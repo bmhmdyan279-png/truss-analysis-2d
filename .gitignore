@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+truss_analysis.log
+
+# Output files
+results/
+*.png
+*.csv
+*.json
+!examples/*.json
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
