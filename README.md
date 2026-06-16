@@ -44,7 +44,7 @@ pip install truss-analysis-2d
 ### نصب از روی سورس (برای توسعه)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/truss_analysis.git
+git clone https://github.com/bmhmdyan279/truss-analysis-2d.git
 cd truss_analysis
 python -m venv venv
 source venv/bin/activate       # Linux/macOS
