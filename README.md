@@ -35,21 +35,12 @@ pytest>=7.0.0        # فقط برای اجرای تست‌ها
 
 ## 🚀 نصب و راه‌اندازی
 
-### روش پیشنهادی: نصب با pip
+# نصب از روی سورس (توصیه شده برای این نسخه)
 
 ```bash
-pip install truss-analysis-2d
-```
-
-### نصب از روی سورس (برای توسعه)
-
-```bash
-git clone https://github.com/bmhmdyan279/bmhmdyan279-png/truss-analysis-2d
-cd truss_analysis
-python -m venv venv
-source venv/bin/activate       # Linux/macOS
-venv\Scripts\activate          # Windows
-pip install -r requirements.txt
+git clone https://github.com/YOUR_USERNAME/truss-analysis-2d.git
+cd truss-analysis-2d
+pip install .
 ```
 
 ## 🏗️ ساختار پروژه
