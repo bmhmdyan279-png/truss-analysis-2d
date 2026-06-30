@@ -1,5 +1,5 @@
 """
-حلگر معادلات و محاسبه نتایج - نسخه نهایی با اصلاح اعتبارسنجی انرژی
+حلگر معادلات و محاسبه نتایج - نسخه بازنویسی‌شده با تفکیک روش‌ها
 """
 
 import numpy as np
@@ -10,252 +10,155 @@ from model import TrussModel
 from constants import TOLERANCES
 
 
+# ================================
+# توابع اصلی حل دستگاه
+# ================================
+
 def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
     """
-    حل دستگاه معادلات برای یافتن جابجایی‌ها با مدیریت خطا - نسخه اصلاح شده
+    حل دستگاه معادلات برای یافتن جابجایی‌ها با مدیریت خطا - نسخه بازنویسی‌شده
     """
     bc_method = truss.options.get('bc_method', 'elimination')
-    penalty_value = truss.options.get('penalty_value', 1e12)
-    use_sparse = truss.options.get('use_sparse', True)
+    
+    if bc_method == 'elimination':
+        return _solve_elimination(truss, K_global, F_global)
+    elif bc_method == 'penalty':
+        return _solve_penalty(truss, K_global, F_global)
+    else:
+        raise ValueError(f"روش شرایط مرزی نامعتبر: {bc_method}")
 
+
+def _solve_elimination(truss: TrussModel, K_global, F_global) -> np.ndarray:
+    """حل با روش حذف درجات آزاد قیدشده"""
+    from assembly import get_reduced_system
+    
     n_dof = truss.n_dof
-    displacements = np.zeros(n_dof)  # مقدار پیش‌فرض
+    use_sparse = truss.options.get('use_sparse', True)
+    tol = TOLERANCES['singular']
 
-    try:
-        if bc_method == 'elimination':
-            from assembly import get_reduced_system
-            K_ff, F_f, free_dofs, fixed_dofs = get_reduced_system(truss, K_global, F_global)
-            # حذف سطر/ستون‌های صفر برای جلوگیری از ماتریس منفرد
-            tol = TOLERANCES['singular']
+    # ۱. استخراج سیستم کاهش‌یافته (فقط درجات آزاد آزاد)
+    K_ff, F_f, free_dofs, fixed_dofs = get_reduced_system(truss, K_global, F_global)
+    
+    if len(free_dofs) == 0:
+        # همه درجات آزاد قفل شده‌اند → جابجایی صفر
+        displacements = np.zeros(n_dof)
+        _store_displacements(truss, displacements)
+        return displacements
 
-            if isinstance(K_ff, np.ndarray):
-                row_sums = np.sum(np.abs(K_ff), axis=1)
-            else:
-                row_sums = np.array(np.sum(np.abs(K_ff), axis=1)).flatten()
+    if K_ff.shape[0] == 0:
+        raise ValueError("ماتریس سختی کاهش‌یافته تهی است. بررسی کنید که حداقل یک درجه آزاد آزاد وجود داشته باشد.")
 
-            # پیدا کردن سطرهای غیرصفر
-            non_zero_indices = np.where(row_sums > tol)[0]
+    # ۲. حذف سطر/ستون‌های صفر (مکانیزم‌های محلی) در صورت وجود
+    if isinstance(K_ff, sparse.spmatrix):
+        row_sums = np.array(np.abs(K_ff).sum(axis=1)).flatten()
+    else:
+        row_sums = np.sum(np.abs(K_ff), axis=1)
 
-            if len(non_zero_indices) < len(row_sums):
-                # کاهش ماتریس
-                if isinstance(K_ff, np.ndarray):
-                    K_ff = K_ff[non_zero_indices, :][:, non_zero_indices]
-                else:
-                    K_ff = K_ff[non_zero_indices, :][:, non_zero_indices]
-                F_f = F_f[non_zero_indices]
-
-                # حل سیستم کاهش یافته
-                if use_sparse and isinstance(K_ff, sparse.spmatrix):
-                    U_f_reduced = spsolve(K_ff, F_f)
-                else:
-                    if isinstance(K_ff, sparse.spmatrix):
-                        K_ff = K_ff.toarray()
-                    U_f_reduced = np.linalg.solve(K_ff, F_f)
-
-                # بازسازی بردار کامل
-                U_f = np.zeros(len(row_sums))
-                U_f[non_zero_indices] = U_f_reduced
-            else:
-                # حل سیستم کامل
-                if use_sparse and isinstance(K_ff, sparse.spmatrix):
-                    U_f = spsolve(K_ff, F_f)
-                else:
-                    if isinstance(K_ff, sparse.spmatrix):
-                        K_ff = K_ff.toarray()
-                    U_f = np.linalg.solve(K_ff, F_f)
-
-            # بررسی شرایط ایستایی
-            if len(free_dofs) == 0:
-                # حالت خاص: همه درجات آزادی قفل شده‌اند.
-                displacements = np.zeros(n_dof)
-                for node in truss.nodes.values():
-                    dof_x, dof_y = node.dofs
-                    node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
-                return displacements
-
-            if len(free_dofs) > 0 and K_ff.shape[0] == 0:
-                raise ValueError("ماتریس سختی کاهش یافته تهی است.")
-
-            # حل برای DOFهای آزاد
-            # بررسی وجود ردیف/ستون‌های صفر (مکانیزم‌های آزاد محلی)
-            if isinstance(K_ff, sparse.spmatrix):
-                K_check = K_ff.tocsc()
-                row_sums = np.array(np.abs(K_check).sum(axis=1)).flatten()
-            else:
-                row_sums = np.sum(np.abs(K_ff), axis=1)
-
-            zero_rows = np.where(row_sums < 1e-12)[0]
-
-            if zero_rows.size > 0:
-                # حذف DOFهای صفر
-                to_keep = []
-                to_remove = []
-                for idx in range(len(row_sums)):
-                    if row_sums[idx] < 1e-12 and abs(F_f[idx]) < 1e-12:
-                        to_remove.append(idx)
-                    else:
-                        to_keep.append(idx)
-
-                if len(to_remove) > 0 and len(to_keep) > 0:
-                    # ساخت زیرماتریس کاهش‌یافته
-                    if isinstance(K_ff, sparse.spmatrix):
-                        K_reduced = K_ff[to_keep, :][:, to_keep]
-                    else:
-                        K_reduced = K_ff[np.ix_(to_keep, to_keep)]
-                    F_reduced = F_f[to_keep]
-
-                    # حل روی سیستم کاهش‌یافته
-                    try:
-                        if use_sparse and isinstance(K_reduced, sparse.spmatrix):
-                            U_reduced = spsolve(K_reduced, F_reduced)
-                        else:
-                            U_reduced = np.linalg.solve(K_reduced, F_reduced)
-                    except Exception:
-                        # fallback: تبدیل به dense و حل
-                        K_dense = K_reduced.toarray() if isinstance(K_reduced, sparse.spmatrix) else K_reduced
-                        U_reduced = np.linalg.solve(K_dense, F_reduced)
-
-                    # بازسازی U_f با مقدار صفر برای DOFهای حذف‌شده
-                    U_f = np.zeros(len(row_sums))
-                    for k, idx in enumerate(to_keep):
-                        U_f[idx] = U_reduced[k]
-                else:
-                    # حل مستقیم
-                    try:
-                        if use_sparse and isinstance(K_ff, sparse.spmatrix):
-                            U_f = spsolve(K_ff, F_f)
-                        else:
-                            U_f = np.linalg.solve(K_ff, F_f)
-                    except Exception:
-                        if isinstance(K_ff, sparse.spmatrix):
-                            K_ff_dense = K_ff.toarray()
-                            U_f = np.linalg.solve(K_ff_dense, F_f)
-                        else:
-                            # اگر هنوز خطا داد، از کمترین مربعات استفاده کن
-                            U_f = np.linalg.lstsq(K_ff, F_f, rcond=None)[0]
-            else:
-                # حالت معمول: حل مستقیم
-                try:
-                    if use_sparse and isinstance(K_ff, sparse.spmatrix):
-                        U_f = spsolve(K_ff, F_f)
-                    else:
-                        U_f = np.linalg.solve(K_ff, F_f)
-                except Exception:
-                    if isinstance(K_ff, sparse.spmatrix):
-                        K_ff_dense = K_ff.toarray()
-                        U_f = np.linalg.solve(K_ff_dense, F_f)
-                    else:
-                        # اگر هنوز خطا داد، از کمترین مربعات استفاده کن
-                        U_f = np.linalg.lstsq(K_ff, F_f, rcond=None)[0]
-
-            # جایگذاری جابجایی‌ها
-            displacements[free_dofs] = U_f
-
-
-        elif bc_method == 'penalty':
-
-            # روش پنالتی
-
-            K_modified = K_global.copy()
-
-            F_modified = F_global.copy()
-
-            if use_sparse:
-                K_modified = K_modified.tolil()
-
-            # اعمال پنالتی بر روی DOFهای قفل شده
-
-            for dof in truss.fixed_dofs:
-
-                if use_sparse:
-
-                    K_modified[dof, dof] += penalty_value
-
-                else:
-
-                    K_modified[dof, dof] += penalty_value
-
-            if use_sparse:
-
-                K_modified = K_modified.tocsr()
-
-                try:
-
-                    displacements = spsolve(K_modified, F_modified)
-
-                    # بررسی اینکه نتایج nan نباشند
-
-                    if np.any(np.isnan(displacements)):
-                        raise ValueError("نتایج شامل nan هستند")
-
-                except (Exception, ValueError) as e:
-
-                    print(f"⚠️ خطا در حل با روش پنالتی: {e}. استفاده از روش fallback...")
-
-                    # تبدیل به dense و حل با lstsq
-
-                    K_modified_dense = K_modified.toarray()
-
-                    # اضافه کردن یک مقدار کوچک به قطر برای جلوگیری از انحراف
-
-                    K_modified_dense += np.eye(K_modified_dense.shape[0]) * 1e-8
-
-                    displacements = np.linalg.lstsq(K_modified_dense, F_modified, rcond=None)[0]
-
-            else:
-
-                try:
-
-                    displacements = np.linalg.solve(K_modified, F_modified)
-
-                    if np.any(np.isnan(displacements)):
-                        raise ValueError("نتایج شامل nan هستند")
-
-                except (np.linalg.LinAlgError, ValueError) as e:
-
-                    print(f"⚠️ خطا در حل با روش پنالتی: {e}. استفاده از کمترین مربعات...")
-
-                    # اضافه کردن یک مقدار کوچک به قطر
-
-                    K_modified += np.eye(K_modified.shape[0]) * 1e-8
-
-                    displacements = np.linalg.lstsq(K_modified, F_modified, rcond=None)[0]
-
+    zero_rows = np.where(row_sums < tol)[0]
+    if zero_rows.size > 0 and np.all(np.abs(F_f[zero_rows]) < tol):
+        # حذف درجات آزاد با سطر صفر و نیروی صفر
+        keep_idx = [i for i in range(len(row_sums)) if row_sums[i] >= tol or abs(F_f[i]) >= tol]
+        if len(keep_idx) == 0:
+            # همه سطرها صفر هستند → جابجایی صفر
+            displacements = np.zeros(n_dof)
+            _store_displacements(truss, displacements)
+            return displacements
+        
+        # کاهش ماتریس و بردار نیرو
+        if isinstance(K_ff, sparse.spmatrix):
+            K_reduced = K_ff[keep_idx, :][:, keep_idx]
         else:
-            raise ValueError(f"روش شرایط مرزی نامعتبر: {bc_method}")
+            K_reduced = K_ff[np.ix_(keep_idx, keep_idx)]
+        F_reduced = F_f[keep_idx]
+        
+        # حل سیستم کاهش‌یافته
+        U_reduced = _safe_solve(K_reduced, F_reduced, use_sparse)
+        
+        # بازسازی بردار کامل (با صفر برای درجات حذف‌شده)
+        U_f = np.zeros(len(row_sums))
+        for k, idx in enumerate(keep_idx):
+            U_f[idx] = U_reduced[k]
+    else:
+        # حالت عادی: حل مستقیم سیستم کاهش‌یافته
+        U_f = _safe_solve(K_ff, F_f, use_sparse)
 
-        # ذخیره جابجایی‌ها در گره‌ها
-        for node in truss.nodes.values():
-            dof_x, dof_y = node.dofs
-            node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
+    # ۳. بازسازی بردار جابجایی کامل
+    displacements = np.zeros(n_dof)
+    displacements[free_dofs] = U_f
+    _store_displacements(truss, displacements)
+    return displacements
 
-        return displacements  # اینجا حتماً return می‌شود
 
-    except np.linalg.LinAlgError as e:
-        print(f"❌ خطای جبر خطی: {str(e)}")
-        print("🔍 پیشنهاد: بررسی کنید که سازه ایستا باشد و تکیه‌گاه‌های کافی داشته باشد.")
+def _solve_penalty(truss: TrussModel, K_global, F_global) -> np.ndarray:
+    """حل با روش پنالتی (اعمال قیدها با ضریب بزرگ)"""
+    n_dof = truss.n_dof
+    use_sparse = truss.options.get('use_sparse', True)
+    penalty_value = truss.options.get('penalty_value', 1e12)
 
-        # حتی در صورت خطا، یک آرایه صفر برمی‌گردانیم (به جای None)
-        displacements = np.zeros(n_dof)
-        for node in truss.nodes.values():
-            dof_x, dof_y = node.dofs
-            node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
+    # کپی ماتریس و بردار نیرو
+    K_modified = K_global.copy()
+    F_modified = F_global.copy()
 
-        print("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
-        return displacements  # اینجا هم return داریم
+    if use_sparse:
+        K_modified = K_modified.tolil()
+        for dof in truss.fixed_dofs:
+            K_modified[dof, dof] += penalty_value
+        K_modified = K_modified.tocsr()
+    else:
+        for dof in truss.fixed_dofs:
+            K_modified[dof, dof] += penalty_value
 
-    except Exception as e:
-        print(f"❌ خطای غیرمنتظره در حلگر: {str(e)}")
+    # حل دستگاه
+    displacements = _safe_solve(K_modified, F_modified, use_sparse)
+    
+    # بررسی نتایج از نظر NaN
+    if np.any(np.isnan(displacements)):
+        raise ValueError("نتایج شامل NaN هستند. روش پنالتی با موفقیت حل نشد.")
+    
+    _store_displacements(truss, displacements)
+    return displacements
 
-        # حتی در صورت خطا، یک آرایه صفر برمی‌گردانیم
-        displacements = np.zeros(n_dof)
-        for node in truss.nodes.values():
-            dof_x, dof_y = node.dofs
-            node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
 
-        print("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
-        return displacements  # اینجا هم return داریم
+def _safe_solve(A, b, use_sparse: bool) -> np.ndarray:
+    """
+    حل دستگاه خطی با مدیریت خطا.
+    در صورت بروز خطا، از کمترین مربعات (lstsq) با هشدار استفاده می‌کند.
+    تبدیل خودکار به Dense انجام نمی‌شود؛ اگر use_sparse=False و ماتریس sparse باشد،
+    کاربر باید آن را به Dense تبدیل کند.
+    """
+    try:
+        if use_sparse:
+            if not isinstance(A, sparse.spmatrix):
+                raise TypeError("با use_sparse=True، ماتریس باید از نوع sparse باشد.")
+            return spsolve(A, b)
+        else:
+            if isinstance(A, sparse.spmatrix):
+                raise TypeError("با use_sparse=False، ماتریس باید از نوع dense باشد (numpy.ndarray).")
+            return np.linalg.solve(A, b)
+    except (np.linalg.LinAlgError, ValueError, TypeError) as e:
+        print(f"⚠️ هشدار: حل مستقیم با خطا مواجه شد: {e}")
+        print("   استفاده از کمترین مربعات (lstsq) با rcond=None...")
+        # اگر ماتریس sparse است، ابتدا به dense تبدیل می‌کنیم (چون lstsq نیاز به dense دارد)
+        if isinstance(A, sparse.spmatrix):
+            A_dense = A.toarray()
+        else:
+            A_dense = A
+        # استفاده از lstsq با rcond=None
+        solution = np.linalg.lstsq(A_dense, b, rcond=None)[0]
+        print("   حل با lstsq انجام شد (نتایج ممکن است تقریبی باشند).")
+        return solution
 
+
+def _store_displacements(truss: TrussModel, displacements: np.ndarray) -> None:
+    """ذخیره جابجایی‌ها در گره‌ها"""
+    for node in truss.nodes.values():
+        dof_x, dof_y = node.dofs
+        node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
+
+
+# ================================
+# توابع محاسبه نتایج اعضا و انرژی
+# ================================
 
 def calculate_element_results(truss: TrussModel, displacements: np.ndarray) -> List[Dict]:
     """
