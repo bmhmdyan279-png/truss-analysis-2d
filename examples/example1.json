@@ -1,0 +1,49 @@
+{
+  "units": "SI",
+  "temperature_change": 0.0,
+  "nodes": [
+    {"id": 1, "x": 0.0, "y": 0.0, "is_support": true},
+    {"id": 2, "x": 10.0, "y": 0.0, "is_support": true},
+    {"id": 3, "x": 5.0, "y": 4.0, "is_support": false}
+  ],
+  "elements": [
+    {
+      "id": 1,
+      "node_i": 1,
+      "node_j": 3,
+      "A": 0.01,
+      "E": 210e9,
+      "alpha": 1.2e-5,
+      "delta_T": 50.0,
+      "delta_L0": 0.0,
+      "I": 7.85e-9,
+      "effective_length_factor": 1.0,
+      "section_type": "circular"
+    },
+    {
+      "id": 2,
+      "node_i": 2,
+      "node_j": 3,
+      "A": 0.01,
+      "E": 210e9,
+      "alpha": 1.2e-5,
+      "delta_T": 0.0,
+      "delta_L0": -0.0001,
+      "I": 7.85e-9,
+      "effective_length_factor": 1.0,
+      "section_type": "circular"
+    }
+  ],
+  "loads": {
+    "node_forces": [
+      {"node_id": 3, "Fx": 1000.0, "Fy": -2000.0}
+    ]
+  },
+  "options": {
+    "use_sparse": true,
+    "bc_method": "elimination",
+    "penalty_value": 1e12,
+    "plot_results": true,
+    "displacement_scale": "auto"
+  }
+}

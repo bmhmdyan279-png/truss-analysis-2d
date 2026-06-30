@@ -1,0 +1,81 @@
+{
+  "units": "SI",
+  "temperature_change": 0.0,
+  "nodes": [
+    {"id": 1, "x": 0.0, "y": 0.0, "is_support": true},
+    {"id": 2, "x": 5.0, "y": 0.0, "is_support": true},
+    {"id": 3, "x": 10.0, "y": 0.0, "is_support": true},
+    {"id": 4, "x": 2.5, "y": 3.0, "is_support": false},
+    {"id": 5, "x": 7.5, "y": 3.0, "is_support": false}
+  ],
+  "elements": [
+    {
+      "id": 1,
+      "node_i": 1,
+      "node_j": 4,
+      "A": 0.02,
+      "E": 200e9,
+      "alpha": 1.2e-5,
+      "I": 1.67e-8,
+      "effective_length_factor": 1.0,
+      "section_type": "circular"
+    },
+    {
+      "id": 2,
+      "node_i": 4,
+      "node_j": 2,
+      "A": 0.02,
+      "E": 200e9,
+      "alpha": 1.2e-5,
+      "I": 1.67e-8,
+      "effective_length_factor": 1.0,
+      "section_type": "circular"
+    },
+    {
+      "id": 3,
+      "node_i": 2,
+      "node_j": 5,
+      "A": 0.02,
+      "E": 200e9,
+      "alpha": 1.2e-5,
+      "I": 1.67e-8,
+      "effective_length_factor": 1.0,
+      "section_type": "circular"
+    },
+    {
+      "id": 4,
+      "node_i": 5,
+      "node_j": 3,
+      "A": 0.02,
+      "E": 200e9,
+      "alpha": 1.2e-5,
+      "I": 1.67e-8,
+      "effective_length_factor": 1.0,
+      "section_type": "circular"
+    },
+    {
+      "id": 5,
+      "node_i": 4,
+      "node_j": 5,
+      "A": 0.015,
+      "E": 200e9,
+      "alpha": 1.2e-5,
+      "I": 1.25e-8,
+      "effective_length_factor": 1.0,
+      "section_type": "circular"
+    }
+  ],
+  "loads": {
+    "node_forces": [
+      {"node_id": 4, "Fx": 0.0, "Fy": -50000.0},
+      {"node_id": 5, "Fx": 0.0, "Fy": -50000.0}
+    ]
+  },
+  "options": {
+    "use_sparse": true,
+    "bc_method": "elimination",
+    "penalty_value": 1e12,
+    "plot_results": true,
+    "displacement_scale": "auto"
+  }
+}
