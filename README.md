@@ -38,7 +38,7 @@ pytest>=7.0.0        # فقط برای اجرای تست‌ها
 # نصب از روی سورس (توصیه شده برای این نسخه)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/truss-analysis-2d.git
+git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
 cd truss-analysis-2d
 pip install .
 ```
