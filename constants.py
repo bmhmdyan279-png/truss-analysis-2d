@@ -1,30 +1,22 @@
-"""
-ثابت‌های پروژه تحلیل خرپا
-"""
+# ثابت‌های پروژه تحلیل خرپا
 
-# قرارداد علامت برای نیروها
-FORCE_CONVENTION = {
-    "thermal": "compression",  # انبساط حرارتی → نیروی فشاری
-    "mechanical": "tension_positive",  # نیروی کششی مثبت
-}
+# ضریب انبساط حرارتی پیش‌فرض (برای فولاد)
+DEFAULT_ALPHA = 1.2e-5
 
-# آستانه‌های عددی
+# تلورانس‌های عددی
+ZERO_LENGTH_TOLERANCE = 1e-12
+
+# دیکشنری تلورانس‌ها (برای سازگاری با کد قدیمی)
 TOLERANCES = {
-    "zero": 1e-12,  # صفر عددی
-    "small": 1e-8,  # مقادیر خیلی کوچک
-    "medium": 1e-6,  # دقت متوسط
-    "large": 1e-4,  # دقت پایین
-    "energy": 1e-6,  # دقت انرژی
-    "force_balance": 1e-3,  # دقت تعادل نیرو
-    "singular": 1e-12,  # تشخیص ماتریس منفرد
-    "DEFAULT_ALPHA": 1.2e-5,
-    "ZERO_LENGTH_TOLERANCE": 1e-12,
+    'zero': 1e-12,
+    'small': 1e-6,
+    'energy': 1e-6,
+    'singular': 1e-10  # آستانه تشخیص ماتریس منفرد
 }
 
-# تبدیل واحدها
-UNIT_CONVERSIONS = {
-    "SI": {"length": 1.0, "area": 1.0, "force": 1.0},
-    "SI-mm": {"length": 0.001, "area": 1e-6, "force": 1.0},
-    "SI-cm": {"length": 0.01, "area": 1e-4, "force": 1.0},
-    "Imperial": {"length": 0.3048, "area": 0.0929, "force": 4.44822},
-}
+# تنظیمات پیش‌فرض
+DEFAULT_PENALTY_VALUE = 1e10
+DEFAULT_DISPLACEMENT_SCALE = 50.0
+
+# واحدهای پشتیبانی شده
+SUPPORTED_UNITS = ['si', 'imperial']

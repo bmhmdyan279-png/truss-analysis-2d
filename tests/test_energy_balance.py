@@ -11,9 +11,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # اضافه کردن مسیر پوشه والد به sys.path برای امکان import
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from truss_analysis.model import TrussModel
-from truss_analysis.assembly import build_global_matrices
-from truss_analysis.solver import (
+from model import TrussModel
+from assembly import build_global_matrices
+from solver import (
     solve_displacements,
     calculate_element_results,
     calculate_total_energy,

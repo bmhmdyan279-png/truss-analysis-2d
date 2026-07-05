@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # اضافه کردن مسیر پوشه والد به sys.path برای امکان import
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from truss_analysis.model import TrussModel
+from model import TrussModel
 
 
 def test_sign_convention_no_force_on_support():

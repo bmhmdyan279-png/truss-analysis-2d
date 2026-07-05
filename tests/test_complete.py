@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # اضافه کردن مسیر پوشه والد برای import کردن ماژول‌ها
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from truss_analysis.model import TrussModel, Node, Element  # اضافه کردن Node و Element
+from model import TrussModel, Node, Element  # اضافه کردن Node و Element
 
 
 class TestNode:

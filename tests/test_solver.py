@@ -226,9 +226,9 @@ def test_calculate_element_results_with_buckling():
 
     # اگر نسبت > 0.8 باشد، باید هشدار داده شود
     if buckling_ratio > 0.8:
-        assert element_result["buckling_warning"] is True
+        assert element_result["buckling_warning"] == True
     else:
-        assert element_result["buckling_warning"] is False
+        assert element_result["buckling_warning"] == False
 
     print("✅ نتایج کمانش محاسبه شد")
     print(f"  بار بحرانی: {element_result['P_cr']:.2f} N")
@@ -311,7 +311,7 @@ def test_validate_energy_with_loads():
     )
 
     # با بار خارجی، خطا باید بسیار کوچک باشد
-    assert is_valid is True
+    assert is_valid == True
     assert error < 1e-6
 
     print("✅ اعتبارسنجی انرژی (با بار) موفق بود")
@@ -407,7 +407,7 @@ def test_solve_truss_2d_example():
     is_valid, error, message = validate_energy(
         results, U_total, truss, displacements, F
     )
-    assert is_valid is True
+    assert is_valid == True
     assert error < 1e-6
 
     # محاسبه درست نیروهای وارد بر گره ۳
