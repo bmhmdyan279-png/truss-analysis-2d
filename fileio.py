@@ -8,6 +8,19 @@ from typing import Dict, List
 import os
 import logging
 from model import TrussModel
+import json
+from exceptions import InputDataError
+
+def load_json(filepath: str) -> dict:
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error(f"فایل یافت نشد: {filepath}")
+        raise InputDataError(f"فایل {filepath} وجود ندارد.")
+    except json.JSONDecodeError as e:
+        logger.error(f"خطای parsing در فایل {filepath}: {e}")
+        raise InputDataError("فرمت JSON فایل ورودی نامعتبر است.")
 
 UNIT_CONVERSION = {
     # تبدیل به واحدهای پایه SI
