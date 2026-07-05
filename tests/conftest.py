@@ -2,6 +2,7 @@
 Shared pytest configuration.
 Adds src/ to sys.path so tests can import truss_analysis without installation.
 """
+
 from __future__ import annotations
 
 import sys

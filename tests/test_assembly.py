@@ -12,13 +12,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # اضافه کردن مسیر پروژه به sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from assembly import (
+from truss_analysis.assembly import (
     build_global_matrices,
     calculate_element_stiffness,
     calculate_element_thermal_force,
     get_reduced_system,
 )
-from model import TrussModel
+from truss_analysis.model import TrussModel
 
 
 def test_calculate_element_stiffness():
@@ -53,9 +53,7 @@ def test_calculate_element_stiffness():
     AE_L = element.A * element.E / element.L
 
     # برای عضو افقی (c=1, s=0)
-    expected_k = AE_L * np.array(
-        [[1, 0, -1, 0], [0, 0, 0, 0], [-1, 0, 1, 0], [0, 0, 0, 0]]
-    )
+    expected_k = AE_L * np.array([[1, 0, -1, 0], [0, 0, 0, 0], [-1, 0, 1, 0], [0, 0, 0, 0]])
 
     # به دلیل خطای عددی، از tolerance استفاده می‌کنیم
     assert np.allclose(k_e, expected_k, rtol=1e-10)
@@ -75,9 +73,7 @@ def test_calculate_element_thermal_force():
     input_data = {
         "temperature_change": 50.0,
         "nodes": [{"id": 1, "x": 0.0, "y": 0.0}, {"id": 2, "x": 2.0, "y": 0.0}],
-        "elements": [
-            {"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9, "alpha": 1.2e-5}
-        ],
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9, "alpha": 1.2e-5}],
     }
 
     truss = TrussModel(input_data)

@@ -1,18 +1,17 @@
-from __future__ import annotations
-from constants import ZERO_LENGTH_TOLERANCE  # noqa: E402
-
 #!/usr/bin/env python3
 """
 تحلیلگر خرپای 2D با اثرات حرارتی و خطای ساخت - نسخه نهایی
 """
 
-import argparse  # noqa: E402
+import argparse
 import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
 import sys  # noqa: E402
 import time  # noqa: E402
 import traceback  # noqa: E402
+
+from .constants import MIN_SUPPORTS, THERMAL_ENERGY_WARN, VALIDATION_REL_ERR, ZERO_LENGTH_TOLERANCE
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ def sanity_check(truss):
     issues = []
 
     # ۱. بررسی تکیه‌گاه‌ها
-    if len(truss.supported_nodes) < 2:
+    if len(truss.supported_nodes) < MIN_SUPPORTS:
         issues.append("⚠️ تعداد تکیه‌گاه‌ها ناکافی است (حداقل ۲ مورد نیاز)")
 
     # ۲. بررسی طول اعضا
@@ -134,20 +133,14 @@ def run_analysis(
                 "message": "مدل خرپا معتبر نیست.",
             }
 
-        logger.info(
-            f"   • گره‌ها: {len(truss.nodes)} (آزاد: {len(truss.free_nodes)}, تکیه‌گاهی: {len(truss.supported_nodes)})"
-        )
+        logger.info(f"   • گره‌ها: {len(truss.nodes)} (آزاد: {len(truss.free_nodes)}, تکیه‌گاهی: {len(truss.supported_nodes)})")
         logger.info(f"   • اعضا: {len(truss.elements)}")
         logger.info(f"   • بارهای گره‌ای: {len(truss.loads)}")
         logger.info(f"   • DOFهای آزاد: {len(truss.free_dofs)}")
 
         # بررسی اثرات حرارتی و خطای ساخت
-        elements_with_delta_T = sum(
-            1 for e in truss.elements.values() if e.delta_T != 0
-        )
-        elements_with_delta_L0 = sum(
-            1 for e in truss.elements.values() if e.delta_L0 != 0
-        )
+        elements_with_delta_T = sum(1 for e in truss.elements.values() if e.delta_T != 0)
+        elements_with_delta_L0 = sum(1 for e in truss.elements.values() if e.delta_L0 != 0)
         logger.info(f"   • اعضا با ΔT ≠ 0: {elements_with_delta_T}")
         logger.info(f"   • اعضا با δL₀ ≠ 0: {elements_with_delta_L0}")
 
@@ -157,16 +150,12 @@ def run_analysis(
         # اطلاعات ماتریس
         if truss.options.get("use_sparse", True):
             logger.info("   • استفاده از ماتریس‌های تنک")
-            logger.info(
-                f"   • اندازه ماتریس سختی: {K_global.shape[0]} × {K_global.shape[1]}"
-            )
+            logger.info(f"   • اندازه ماتریس سختی: {K_global.shape[0]} × {K_global.shape[1]}")
             if hasattr(K_global, "nnz"):
                 logger.info(f"   • تعداد عناصر غیرصفر: {K_global.nnz}")
         else:
             logger.info("   • استفاده از ماتریس‌های متراکم")
-            logger.info(
-                f"   • اندازه ماتریس سختی: {K_global.shape[0]} × {K_global.shape[1]}"
-            )
+            logger.info(f"   • اندازه ماتریس سختی: {K_global.shape[0]} × {K_global.shape[1]}")
 
         # حل جابجایی‌ها
         logger.info("🧮 حل دستگاه معادلات...")
@@ -181,17 +170,13 @@ def run_analysis(
         # اعتبارسنجی انرژی
         logger.info("⚖️ اعتبارسنجی تعادل انرژی...")
         U_total = calculate_total_energy(truss, displacements, F_global)
-        is_energy_valid, energy_error, energy_message = validate_energy(
-            results, U_total, truss, displacements, F_global
-        )
+        is_energy_valid, energy_error, energy_message = validate_energy(results, U_total, truss, displacements, F_global)
 
         # اگر اثرات حرارتی وجود دارد و خطا زیاد است، پیام ویژه بده
         has_thermal = elements_with_delta_T > 0 or elements_with_delta_L0 > 0
-        if has_thermal and energy_error > 0.1:
+        if has_thermal and energy_error > THERMAL_ENERGY_WARN:
             logger.warning(f"   ⚠️ {energy_message}")
-            logger.warning(
-                "   توجه: وجود اثرات حرارتی می‌تواند دقت محاسبات انرژی را کاهش دهد."
-            )
+            logger.warning("   توجه: وجود اثرات حرارتی می‌تواند دقت محاسبات انرژی را کاهش دهد.")
         else:
             logger.info(f"   • {energy_message}")
 
@@ -226,9 +211,7 @@ def run_analysis(
             os.makedirs(output_dir, exist_ok=True)
             logger.info(f"   • ایجاد پوشه خروجی: {output_dir}")
 
-        write_output(
-            results_with_pct, displacements, truss, report, output_prefix, format
-        )
+        write_output(results_with_pct, displacements, truss, report, output_prefix, format)
 
         # ذخیره گزارش Markdown
         save_report_to_markdown(report, f"{output_prefix}_report.md")
@@ -237,9 +220,7 @@ def run_analysis(
         plot_files = {}
         if truss.options.get("plot_results", False) or force_plot:
             logger.info("📊 رسم نمودارها...")
-            plot_files = generate_plots(
-                truss, displacements, results_with_pct, output_prefix
-            )
+            plot_files = generate_plots(truss, displacements, results_with_pct, output_prefix)
             report["plot_files"] = list(plot_files.values())
 
         # محاسبه زمان اجرا
@@ -253,19 +234,11 @@ def run_analysis(
 
         logger.info("\n📊 خلاصه نتایج:")
         logger.info(f"   • انرژی کل: {U_total:.4e} J")
-        logger.info(
-            f"   • بیشترین جابجایی: {report['displacement_statistics']['max_displacement']:.4e} m"
-        )
-        logger.info(
-            f"   • بیشترین نیروی کششی: {report['force_distribution']['max_tensile_force']:.4e} N"
-        )
-        logger.info(
-            f"   • بیشترین نیروی فشاری: {report['force_distribution']['max_compressive_force']:.4e} N"
-        )
+        logger.info(f"   • بیشترین جابجایی: {report['displacement_statistics']['max_displacement']:.4e} m")
+        logger.info(f"   • بیشترین نیروی کششی: {report['force_distribution']['max_tensile_force']:.4e} N")
+        logger.info(f"   • بیشترین نیروی فشاری: {report['force_distribution']['max_compressive_force']:.4e} N")
         # استفاده از elements_at_risk به جای warning_count
-        logger.info(
-            f"   • هشدارهای کمانش: {report['buckling_analysis'].get('elements_at_risk', 0)}"
-        )
+        logger.info(f"   • هشدارهای کمانش: {report['buckling_analysis'].get('elements_at_risk', 0)}")
         logger.info(f"   • زمان اجرا: {execution_time:.2f} ثانیه")
 
         logger.info("\n📁 فایل‌های خروجی:")
@@ -287,27 +260,19 @@ def run_analysis(
             # مقایسه نیروها
             for exp_elem in expected.get("elements", []):
                 elem_id = exp_elem["id"]
-                actual_elem = next(
-                    (r for r in results_with_pct if r["id"] == elem_id), None
-                )
+                actual_elem = next((r for r in results_with_pct if r["id"] == elem_id), None)
 
                 if actual_elem:
                     N_actual = actual_elem["N"]
                     N_expected_val = exp_elem.get("N")
 
                     if N_expected_val is not None:
-                        rel_error = abs(N_actual - N_expected_val) / max(
-                            abs(N_expected_val), ZERO_LENGTH_TOLERANCE
-                        )
+                        rel_error = abs(N_actual - N_expected_val) / max(abs(N_expected_val), ZERO_LENGTH_TOLERANCE)
 
-                        if rel_error < 0.01:  # 1% خطا
-                            logger.info(
-                                f"  ✅ عضو {elem_id}: N={N_actual:.2f} (انتظار: {N_expected_val:.2f})"
-                            )
+                        if rel_error < VALIDATION_REL_ERR:  # 1% خطا
+                            logger.info(f"  ✅ عضو {elem_id}: N={N_actual:.2f} (انتظار: {N_expected_val:.2f})")
                         else:
-                            logger.warning(
-                                f"  ⚠️ عضو {elem_id}: اختلاف {rel_error:.1%}"
-                            )
+                            logger.warning(f"  ⚠️ عضو {elem_id}: اختلاف {rel_error:.1%}")
 
         return {
             "success": True,
@@ -355,9 +320,7 @@ def run_analysis(
 
     finally:
         if not analysis_successful:
-            logger.error(
-                f"⏱️ زمان اجرا تا وقوع خطا: {time.time() - start_time:.2f} ثانیه"
-            )
+            logger.error(f"⏱️ زمان اجرا تا وقوع خطا: {time.time() - start_time:.2f} ثانیه")
 
 
 def main():
@@ -394,12 +357,8 @@ def main():
         action="store_true",
         help="رسم نمودارها حتی اگر در options تنظیم نشده باشد",
     )
-    parser.add_argument(
-        "--test", "-t", action="store_true", help="اجرای تمام تست‌های واحد"
-    )
-    parser.add_argument(
-        "--generate-readme", action="store_true", help="تولید فایل README.md"
-    )
+    parser.add_argument("--test", "-t", action="store_true", help="اجرای تمام تست‌های واحد")
+    parser.add_argument("--generate-readme", action="store_true", help="تولید فایل README.md")
     parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -430,9 +389,7 @@ def main():
             exit_code = pytest.main(test_args)
             sys.exit(exit_code)
         except ImportError:
-            logger.error(
-                "❌ pytest نصب نیست. برای اجرای تست‌ها ابتدا pytest را نصب کنید."
-            )
+            logger.error("❌ pytest نصب نیست. برای اجرای تست‌ها ابتدا pytest را نصب کنید.")
             logger.error("   pip install pytest")
             sys.exit(1)
 

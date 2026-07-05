@@ -7,7 +7,7 @@ import logging
 import numpy as np
 from scipy import sparse
 
-from model import Element, TrussModel
+from .model import Element, TrussModel
 
 logger = logging.getLogger(__name__)
 

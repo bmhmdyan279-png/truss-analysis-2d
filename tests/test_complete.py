@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # اضافه کردن مسیر پوشه والد برای import کردن ماژول‌ها
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model import Element, Node, TrussModel  # اضافه کردن Node و Element
+from truss_analysis.model import Element, Node, TrussModel  # اضافه کردن Node و Element
 
 
 class TestNode:
@@ -64,9 +64,7 @@ class TestElement:
 
     def test_element_creation(self):
         """تست ایجاد عضو"""
-        element = Element(
-            id=1, node_i=self.node1, node_j=self.node2, A=0.01, E=210e9, alpha=1.2e-5
-        )
+        element = Element(id=1, node_i=self.node1, node_j=self.node2, A=0.01, E=210e9, alpha=1.2e-5)
         assert element.id == 1
         assert element.A == 0.01
         assert element.E == 210e9

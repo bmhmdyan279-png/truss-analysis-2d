@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # اضافه کردن مسیر پروژه به sys.path برای import کردن ماژول‌ها
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model import Element, Node, TrussModel
+from truss_analysis.model import Element, Node, TrussModel
 
 
 def test_node_creation():

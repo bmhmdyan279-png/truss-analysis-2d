@@ -12,9 +12,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # اضافه کردن مسیر پوشه والد به sys.path برای امکان import
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from assembly import build_global_matrices
-from model import TrussModel
-from solver import (
+from truss_analysis.assembly import build_global_matrices
+from truss_analysis.model import TrussModel
+from truss_analysis.solver import (
     calculate_element_results,
     calculate_total_energy,
     solve_displacements,
@@ -45,9 +45,7 @@ def test_energy_balance_simple_truss():
     U_total = calculate_total_energy(truss, displacements, F)
 
     # اعتبارسنجی انرژی
-    is_valid, error, message = validate_energy(
-        results, U_total, truss, displacements, F
-    )
+    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F)
 
     # چک کنیم که خطای انرژی کمتر از 1e-6 باشد
     assert is_valid is True, f"تعادل انرژی برقرار نیست: {message}"
@@ -79,9 +77,7 @@ def test_energy_balance_thermal_only():
     results = calculate_element_results(truss, displacements)
     U_total = calculate_total_energy(truss, displacements, F)
 
-    is_valid, error, message = validate_energy(
-        results, U_total, truss, displacements, F
-    )
+    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F)
 
     # در حالت حرارتی خالص، خطای نسبی می‌تواند بیشتر باشد، اما باید کمتر از 1% باشد
     assert error <= 1.0 + 1e-10, f"خطای انرژی در حالت حرارتی زیاد است: {error}"
@@ -117,9 +113,7 @@ def test_energy_balance_fabrication_error():
     results = calculate_element_results(truss, displacements)
     U_total = calculate_total_energy(truss, displacements, F)
 
-    is_valid, error, message = validate_energy(
-        results, U_total, truss, displacements, F
-    )
+    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F)
 
     assert error <= 1.0 + 1e-10, f"تعادل انرژی برقرار نیست: {message}"
     assert error <= 1.0 + 1e-10, f"خطای انرژی زیاد است: {error}"

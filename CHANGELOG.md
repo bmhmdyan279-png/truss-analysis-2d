@@ -1,3 +1,17 @@
+## [1.4.0] - 2026-07-06
+
+### تغییرات عمده (Professional Polish)
+- **ساختار استاندارد `src/`**: انتقال تمام ماژول‌ها به `src/truss_analysis/` برای بسته‌بندی حرفه‌ای.
+- **CLI Entry Point**: اضافه شدن دستور `truss-analyze` از طریق `console_scripts`.
+- **حذف فایل‌های اضافی**: حذف `setup.py` قدیمی و `__init__.py` از ریشه.
+- **یکپارچه‌سازی Importها**: استفاده از relative imports در هسته پکیج و absolute imports در تست‌ها.
+- **Shim backward compatibility**: حفظ `main.py` در ریشه برای اجرای آسان.
+
+### بهبودهای زیرساختی
+- تنظیم `pythonpath` در `pytest` برای اجرای تست‌ها بدون نیاز به نصب.
+- به‌روزرسانی `pyproject.toml` با متادیتای کامل و نسخه 1.4.0.
+- رفع تناقض‌های ظاهری در README (تأکید بر Python 3.8+).
+
 ## [1.3.1] - 2026-07-06
 
 ### Fixed

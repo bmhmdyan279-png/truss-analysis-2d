@@ -27,3 +27,9 @@ results/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Script files
+*.py
+!src/**/*.py
+!tests/**/*.py
+!examples/**/*.py

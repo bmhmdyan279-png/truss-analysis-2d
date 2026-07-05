@@ -7,9 +7,9 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from assembly import build_global_matrices
-from model import TrussModel
-from solver import calculate_element_results, solve_displacements
+from truss_analysis.assembly import build_global_matrices
+from truss_analysis.model import TrussModel
+from truss_analysis.solver import calculate_element_results, solve_displacements
 
 
 def test_golden_reference():

@@ -1,0 +1,2 @@
+[console_scripts]
+truss-analyze = truss_analysis.main:main
