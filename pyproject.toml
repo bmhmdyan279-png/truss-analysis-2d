@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "truss_analysis"
-version = "1.1.0"
+version = "1.3.1"
 description = "2D Truss Analysis with Thermal and Buckling Effects"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -46,3 +46,6 @@ python_version = "3.8"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+
+[tool.black]
+target-version = ["py314"]

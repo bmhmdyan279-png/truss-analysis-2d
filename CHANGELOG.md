@@ -1,3 +1,11 @@
+## [1.3.1] - 2026-07-06
+
+### Fixed
+- Convert NumPy bool to Python bool in buckling warning to ensure consistent type checking
+- Fix test assertion compatibility with NumPy boolean values
+
+### Changed
+- Improved type consistency in solver results
 ## [1.1.0] - 2026-06-30
 
 ### تغییرات عمده
