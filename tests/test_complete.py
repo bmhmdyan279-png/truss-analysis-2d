@@ -24,13 +24,13 @@ class TestNode:
         assert node.id == 1
         assert node.x == 1.5
         assert node.y == 2.5
-        assert node.is_support == False
+        assert node.is_support is False
         assert node.dofs is None
 
     def test_node_creation_support(self):
         """تست ایجاد گره تکیه‌گاهی"""
         node = Node(id=2, x=0.0, y=0.0, is_support=True)
-        assert node.is_support == True
+        assert node.is_support is True
 
     def test_node_set_dofs(self):
         """تست تنظیم DOFهای گره"""
@@ -326,10 +326,10 @@ class TestTrussModel:
         }
 
         truss = TrussModel(input_data)
-        assert truss.options["use_sparse"] == False
+        assert truss.options["use_sparse"] is False
         assert truss.options["bc_method"] == "penalty"
         assert truss.options["penalty_value"] == 1e10
-        assert truss.options["plot_results"] == True
+        assert truss.options["plot_results"] is True
         assert truss.options["displacement_scale"] == 50.0
 
     def test_truss_non_sequential_node_ids(self):
@@ -379,7 +379,7 @@ class TestTrussModel:
 
         truss = TrussModel(input_data)
         # بدون اعضا باید True برگرداند
-        assert truss.validate_sign_convention() == True
+        assert truss.validate_sign_convention() is True
 
 
 if __name__ == "__main__":

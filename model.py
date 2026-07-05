@@ -1,3 +1,5 @@
+from constants import DEFAULT_ALPHA
+
 """
 مدل‌سازی خرپا - نسخه نهایی کامل
 """
@@ -42,7 +44,7 @@ class Element:
         node_j: "Node" = None,
         A: float = None,
         E: float = None,
-        alpha: float = 1.2e-5,
+        alpha: float = DEFAULT_ALPHA,
         delta_T: float = 0.0,
         delta_L0: float = 0.0,
         I: Optional[float] = None,

@@ -95,7 +95,7 @@ def test_calculate_element_thermal_force():
     AE_L = element.A * element.E / element.L
     delta_L_free = element.delta_L_free
 
-    expected_f = AE_L * delta_L_free * np.array([-1, 0, 1, 0])
+    AE_L * delta_L_free * np.array([-1, 0, 1, 0])
 
     # بررسی کنید که اندازه بردارها یکسان است
     assert f_e.shape == (4,)
@@ -253,7 +253,7 @@ def test_assemble_with_thermal_effects():
     # بررسی نیروهای حرارتی در بردار F_global
     # فرمول: f = AE/L * delta_L_free * [-c, -s, c, s]
     c, s = element.c, element.s
-    f_thermal = AE_L * delta_L_free_expected * np.array([-c, -s, c, s])
+    AE_L * delta_L_free_expected * np.array([-c, -s, c, s])
 
     # جمع نیروها در DOFهای مربوطه
     total_fx = F_global[node1_dofs[0]] + F_global[node3_dofs[0]]
@@ -302,7 +302,7 @@ def test_assemble_with_fabrication_error():
     K_global, F_global = build_global_matrices(truss)
 
     # خطای ساخت باید به بردار نیرو اضافه شود
-    AE_L = element.A * element.E / element.L
+    element.A * element.E / element.L
     delta_L_free_expected = element.delta_L0  # فقط خطای ساخت
 
     # بررسی اینکه delta_L_free شامل خطای ساخت است

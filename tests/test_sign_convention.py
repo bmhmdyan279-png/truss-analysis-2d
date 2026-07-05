@@ -32,7 +32,7 @@ def test_sign_convention_no_force_on_support():
 
     truss = TrussModel(input_data)
     # این باید False برگرداند زیرا نیرو به تکیه‌گاه اعمال شده
-    assert truss.validate_sign_convention() == False
+    assert truss.validate_sign_convention() is False
 
 
 def test_sign_convention_valid_force():
@@ -52,7 +52,7 @@ def test_sign_convention_valid_force():
     }
 
     truss = TrussModel(input_data)
-    assert truss.validate_sign_convention() == True
+    assert truss.validate_sign_convention() is True
 
 
 def test_sign_convention_no_loads():
@@ -70,7 +70,7 @@ def test_sign_convention_no_loads():
     }
 
     truss = TrussModel(input_data)
-    assert truss.validate_sign_convention() == True
+    assert truss.validate_sign_convention() is True
 
 
 def test_sign_convention_multiple_supports():
@@ -90,7 +90,7 @@ def test_sign_convention_multiple_supports():
     }
 
     truss = TrussModel(input_data)
-    assert truss.validate_sign_convention() == True
+    assert truss.validate_sign_convention() is True
 
 
 if __name__ == "__main__":

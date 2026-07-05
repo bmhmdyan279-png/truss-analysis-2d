@@ -160,8 +160,6 @@ def test_single_element_thermal_expansion():
     L = 2.0
     alpha = 1.2e-5
     delta_T = 50.0
-    A = 0.01
-    E = 210e9
 
     # تغییر طول آزاد ناشی از حرارت
     delta_L_free_analytical = alpha * delta_T * L

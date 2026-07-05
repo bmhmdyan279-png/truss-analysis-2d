@@ -49,7 +49,7 @@ def test_energy_balance_simple_truss():
     )
 
     # چک کنیم که خطای انرژی کمتر از 1e-6 باشد
-    assert is_valid == True, f"تعادل انرژی برقرار نیست: {message}"
+    assert is_valid is True, f"تعادل انرژی برقرار نیست: {message}"
     assert error < 0.01, f"خطای انرژی زیاد است: {error}"
 
 

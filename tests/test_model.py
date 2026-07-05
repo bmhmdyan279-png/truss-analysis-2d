@@ -28,7 +28,7 @@ def test_node_creation():
     assert node.id == 1
     assert node.x == 0.0
     assert node.y == 0.0
-    assert node.is_support == False
+    assert node.is_support is False
     assert node.dofs is None  # هنوز تنظیم نشده
 
     print(f"✅ گره {node.id} در ({node.x}, {node.y}) ایجاد شد")
@@ -44,7 +44,7 @@ def test_node_support():
     node = Node(id=2, x=1.0, y=2.0, is_support=True)
 
     # بررسی
-    assert node.is_support == True
+    assert node.is_support is True
 
     print(f"✅ گره {node.id} به عنوان تکیه‌گاه شناسایی شد")
 
@@ -206,16 +206,16 @@ def test_truss_model_creation():
     assert len(truss.loads) == 1
 
     # بررسی گره‌ها
-    assert truss.nodes[1].is_support == True
-    assert truss.nodes[2].is_support == True
-    assert truss.nodes[3].is_support == False
+    assert truss.nodes[1].is_support is True
+    assert truss.nodes[2].is_support is True
+    assert truss.nodes[3].is_support is False
 
     # بررسی DOFها
     # گره‌های تکیه‌گاهی باید DOFهای منفی داشته باشند
     assert truss.nodes[1].dofs[0] >= 0 and truss.nodes[1].dofs[1] >= 0
     # در پیاده‌سازی فعلی، DOFهای همه گره‌ها مثبت هستند
     # فقط بررسی کنیم که گره تکیه‌گاهی است
-    assert truss.nodes[2].is_support == True  # فقط بررسی تکیه‌گاه بودن
+    assert truss.nodes[2].is_support is True  # فقط بررسی تکیه‌گاه بودن
     # گره آزاد باید DOFهای مثبت داشته باشد
     assert truss.nodes[3].dofs[0] >= 0 and truss.nodes[3].dofs[1] >= 0
 
@@ -256,10 +256,10 @@ def test_truss_model_with_options():
     truss = TrussModel(input_data)
 
     # بررسی گزینه‌ها
-    assert truss.options["use_sparse"] == False
+    assert truss.options["use_sparse"] is False
     assert truss.options["bc_method"] == "penalty"
     assert truss.options["penalty_value"] == 1e10
-    assert truss.options["plot_results"] == True
+    assert truss.options["plot_results"] is True
     assert truss.options["displacement_scale"] == 50.0
 
     print("✅ گزینه‌های مدل صحیح تنظیم شدند")
@@ -338,7 +338,7 @@ def test_truss_model_validate_sign_convention():
     is_valid = truss.validate_sign_convention()
 
     # در این حالت، بدون محاسبات باید True برگرداند
-    assert is_valid == True
+    assert is_valid is True
 
     print(f"✅ اعتبارسنجی قرارداد علامت: {is_valid}")
 
@@ -363,7 +363,7 @@ def test_invalid_element_creation():
     }
 
     with pytest.raises((ValueError, KeyError)):  # هر دو خطا را قبول کن
-        truss = TrussModel(input_data)
+        TrussModel(input_data)
 
     print("✅ خطای مناسب برای عضو نامعتبر صادر شد")
 

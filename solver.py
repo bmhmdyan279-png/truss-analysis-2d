@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 """
 حلگر معادلات و محاسبه نتایج - نسخه نهایی با اصلاح اعتبارسنجی انرژی
 """
@@ -89,14 +93,17 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
             else:
                 row_sums = np.sum(np.abs(K_ff), axis=1)
 
-            zero_rows = np.where(row_sums < 1e-12)[0]
+            zero_rows = np.where(row_sums < ZERO_LENGTH_TOLERANCE)[0]
 
             if zero_rows.size > 0:
                 # حذف DOFهای صفر
                 to_keep = []
                 to_remove = []
                 for idx in range(len(row_sums)):
-                    if row_sums[idx] < 1e-12 and abs(F_f[idx]) < 1e-12:
+                    if (
+                        row_sums[idx] < ZERO_LENGTH_TOLERANCE
+                        and abs(F_f[idx]) < ZERO_LENGTH_TOLERANCE
+                    ):
                         to_remove.append(idx)
                     else:
                         to_keep.append(idx)
@@ -191,7 +198,9 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
                         raise ValueError("نتایج شامل nan هستند")
 
                 except (Exception, ValueError) as e:
-                    print(f"⚠️ خطا در حل با روش پنالتی: {e}. استفاده از روش fallback...")
+                    logger.info(
+                        f"⚠️ خطا در حل با روش پنالتی: {e}. استفاده از روش fallback..."
+                    )
 
                     # تبدیل به dense و حل با lstsq
 
@@ -213,7 +222,7 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
                         raise ValueError("نتایج شامل nan هستند")
 
                 except (np.linalg.LinAlgError, ValueError) as e:
-                    print(
+                    logger.info(
                         f"⚠️ خطا در حل با روش پنالتی: {e}. استفاده از کمترین مربعات..."
                     )
 
@@ -236,8 +245,10 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
         return displacements  # اینجا حتماً return می‌شود
 
     except np.linalg.LinAlgError as e:
-        print(f"❌ خطای جبر خطی: {str(e)}")
-        print("🔍 پیشنهاد: بررسی کنید که سازه ایستا باشد و تکیه‌گاه‌های کافی داشته باشد.")
+        logger.info(f"❌ خطای جبر خطی: {str(e)}")
+        logger.info(
+            "🔍 پیشنهاد: بررسی کنید که سازه ایستا باشد و تکیه‌گاه‌های کافی داشته باشد."
+        )
 
         # حتی در صورت خطا، یک آرایه صفر برمی‌گردانیم (به جای None)
         displacements = np.zeros(n_dof)
@@ -245,11 +256,11 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
             dof_x, dof_y = node.dofs
             node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
 
-        print("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
+        logger.info("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
         return displacements  # اینجا هم return داریم
 
     except Exception as e:
-        print(f"❌ خطای غیرمنتظره در حلگر: {str(e)}")
+        logger.info(f"❌ خطای غیرمنتظره در حلگر: {str(e)}")
 
         # حتی در صورت خطا، یک آرایه صفر برمی‌گردانیم
         displacements = np.zeros(n_dof)
@@ -257,7 +268,7 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
             dof_x, dof_y = node.dofs
             node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
 
-        print("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
+        logger.info("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
         return displacements  # اینجا هم return داریم
 
 
@@ -365,23 +376,23 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
 
     # ۲. مدیریت حالت‌های ویژه
     # اگر هر دو انرژی بسیار کوچک هستند
-    if abs(U_total) < 1e-12 and abs(U_elements) < 1e-12:
+    if abs(U_total) < ZERO_LENGTH_TOLERANCE and abs(U_elements) < ZERO_LENGTH_TOLERANCE:
         return True, 0.0, "انرژی‌ها ناچیز هستند ✅"
 
     # اگر فقط یکی از آنها بسیار کوچک است
-    if abs(U_total) < 1e-12 and abs(U_elements) > 1e-6:
+    if abs(U_total) < ZERO_LENGTH_TOLERANCE and abs(U_elements) > 1e-6:
         # این حالت در اثرات حرارتی خالص رخ می‌دهد
         error = 1.0  # 100% خطا (معمول در حرارتی خالص)
         msg = f"حالت حرارتی خالص: انرژی کل ({U_total:.2e}) ناچیز است ⚠️"
         return True, error, msg  # باز هم True چون طبیعی است
 
-    if abs(U_elements) < 1e-12 and abs(U_total) > 1e-6:
+    if abs(U_elements) < ZERO_LENGTH_TOLERANCE and abs(U_total) > 1e-6:
         error = 1.0
         msg = f"انرژی اعضا ناچیز است در حالی که انرژی کل ({U_total:.2e}) نیست ⚠️"
         return False, error, msg
 
     # ۳. محاسبه خطای نسبی
-    denominator = max(abs(U_total), abs(U_elements), 1e-12)
+    denominator = max(abs(U_total), abs(U_elements), ZERO_LENGTH_TOLERANCE)
     error = abs(U_elements - U_total) / denominator
 
     # ۴. تعیین آستانه دینامیک

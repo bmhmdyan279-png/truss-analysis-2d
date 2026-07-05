@@ -345,13 +345,13 @@ def generate_plots(
     # تنظیم سبک matplotlib با fallback
     try:
         plt.style.use("seaborn-v0_8-darkgrid")
-    except:
+    except Exception:
         try:
             plt.style.use("seaborn-darkgrid")
-        except:
+        except Exception:
             try:
                 plt.style.use("seaborn")
-            except:
+            except Exception:
                 plt.style.use("default")
 
     plt.rcParams["font.family"] = "DejaVu Sans"

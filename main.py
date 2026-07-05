@@ -1,3 +1,5 @@
+from constants import ZERO_LENGTH_TOLERANCE
+
 #!/usr/bin/env python3
 """
 تحلیلگر خرپای 2D با اثرات حرارتی و خطای ساخت - نسخه نهایی
@@ -33,7 +35,7 @@ def sanity_check(truss):
 
     # ۲. بررسی طول اعضا
     for element in truss.elements.values():
-        if element.L < 1e-12:
+        if element.L < ZERO_LENGTH_TOLERANCE:
             issues.append(f"⚠️ عضو {element.id} طول صفر دارد")
 
     # ۳. بررسی واحدها
@@ -293,7 +295,7 @@ def run_analysis(
 
                     if N_expected_val is not None:
                         rel_error = abs(N_actual - N_expected_val) / max(
-                            abs(N_expected_val), 1e-12
+                            abs(N_expected_val), ZERO_LENGTH_TOLERANCE
                         )
 
                         if rel_error < 0.01:  # 1% خطا

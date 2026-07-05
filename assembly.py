@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 """
 مونتاژ ماتریس‌های سراسری بهینه‌شده
 """
