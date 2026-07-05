@@ -227,7 +227,7 @@ def test_calculate_element_results_with_buckling():
 
     # اگر نسبت > 0.8 باشد، باید هشدار داده شود
     if buckling_ratio > 0.8:
-        assert element_result["buckling_warning"] is True
+        assert element_result["buckling_warning"]
     else:
         assert element_result["buckling_warning"] is False
 
