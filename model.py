@@ -1,13 +1,15 @@
+from constants import DEFAULT_ALPHA
+
 """
 مدل‌سازی خرپا - نسخه نهایی کامل
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Optional, Any
-import logging
+from typing import Dict, List, Tuple, Optional
 
 # ایمپورت از فایل جدید utils
 from utils import validate_units, convert_to_si
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +29,32 @@ class Node:
             self.dofs = dof_map[self.id]
 
     def __repr__(self):
-        return f"Node({self.id}, ({self.x:.3f}, {self.y:.3f}), support={self.is_support})"
+        return (
+            f"Node({self.id}, ({self.x:.3f}, {self.y:.3f}), support={self.is_support})"
+        )
 
 
 class Element:
     """کلاس عضو خرپا"""
 
-    def __init__(self, element_id: int = None, node_i: 'Node' = None, node_j: 'Node' = None,
-                 A: float = None, E: float = None, alpha: float = 1.2e-5,
-                 delta_T: float = 0.0, delta_L0: float = 0.0,
-                 I: Optional[float] = None,
-                 effective_length_factor: float = 1.0,
-                 section_type: str = 'general', **kwargs):
+    def __init__(
+        self,
+        element_id: int = None,
+        node_i: "Node" = None,
+        node_j: "Node" = None,
+        A: float = None,
+        E: float = None,
+        alpha: float = DEFAULT_ALPHA,
+        delta_T: float = 0.0,
+        delta_L0: float = 0.0,
+        I: Optional[float] = None,  # noqa: E741
+        effective_length_factor: float = 1.0,
+        section_type: str = "general",
+        **kwargs,
+    ):
         # backward compatibility: accept 'id' kwarg
-        if element_id is None and 'id' in kwargs:
-            element_id = kwargs.get('id')
+        if element_id is None and "id" in kwargs:
+            element_id = kwargs.get("id")
         self.id = element_id
         self.node_i = node_i
         self.node_j = node_j
@@ -88,7 +101,7 @@ class Element:
 
         # فرمول اویلر: P_cr = π²EI / (K_eff * L)²
         if self.L > 0 and self.E > 0:
-            return (np.pi**2 * self.E * self.I) / (self.K_eff * self.L)**2
+            return (np.pi**2 * self.E * self.I) / (self.K_eff * self.L) ** 2
         return None
 
     def __repr__(self):
@@ -100,34 +113,34 @@ class TrussModel:
 
     def __init__(self, input_data: Dict):
         # تنظیم واحدها
-        self.units = input_data.get('units', 'SI')
+        self.units = input_data.get("units", "SI")
         # اعتبارسنجی واحدها
         self._units_conv = validate_units(self.units)
         self._convert_to_si = convert_to_si
-        self.global_delta_T = input_data.get('temperature_change', 0.0)
+        self.global_delta_T = input_data.get("temperature_change", 0.0)
 
         # گزینه‌ها
         self.options = {
-            'use_sparse': True,
-            'bc_method': 'elimination',
-            'penalty_value': 1e12,
-            'plot_results': True,
-            'displacement_scale': 'auto'
+            "use_sparse": True,
+            "bc_method": "elimination",
+            "penalty_value": 1e12,
+            "plot_results": True,
+            "displacement_scale": "auto",
         }
-        if 'options' in input_data:
-            self.options.update(input_data['options'])
+        if "options" in input_data:
+            self.options.update(input_data["options"])
 
         # ذخیره داده ورودی
         self.input_data = input_data
 
         # ایجاد گره‌ها
-        self.nodes = self._create_nodes(input_data['nodes'])
+        self.nodes = self._create_nodes(input_data["nodes"])
 
         # ایجاد اعضا
-        self.elements = self._create_elements(input_data['elements'])
+        self.elements = self._create_elements(input_data["elements"])
 
         # بارها
-        self.loads = self._create_loads(input_data.get('loads', {}))
+        self.loads = self._create_loads(input_data.get("loads", {}))
 
         # محاسبه DOFها
         self._setup_dofs()
@@ -137,10 +150,10 @@ class TrussModel:
         nodes = {}
         for node_data in nodes_data:
             node = Node(
-                id=node_data['id'],  # تغییر node_id به id
-                x=convert_to_si(float(node_data['x']), self.units, 'length'),
-                y=convert_to_si(float(node_data['y']), self.units, 'length'),
-                is_support=bool(node_data.get('is_support', False))
+                id=node_data["id"],  # تغییر node_id به id
+                x=convert_to_si(float(node_data["x"]), self.units, "length"),
+                y=convert_to_si(float(node_data["y"]), self.units, "length"),
+                is_support=bool(node_data.get("is_support", False)),
             )
             nodes[node.id] = node
         return nodes
@@ -149,26 +162,26 @@ class TrussModel:
         """ایجاد دیکشنری اعضا"""
         elements = {}
         for element_data in elements_data:
-            element_id = element_data['id']
+            element_id = element_data["id"]
 
             # پیدا کردن گره‌ها
-            node_i = self.nodes[element_data['node_i']]
-            node_j = self.nodes[element_data['node_j']]
+            node_i = self.nodes[element_data["node_i"]]
+            node_j = self.nodes[element_data["node_j"]]
 
             # دمای کل (سراسری + محلی)
-            delta_T_total = self.global_delta_T + element_data.get('delta_T', 0.0)
+            delta_T_total = self.global_delta_T + element_data.get("delta_T", 0.0)
 
             # تبدیل مساحت مقطع به SI
-            if element_data.get('A') is not None:
-                A_value = convert_to_si(float(element_data['A']), self.units, 'length')
+            if element_data.get("A") is not None:
+                A_value = convert_to_si(float(element_data["A"]), self.units, "length")
                 # برای مساحت: اگر واحد طول mm باشد، مساحت mm² است که باید به m² تبدیل شود
                 # اما convert_to_si فقط تبدیل طول انجام می‌دهد، پس باید مربع آن را بگیریم
-                if self.units == 'SI-mm':
+                if self.units == "SI-mm":
                     A_si = A_value**2  # تبدیل mm² به m²
-                elif self.units == 'SI-cm':
+                elif self.units == "SI-cm":
                     A_si = A_value**2  # تبدیل cm² به m²
                 else:
-                    A_si = element_data['A']  # در واحد SI مساحت مستقیماً m² است
+                    A_si = element_data["A"]  # در واحد SI مساحت مستقیماً m² است
             else:
                 A_si = None
 
@@ -177,13 +190,15 @@ class TrussModel:
                 node_i=node_i,
                 node_j=node_j,
                 A=A_si,
-                E=float(element_data['E']),
-                alpha=float(element_data.get('alpha', 1.2e-5)),
+                E=float(element_data["E"]),
+                alpha=float(element_data.get("alpha", 1.2e-5)),
                 delta_T=delta_T_total,
-                delta_L0=float(element_data.get('delta_L0', 0.0)),
-                I=element_data.get('I'),
-                effective_length_factor=float(element_data.get('effective_length_factor', 1.0)),
-                section_type=element_data.get('section_type', 'general')
+                delta_L0=float(element_data.get("delta_L0", 0.0)),
+                I=element_data.get("I"),
+                effective_length_factor=float(
+                    element_data.get("effective_length_factor", 1.0)
+                ),
+                section_type=element_data.get("section_type", "general"),
             )
             elements[element.id] = element
         return elements
@@ -191,14 +206,18 @@ class TrussModel:
     def _create_loads(self, loads_data: Dict) -> List[Dict]:
         """ایجاد لیست بارها"""
         loads = []
-        if 'node_forces' in loads_data:
-            for i, load_data in enumerate(loads_data['node_forces']):
-                loads.append({
-                    'id': load_data.get('id', load_data.get('node_id', i + 1)),  # انعطاف‌پذیر
-                    'node_id': load_data.get('node_id'),  # اضافه کردن node_id
-                    'Fx': float(load_data.get('Fx', 0.0)),
-                    'Fy': float(load_data.get('Fy', 0.0))
-                })
+        if "node_forces" in loads_data:
+            for i, load_data in enumerate(loads_data["node_forces"]):
+                loads.append(
+                    {
+                        "id": load_data.get(
+                            "id", load_data.get("node_id", i + 1)
+                        ),  # انعطاف‌پذیر
+                        "node_id": load_data.get("node_id"),  # اضافه کردن node_id
+                        "Fx": float(load_data.get("Fx", 0.0)),
+                        "Fy": float(load_data.get("Fy", 0.0)),
+                    }
+                )
         return loads
 
     def _setup_dofs(self):
@@ -245,7 +264,7 @@ class TrussModel:
             # بررسی جهت نیروهای خارجی
             for load in self.loads:
                 # هیچ نیرویی نباید به تکیه‌گاه اعمال شود
-                node = self.nodes[load['id']]
+                node = self.nodes[load["id"]]
                 if node.is_support:
                     logger.warning(f"⚠️ نیرو به تکیه‌گاه (گره {node.id}) اعمال شده است.")
                     return False

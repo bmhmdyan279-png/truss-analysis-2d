@@ -3,10 +3,11 @@
 """
 
 import numpy as np
-from typing import Tuple
 from scipy import sparse
 from model import TrussModel, Element
-from constants import FORCE_CONVENTION
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_element_stiffness(element: Element) -> np.ndarray:
@@ -17,12 +18,14 @@ def calculate_element_stiffness(element: Element) -> np.ndarray:
     c, s = element.c, element.s
 
     # ماتریس سختی 4x4
-    k_e = AE_L * np.array([
-        [c * c, c * s, -c * c, -c * s],
-        [c * s, s * s, -c * s, -s * s],
-        [-c * c, -c * s, c * c, c * s],
-        [-c * s, -s * s, c * s, s * s]
-    ])
+    k_e = AE_L * np.array(
+        [
+            [c * c, c * s, -c * c, -c * s],
+            [c * s, s * s, -c * s, -s * s],
+            [-c * c, -c * s, c * c, c * s],
+            [-c * s, -s * s, c * s, s * s],
+        ]
+    )
 
     return k_e
 
@@ -72,10 +75,9 @@ def build_global_matrices(truss: TrussModel):
     """
     مونتاژ ماتریس سختی سراسری و بردار نیروی سراسری
     """
-    from scipy import sparse
 
     n_dof = truss.n_dof
-    use_sparse = truss.options.get('use_sparse', True)
+    use_sparse = truss.options.get("use_sparse", True)
 
     if use_sparse:
         K_global = sparse.lil_matrix((n_dof, n_dof))
@@ -102,14 +104,16 @@ def build_global_matrices(truss: TrussModel):
 
     # افزودن بارهای گره‌ای
     for load in truss.loads:
-        node_id = load['node_id']
+        node_id = load["node_id"]
         node_dofs = truss.nodes[node_id].dofs
-        F_global[node_dofs[0]] += load['Fx']
-        F_global[node_dofs[1]] += load['Fy']
+        F_global[node_dofs[0]] += load["Fx"]
+        F_global[node_dofs[1]] += load["Fy"]
 
     if use_sparse:
         K_global = K_global.tocsr()
 
     return K_global, F_global
+
+
 # ایجاد نام مستعار برای سازگاری با solver.py
 get_reduced_system = assemble_global_matrices

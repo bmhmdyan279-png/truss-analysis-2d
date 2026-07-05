@@ -4,20 +4,16 @@
 
 import pytest
 import numpy as np
-import json
-import tempfile
 import os
 import sys
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # اضافه کردن مسیر پوشه والد برای import کردن ماژول‌ها
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from truss_analysis.model import TrussModel, Node, Element  # اضافه کردن Node و Element
-from truss_analysis.assembly import assemble_global_matrices, calculate_element_stiffness, get_reduced_system
-from truss_analysis.solver import solve_displacements, calculate_element_results, calculate_total_energy, validate_energy
-from truss_analysis.postprocess import sort_elements, calculate_percentages, generate_report
-from truss_analysis.fileio import parse_input, validate_units, write_output
+
 
 class TestNode:
     """تست کامل کلاس Node"""
@@ -28,13 +24,13 @@ class TestNode:
         assert node.id == 1
         assert node.x == 1.5
         assert node.y == 2.5
-        assert node.is_support == False
+        assert node.is_support is False
         assert node.dofs is None
 
     def test_node_creation_support(self):
         """تست ایجاد گره تکیه‌گاهی"""
         node = Node(id=2, x=0.0, y=0.0, is_support=True)
-        assert node.is_support == True
+        assert node.is_support is True
 
     def test_node_set_dofs(self):
         """تست تنظیم DOFهای گره"""
@@ -56,6 +52,7 @@ class TestNode:
         assert "Node(5" in repr_str
         assert "support=True" in repr_str
 
+
 class TestElement:
     """تست کامل کلاس Element"""
 
@@ -67,12 +64,7 @@ class TestElement:
     def test_element_creation(self):
         """تست ایجاد عضو"""
         element = Element(
-            id=1,
-            node_i=self.node1,
-            node_j=self.node2,
-            A=0.01,
-            E=210e9,
-            alpha=1.2e-5
+            id=1, node_i=self.node1, node_j=self.node2, A=0.01, E=210e9, alpha=1.2e-5
         )
         assert element.id == 1
         assert element.A == 0.01
@@ -91,7 +83,7 @@ class TestElement:
                 node_i=node_same,
                 node_j=node_same,  # همان گره
                 A=0.01,
-                E=210e9
+                E=210e9,
             )
 
     def test_element_thermal_effects(self):
@@ -104,7 +96,7 @@ class TestElement:
             E=210e9,
             alpha=1.2e-5,
             delta_T=50.0,
-            delta_L0=0.001
+            delta_L0=0.001,
         )
         delta_free = element.calculate_thermal_effects()
         expected = 1.2e-5 * 50.0 * 2.0 + 0.001
@@ -120,7 +112,7 @@ class TestElement:
             A=0.01,
             E=210e9,
             I=7.85e-9,
-            effective_length_factor=1.0
+            effective_length_factor=1.0,
         )
         P_cr = element.calculate_buckling_load()
         expected = (np.pi**2 * 210e9 * 7.85e-9) / (2.0**2)
@@ -134,23 +126,18 @@ class TestElement:
             node_j=self.node2,
             A=0.01,
             E=210e9,
-            I=None  # بدون ممان اینرسی
+            I=None,  # بدون ممان اینرسی
         )
         P_cr = element.calculate_buckling_load()
         assert P_cr is None
 
     def test_element_repr(self):
         """تست نمایش رشته‌ای عضو"""
-        element = Element(
-            id=6,
-            node_i=self.node1,
-            node_j=self.node2,
-            A=0.01,
-            E=210e9
-        )
+        element = Element(id=6, node_i=self.node1, node_j=self.node2, A=0.01, E=210e9)
         repr_str = repr(element)
         assert "Element(6" in repr_str
         assert "L=5.000" in repr_str
+
 
 class TestTrussModel:
     """تست کامل کلاس TrussModel"""
@@ -158,27 +145,15 @@ class TestTrussModel:
     def test_truss_creation_simple(self):
         """تست ایجاد خرپای ساده"""
         input_data = {
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-                {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+                {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
             ],
-            'elements': [
-                {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 3,
-                    'A': 0.01,
-                    'E': 210e9
-                },
-                {
-                    'id': 2,
-                    'node_i': 2,
-                    'node_j': 3,
-                    'A': 0.01,
-                    'E': 210e9
-                }
-            ]
+            "elements": [
+                {"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9},
+                {"id": 2, "node_i": 2, "node_j": 3, "A": 0.01, "E": 210e9},
+            ],
         }
 
         truss = TrussModel(input_data)
@@ -191,50 +166,38 @@ class TestTrussModel:
     def test_truss_with_loads(self):
         """تست خرپا با بار"""
         input_data = {
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
             ],
-            'elements': [
-                {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 2,
-                    'A': 0.01,
-                    'E': 210e9
-                }
-            ],
-            'loads': {
-                'node_forces': [
-                    {'node_id': 2, 'Fx': 10000.0, 'Fy': -5000.0}
-                ]
-            }
+            "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
+            "loads": {"node_forces": [{"node_id": 2, "Fx": 10000.0, "Fy": -5000.0}]},
         }
 
         truss = TrussModel(input_data)
         assert len(truss.loads) == 1
         load = truss.loads[0]
-        assert load['node_id'] == 2
-        assert load['Fx'] == 10000.0
-        assert load['Fy'] == -5000.0
+        assert load["node_id"] == 2
+        assert load["Fx"] == 10000.0
+        assert load["Fy"] == -5000.0
 
     def test_truss_units_si_mm(self):
         """تست خرپا با واحدهای SI-mm"""
         input_data = {
-            'units': 'SI-mm',
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2000.0, 'y': 0.0, 'is_support': False}  # 2000 mm = 2 m
+            "units": "SI-mm",
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2000.0, "y": 0.0, "is_support": False},  # 2000 mm = 2 m
             ],
-            'elements': [
+            "elements": [
                 {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 2,
-                    'A': 100,  # 100 mm² = 0.0001 m²
-                    'E': 210e9
+                    "id": 1,
+                    "node_i": 1,
+                    "node_j": 2,
+                    "A": 100,  # 100 mm² = 0.0001 m²
+                    "E": 210e9,
                 }
-            ]
+            ],
         }
 
         truss = TrussModel(input_data)
@@ -244,22 +207,22 @@ class TestTrussModel:
     def test_truss_thermal_global(self):
         """تست اثر دمای سراسری"""
         input_data = {
-            'temperature_change': 50.0,
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-                {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+            "temperature_change": 50.0,
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+                {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
             ],
-            'elements': [
+            "elements": [
                 {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 3,
-                    'A': 0.01,
-                    'E': 210e9,
-                    'alpha': 1.2e-5
+                    "id": 1,
+                    "node_i": 1,
+                    "node_j": 3,
+                    "A": 0.01,
+                    "E": 210e9,
+                    "alpha": 1.2e-5,
                 }
-            ]
+            ],
         }
 
         truss = TrussModel(input_data)
@@ -270,22 +233,22 @@ class TestTrussModel:
     def test_truss_thermal_local(self):
         """تست اثر دمای محلی"""
         input_data = {
-            'temperature_change': 20.0,
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True}
+            "temperature_change": 20.0,
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
             ],
-            'elements': [
+            "elements": [
                 {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 2,
-                    'A': 0.01,
-                    'E': 210e9,
-                    'alpha': 1.2e-5,
-                    'delta_T': 30.0  # دمای محلی
+                    "id": 1,
+                    "node_i": 1,
+                    "node_j": 2,
+                    "A": 0.01,
+                    "E": 210e9,
+                    "alpha": 1.2e-5,
+                    "delta_T": 30.0,  # دمای محلی
                 }
-            ]
+            ],
         }
 
         truss = TrussModel(input_data)
@@ -296,20 +259,20 @@ class TestTrussModel:
     def test_truss_fabrication_error(self):
         """تست خطای ساخت"""
         input_data = {
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True}
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
             ],
-            'elements': [
+            "elements": [
                 {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 2,
-                    'A': 0.01,
-                    'E': 210e9,
-                    'delta_L0': 0.001
+                    "id": 1,
+                    "node_i": 1,
+                    "node_j": 2,
+                    "A": 0.01,
+                    "E": 210e9,
+                    "delta_L0": 0.001,
                 }
-            ]
+            ],
         }
 
         truss = TrussModel(input_data)
@@ -319,16 +282,16 @@ class TestTrussModel:
     def test_truss_invalid_element(self):
         """تست خطا برای عضو نامعتبر"""
         input_data = {
-            'nodes': [{'id': 1, 'x': 0.0, 'y': 0.0}],
-            'elements': [
+            "nodes": [{"id": 1, "x": 0.0, "y": 0.0}],
+            "elements": [
                 {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 99,  # گره وجود ندارد
-                    'A': 0.01,
-                    'E': 210e9
+                    "id": 1,
+                    "node_i": 1,
+                    "node_j": 99,  # گره وجود ندارد
+                    "A": 0.01,
+                    "E": 210e9,
                 }
-            ]
+            ],
         }
 
         with pytest.raises(KeyError):  # تغییر از ValueError به KeyError
@@ -337,9 +300,9 @@ class TestTrussModel:
     def test_truss_invalid_units(self):
         """تست خطا برای واحد نامعتبر"""
         input_data = {
-            'units': 'INVALID',
-            'nodes': [{'id': 1, 'x': 0.0, 'y': 0.0}],
-            'elements': []
+            "units": "INVALID",
+            "nodes": [{"id": 1, "x": 0.0, "y": 0.0}],
+            "elements": [],
         }
 
         with pytest.raises(ValueError):
@@ -348,59 +311,39 @@ class TestTrussModel:
     def test_truss_options(self):
         """تست گزینه‌های خرپا"""
         input_data = {
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
             ],
-            'elements': [
-                {
-                    'id': 1,
-                    'node_i': 1,
-                    'node_j': 2,
-                    'A': 0.01,
-                    'E': 210e9
-                }
-            ],
-            'options': {
-                'use_sparse': False,
-                'bc_method': 'penalty',
-                'penalty_value': 1e10,
-                'plot_results': True,
-                'displacement_scale': 50.0
-            }
+            "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
+            "options": {
+                "use_sparse": False,
+                "bc_method": "penalty",
+                "penalty_value": 1e10,
+                "plot_results": True,
+                "displacement_scale": 50.0,
+            },
         }
 
         truss = TrussModel(input_data)
-        assert truss.options['use_sparse'] == False
-        assert truss.options['bc_method'] == 'penalty'
-        assert truss.options['penalty_value'] == 1e10
-        assert truss.options['plot_results'] == True
-        assert truss.options['displacement_scale'] == 50.0
+        assert truss.options["use_sparse"] is False
+        assert truss.options["bc_method"] == "penalty"
+        assert truss.options["penalty_value"] == 1e10
+        assert truss.options["plot_results"] is True
+        assert truss.options["displacement_scale"] == 50.0
 
     def test_truss_non_sequential_node_ids(self):
         """تست شناسه‌های گره غیرمتوالی"""
         input_data = {
-            'nodes': [
-                {'id': 10, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 20, 'x': 2.0, 'y': 0.0, 'is_support': True},
-                {'id': 30, 'x': 1.0, 'y': 1.0, 'is_support': False}
+            "nodes": [
+                {"id": 10, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 20, "x": 2.0, "y": 0.0, "is_support": True},
+                {"id": 30, "x": 1.0, "y": 1.0, "is_support": False},
             ],
-            'elements': [
-                {
-                    'id': 1,
-                    'node_i': 10,
-                    'node_j': 30,
-                    'A': 0.01,
-                    'E': 210e9
-                },
-                {
-                    'id': 2,
-                    'node_i': 20,
-                    'node_j': 30,
-                    'A': 0.01,
-                    'E': 210e9
-                }
-            ]
+            "elements": [
+                {"id": 1, "node_i": 10, "node_j": 30, "A": 0.01, "E": 210e9},
+                {"id": 2, "node_i": 20, "node_j": 30, "A": 0.01, "E": 210e9},
+            ],
         }
 
         truss = TrussModel(input_data)
@@ -412,11 +355,11 @@ class TestTrussModel:
     def test_truss_dof_mapping(self):
         """تست نگاشت DOFها"""
         input_data = {
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
             ],
-            'elements': []
+            "elements": [],
         }
 
         truss = TrussModel(input_data)
@@ -427,16 +370,17 @@ class TestTrussModel:
     def test_truss_validate_sign_convention_empty(self):
         """تست اعتبارسنجی قرارداد علامت برای خرپای خالی"""
         input_data = {
-            'nodes': [
-                {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-                {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True}
+            "nodes": [
+                {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+                {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
             ],
-            'elements': []
+            "elements": [],
         }
 
         truss = TrussModel(input_data)
         # بدون اعضا باید True برگرداند
-        assert truss.validate_sign_convention() == True
+        assert truss.validate_sign_convention() is True
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
