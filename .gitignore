@@ -33,3 +33,7 @@ htmlcov/
 !src/**/*.py
 !tests/**/*.py
 !examples/**/*.py
+results_*.md
+results_*.csv
+results_*.png
+results.json
