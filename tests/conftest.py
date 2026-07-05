@@ -1,16 +1,13 @@
 """
-فایل پیکربندی pytest برای تست‌های خرپا
+Shared pytest configuration.
+Adds src/ to sys.path so tests can import truss_analysis without installation.
 """
+from __future__ import annotations
 
-import os
 import sys
+from pathlib import Path
 
-# اضافه کردن مسیر پوشه والد به sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-# ایمپورت ماژول‌های اصلی برای دسترسی در تست‌ها
-try:
-    print("✅ ماژول‌ها با موفقیت import شدند")
-except ImportError as e:
-    print(f"❌ خطای import: {e}")
-    raise
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
