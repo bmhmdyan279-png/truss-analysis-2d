@@ -28,7 +28,7 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
 
     try:
         if bc_method == "elimination":
-            from assembly import get_reduced_system
+            from .assembly import get_reduced_system
 
             K_ff, F_f, free_dofs, fixed_dofs = get_reduced_system(truss, K_global, F_global)
             # حذف سطر/ستون‌های صفر برای جلوگیری از ماتریس منفرد

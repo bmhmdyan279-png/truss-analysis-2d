@@ -60,17 +60,17 @@ def sanity_check(truss):
 
 
 try:
-    from assembly import build_global_matrices
-    from fileio import validate_units, write_output
-    from model import TrussModel
-    from postprocess import (
+    from .assembly import build_global_matrices
+    from .fileio import validate_units, write_output
+    from .model import TrussModel
+    from .postprocess import (
         calculate_percentages,
         generate_plots,
         generate_report,
         save_report_to_markdown,
         sort_elements,
     )
-    from solver import (
+    from .solver import (
         calculate_element_results,
         calculate_total_energy,
         solve_displacements,
