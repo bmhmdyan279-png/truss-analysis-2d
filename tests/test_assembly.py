@@ -2,18 +2,22 @@
 تست مونتاژ ماتریس‌های سراسری - نسخه کامل
 """
 
-import pytest
 import numpy as np
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # اضافه کردن مسیر پروژه به sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from truss_analysis.model import TrussModel
-from truss_analysis.assembly import build_global_matrices, calculate_element_stiffness, calculate_element_thermal_force, \
-    get_reduced_system
+from truss_analysis.assembly import (
+    build_global_matrices,
+    calculate_element_stiffness,
+    calculate_element_thermal_force,
+    get_reduced_system,
+)
 
 
 def test_calculate_element_stiffness():
@@ -24,19 +28,8 @@ def test_calculate_element_stiffness():
 
     # ایجاد یک خرپای ساده
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0},
-            {'id': 2, 'x': 2.0, 'y': 0.0}
-        ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ]
+        "nodes": [{"id": 1, "x": 0.0, "y": 0.0}, {"id": 2, "x": 2.0, "y": 0.0}],
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
     }
 
     truss = TrussModel(input_data)
@@ -59,17 +52,14 @@ def test_calculate_element_stiffness():
     AE_L = element.A * element.E / element.L
 
     # برای عضو افقی (c=1, s=0)
-    expected_k = AE_L * np.array([
-        [1, 0, -1, 0],
-        [0, 0, 0, 0],
-        [-1, 0, 1, 0],
-        [0, 0, 0, 0]
-    ])
+    expected_k = AE_L * np.array(
+        [[1, 0, -1, 0], [0, 0, 0, 0], [-1, 0, 1, 0], [0, 0, 0, 0]]
+    )
 
     # به دلیل خطای عددی، از tolerance استفاده می‌کنیم
     assert np.allclose(k_e, expected_k, rtol=1e-10)
 
-    print(f"✅ ماتریس سختی عنصر محاسبه شد")
+    print("✅ ماتریس سختی عنصر محاسبه شد")
     print(f"  اندازه: {k_e.shape}")
     print(f"  AE/L: {AE_L:.2e} N/m")
 
@@ -82,21 +72,11 @@ def test_calculate_element_thermal_force():
 
     # ایجاد یک خرپا با اثر حرارتی
     input_data = {
-        'temperature_change': 50.0,
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0},
-            {'id': 2, 'x': 2.0, 'y': 0.0}
+        "temperature_change": 50.0,
+        "nodes": [{"id": 1, "x": 0.0, "y": 0.0}, {"id": 2, "x": 2.0, "y": 0.0}],
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9, "alpha": 1.2e-5}
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            }
-        ]
     }
 
     truss = TrussModel(input_data)
@@ -123,7 +103,7 @@ def test_calculate_element_thermal_force():
     assert np.allclose(f_e[0] + f_e[2], 0.0, atol=1e-10)
     assert np.allclose(f_e[1] + f_e[3], 0.0, atol=1e-10)
 
-    print(f"✅ نیروی معادل حرارتی محاسبه شد")
+    print("✅ نیروی معادل حرارتی محاسبه شد")
     print(f"  اندازه بردار: {f_e.shape}")
     print(f"  delta_L_free: {delta_L_free:.6e} m")
 
@@ -135,38 +115,20 @@ def test_assemble_global_matrices_sparse():
     print("=" * 60)
 
     input_data = {
-        'units': 'SI',
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "units": "SI",
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            },
-            {
-                'id': 2,
-                'node_i': 2,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            }
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
+            {"id": 2, "node_i": 2, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
         ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 3, 'Fx': 1000.0, 'Fy': -2000.0}
-            ]
+        "loads": {"node_forces": [{"node_id": 3, "Fx": 1000.0, "Fy": -2000.0}]},
+        "options": {
+            "use_sparse": True  # استفاده از ماتریس تنک
         },
-        'options': {
-            'use_sparse': True  # استفاده از ماتریس تنک
-        }
     }
 
     truss = TrussModel(input_data)
@@ -180,6 +142,7 @@ def test_assemble_global_matrices_sparse():
 
     # بررسی نوع ماتریس (باید sparse باشد)
     from scipy import sparse
+
     assert isinstance(K_global, sparse.spmatrix)
 
     # بررسی تقارن ماتریس سختی
@@ -192,7 +155,7 @@ def test_assemble_global_matrices_sparse():
     assert abs(F_global[node3_dofs[0]] - 1000.0) < 1e-10
     assert abs(F_global[node3_dofs[1]] - (-2000.0)) < 1e-10
 
-    print(f"✅ ماتریس‌های سراسری با ماتریس تنک مونتاژ شدند")
+    print("✅ ماتریس‌های سراسری با ماتریس تنک مونتاژ شدند")
     print(f"  اندازه K: {K_global.shape}")
     print(f"  اندازه F: {F_global.shape}")
     print(f"  نوع K: {type(K_global).__name__}")
@@ -205,33 +168,19 @@ def test_assemble_global_matrices_dense():
     print("=" * 60)
 
     input_data = {
-        'units': 'SI',
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "units": "SI",
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            },
-            {
-                'id': 2,
-                'node_i': 2,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            }
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
+            {"id": 2, "node_i": 2, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
         ],
-        'options': {
-            'use_sparse': False  # استفاده از ماتریس متراکم
-        }
+        "options": {
+            "use_sparse": False  # استفاده از ماتریس متراکم
+        },
     }
 
     truss = TrussModel(input_data)
@@ -254,7 +203,7 @@ def test_assemble_global_matrices_dense():
         if K_global[i, i] != 0:
             assert K_global[i, i] > 0
 
-    print(f"✅ ماتریس‌های سراسری با ماتریس متراکم مونتاژ شدند")
+    print("✅ ماتریس‌های سراسری با ماتریس متراکم مونتاژ شدند")
     print(f"  اندازه K: {K_global.shape}")
     print(f"  اندازه F: {F_global.shape}")
     print(f"  نوع K: {type(K_global).__name__}")
@@ -267,23 +216,23 @@ def test_assemble_with_thermal_effects():
     print("=" * 60)
 
     input_data = {
-        'temperature_change': 50.0,
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "temperature_change": 50.0,
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
+        "elements": [
             {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5,
-                'delta_T': 20.0  # دمای محلی اضافه
+                "id": 1,
+                "node_i": 1,
+                "node_j": 3,
+                "A": 0.01,
+                "E": 210e9,
+                "alpha": 1.2e-5,
+                "delta_T": 20.0,  # دمای محلی اضافه
             }
-        ]
+        ],
     }
 
     truss = TrussModel(input_data)
@@ -314,7 +263,7 @@ def test_assemble_with_thermal_effects():
     assert abs(total_fx) < 1e-10
     assert abs(total_fy) < 1e-10
 
-    print(f"✅ مونتاژ با اثرات حرارتی موفقیت‌آمیز بود")
+    print("✅ مونتاژ با اثرات حرارتی موفقیت‌آمیز بود")
     print(f"  delta_T کل: {delta_T_total}°C")
     print(f"  delta_L_free: {delta_L_free_expected:.6e} m")
     print(f"  مجموع نیروهای x: {total_fx:.2e} N")
@@ -328,22 +277,22 @@ def test_assemble_with_fabrication_error():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
+        "elements": [
             {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5,
-                'delta_L0': 0.001  # خطای ساخت
+                "id": 1,
+                "node_i": 1,
+                "node_j": 3,
+                "A": 0.01,
+                "E": 210e9,
+                "alpha": 1.2e-5,
+                "delta_L0": 0.001,  # خطای ساخت
             }
-        ]
+        ],
     }
 
     truss = TrussModel(input_data)
@@ -359,7 +308,7 @@ def test_assemble_with_fabrication_error():
     # بررسی اینکه delta_L_free شامل خطای ساخت است
     assert abs(element.delta_L_free - delta_L_free_expected) < 1e-10
 
-    print(f"✅ مونتاژ با خطای ساخت موفقیت‌آمیز بود")
+    print("✅ مونتاژ با خطای ساخت موفقیت‌آمیز بود")
     print(f"  delta_L0: {element.delta_L0:.6e} m")
     print(f"  delta_L_free: {element.delta_L_free:.6e} m")
 
@@ -371,25 +320,13 @@ def test_get_reduced_system():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 3, 'Fx': 1000.0, 'Fy': -2000.0}
-            ]
-        }
+        "elements": [{"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9}],
+        "loads": {"node_forces": [{"node_id": 3, "Fx": 1000.0, "Fy": -2000.0}]},
     }
 
     truss = TrussModel(input_data)
@@ -418,7 +355,7 @@ def test_get_reduced_system():
     assert abs(F_f[0] - 1000.0) < 1e-10
     assert abs(F_f[1] - (-2000.0)) < 1e-10
 
-    print(f"✅ سیستم با موفقیت کاهش یافت")
+    print("✅ سیستم با موفقیت کاهش یافت")
     print(f"  DOFهای آزاد: {free_dofs}")
     print(f"  DOFهای ثابت: {fixed_dofs}")
     print(f"  اندازه K_ff: {K_ff.shape}")
@@ -433,19 +370,11 @@ def test_singular_matrix_detection():
 
     # یک سازه ناپایدار: همه گره‌ها آزاد
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': False},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": False},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ]
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
     }
 
     truss = TrussModel(input_data)
@@ -458,7 +387,7 @@ def test_singular_matrix_detection():
     # برای ماتریس منفرد، دترمینان نزدیک به صفر است
     assert abs(det) < 1e-6
 
-    print(f"✅ ماتریس منفرد شناسایی شد")
+    print("✅ ماتریس منفرد شناسایی شد")
     print(f"  دترمینان: {det:.2e}")
 
 
@@ -477,7 +406,7 @@ if __name__ == "__main__":
         test_assemble_with_thermal_effects,
         test_assemble_with_fabrication_error,
         test_get_reduced_system,
-        test_singular_matrix_detection
+        test_singular_matrix_detection,
     ]
 
     passed = 0

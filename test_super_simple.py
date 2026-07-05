@@ -13,10 +13,10 @@ element = Element(
     id=1,
     node_i=node1,
     node_j=node2,
-    A=0.01,      # 0.01 m²
-    E=210e9,     # 210 GPa
+    A=0.01,  # 0.01 m²
+    E=210e9,  # 210 GPa
     alpha=1.2e-5,
-    delta_T=100  # ۱۰۰ درجه افزایش دما
+    delta_T=100,  # ۱۰۰ درجه افزایش دما
 )
 
 print(f"📏 طول عضو: {element.L} m")

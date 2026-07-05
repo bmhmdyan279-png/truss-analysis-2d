@@ -1,10 +1,11 @@
 import os
+
 print("✅ os import شد")
 
-import sys
 print("✅ sys import شد")
 
 import json
+
 print("✅ json import شد")
 
 # حالا تست کنیم فایل وجود داره یا نه

@@ -2,16 +2,20 @@
 تست حلگر معادلات - نسخه اصلاح شده با tolerance مناسب
 """
 
-import pytest
 import numpy as np
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from model import TrussModel
 from assembly import build_global_matrices
-from solver import solve_displacements, calculate_element_results, calculate_total_energy, validate_energy
+from solver import (
+    solve_displacements,
+    calculate_element_results,
+    calculate_total_energy,
+    validate_energy,
+)
 
 
 def test_solve_displacements_elimination():
@@ -21,28 +25,13 @@ def test_solve_displacements_elimination():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 2, 'Fx': 10000.0, 'Fy': 0.0}
-            ]
-        },
-        'options': {
-            'bc_method': 'elimination',
-            'use_sparse': True
-        }
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
+        "loads": {"node_forces": [{"node_id": 2, "Fx": 10000.0, "Fy": 0.0}]},
+        "options": {"bc_method": "elimination", "use_sparse": True},
     }
 
     truss = TrussModel(input_data)
@@ -75,29 +64,13 @@ def test_solve_displacements_penalty():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 2, 'Fx': 10000.0, 'Fy': 0.0}
-            ]
-        },
-        'options': {
-            'bc_method': 'penalty',
-            'use_sparse': True,
-            'penalty_value': 1e12
-        }
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
+        "loads": {"node_forces": [{"node_id": 2, "Fx": 10000.0, "Fy": 0.0}]},
+        "options": {"bc_method": "penalty", "use_sparse": True, "penalty_value": 1e12},
     }
 
     truss = TrussModel(input_data)
@@ -132,13 +105,14 @@ def test_solve_displacements_penalty():
     # خطای 0.2% برای روش پنالتی قابل قبول است
     tolerance = 0.002  # 0.2%
 
-    assert rel_error < tolerance, f"خطای {rel_error:.2%} بیشتر از tolerance {tolerance:.2%} است"
+    assert rel_error < tolerance, (
+        f"خطای {rel_error:.2%} بیشتر از tolerance {tolerance:.2%} است"
+    )
 
     # همچنین بررسی کنیم که جابجایی مثبت باشد (کشش)
     assert u_x > 0, f"جابجایی باید مثبت باشد: {u_x}"
 
     print("✅ تست روش پنالتی با موفقیت گذشت!")
-
 
 
 def test_calculate_element_results():
@@ -148,24 +122,12 @@ def test_calculate_element_results():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 2, 'Fx': 10000.0, 'Fy': 0.0}
-            ]
-        }
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
+        "loads": {"node_forces": [{"node_id": 2, "Fx": 10000.0, "Fy": 0.0}]},
     }
 
     truss = TrussModel(input_data)
@@ -181,16 +143,16 @@ def test_calculate_element_results():
     element_result = results[0]
 
     # بررسی فیلدهای ضروری
-    required_fields = ['id', 'node_i', 'node_j', 'L', 'N', 'status', 'U', 'delta_L_eff']
+    required_fields = ["id", "node_i", "node_j", "L", "N", "status", "U", "delta_L_eff"]
     for field in required_fields:
         assert field in element_result
 
     # نیرو باید مثبت باشد (کشش)
-    assert element_result['N'] > 0
-    assert element_result['status'] == 'Tension'
+    assert element_result["N"] > 0
+    assert element_result["status"] == "Tension"
 
     # انرژی باید مثبت باشد
-    assert element_result['U'] > 0
+    assert element_result["U"] > 0
 
     # محاسبه تحلیلی
     L = 2.0
@@ -202,10 +164,10 @@ def test_calculate_element_results():
     N_expected = F_applied
     U_expected = 0.5 * F_applied * delta_expected
 
-    assert abs(element_result['N'] - N_expected) < 1e-6
-    assert abs(element_result['U'] - U_expected) < 1e-6
+    assert abs(element_result["N"] - N_expected) < 1e-6
+    assert abs(element_result["U"] - U_expected) < 1e-6
 
-    print(f"✅ نتایج عضو محاسبه شد")
+    print("✅ نتایج عضو محاسبه شد")
     print(f"  نیرو: {element_result['N']:.2f} N (انتظار: {N_expected:.2f} N)")
     print(f"  انرژی: {element_result['U']:.6f} J (انتظار: {U_expected:.6f} J)")
 
@@ -217,26 +179,26 @@ def test_calculate_element_results_with_buckling():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        'elements': [
+        "elements": [
             {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9,
-                'I': 7.85e-9,  # ممان اینرسی
-                'effective_length_factor': 1.0
+                "id": 1,
+                "node_i": 1,
+                "node_j": 2,
+                "A": 0.01,
+                "E": 210e9,
+                "I": 7.85e-9,  # ممان اینرسی
+                "effective_length_factor": 1.0,
             }
         ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 2, 'Fx': -50000.0, 'Fy': 0.0}  # نیروی فشاری بزرگ
+        "loads": {
+            "node_forces": [
+                {"node_id": 2, "Fx": -50000.0, "Fy": 0.0}  # نیروی فشاری بزرگ
             ]
-        }
+        },
     }
 
     truss = TrussModel(input_data)
@@ -247,28 +209,28 @@ def test_calculate_element_results_with_buckling():
     element_result = results[0]
 
     # بررسی فیلدهای کمانش
-    assert 'P_cr' in element_result
-    assert 'buckling_ratio' in element_result
-    assert 'buckling_warning' in element_result
-    assert 'buckling_safety_factor' in element_result
+    assert "P_cr" in element_result
+    assert "buckling_ratio" in element_result
+    assert "buckling_warning" in element_result
+    assert "buckling_safety_factor" in element_result
 
     # محاسبه بار بحرانی انتظاری
     element = list(truss.elements.values())[0]
-    P_cr_expected = (np.pi ** 2 * element.E * element.I) / (element.L) ** 2
+    P_cr_expected = (np.pi**2 * element.E * element.I) / (element.L) ** 2
 
-    assert abs(element_result['P_cr'] - P_cr_expected) < 1e-6
+    assert abs(element_result["P_cr"] - P_cr_expected) < 1e-6
 
     # نسبت کمانش
-    buckling_ratio = abs(element_result['N']) / element_result['P_cr']
-    assert abs(element_result['buckling_ratio'] - buckling_ratio) < 1e-10
+    buckling_ratio = abs(element_result["N"]) / element_result["P_cr"]
+    assert abs(element_result["buckling_ratio"] - buckling_ratio) < 1e-10
 
     # اگر نسبت > 0.8 باشد، باید هشدار داده شود
     if buckling_ratio > 0.8:
-        assert element_result['buckling_warning'] == True
+        assert element_result["buckling_warning"] == True
     else:
-        assert element_result['buckling_warning'] == False
+        assert element_result["buckling_warning"] == False
 
-    print(f"✅ نتایج کمانش محاسبه شد")
+    print("✅ نتایج کمانش محاسبه شد")
     print(f"  بار بحرانی: {element_result['P_cr']:.2f} N")
     print(f"  نسبت کمانش: {element_result['buckling_ratio']:.3f}")
     print(f"  هشدار کمانش: {element_result['buckling_warning']}")
@@ -281,24 +243,12 @@ def test_calculate_total_energy():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 2, 'Fx': 10000.0, 'Fy': 0.0}
-            ]
-        }
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
+        "loads": {"node_forces": [{"node_id": 2, "Fx": 10000.0, "Fy": 0.0}]},
     }
 
     truss = TrussModel(input_data)
@@ -310,7 +260,7 @@ def test_calculate_total_energy():
 
     # محاسبه انرژی از طریق اعضا
     results = calculate_element_results(truss, displacements)
-    U_elements = sum([r['U'] for r in results])
+    U_elements = sum([r["U"] for r in results])
 
     # همچنین می‌توانیم از فرمول 0.5 * U^T * F استفاده کنیم
     U_direct = 0.5 * np.dot(displacements, F)
@@ -322,7 +272,7 @@ def test_calculate_total_energy():
     # انرژی باید مثبت باشد
     assert U_total > 0
 
-    print(f"✅ انرژی کل محاسبه شد")
+    print("✅ انرژی کل محاسبه شد")
     print(f"  از تابع: {U_total:.6f} J")
     print(f"  از مجموع اعضا: {U_elements:.6f} J")
     print(f"  از فرمول مستقیم: {U_direct:.6f} J")
@@ -335,32 +285,16 @@ def test_validate_energy_with_loads():
     print("=" * 60)
 
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9
-            },
-            {
-                'id': 2,
-                'node_i': 2,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9
-            }
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9},
+            {"id": 2, "node_i": 2, "node_j": 3, "A": 0.01, "E": 210e9},
         ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 3, 'Fx': 0.0, 'Fy': -10000.0}
-            ]
-        }
+        "loads": {"node_forces": [{"node_id": 3, "Fx": 0.0, "Fy": -10000.0}]},
     }
 
     truss = TrussModel(input_data)
@@ -372,13 +306,15 @@ def test_validate_energy_with_loads():
     U_total = calculate_total_energy(truss, displacements, F)
 
     # اعتبارسنجی انرژی
-    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F)
+    is_valid, error, message = validate_energy(
+        results, U_total, truss, displacements, F
+    )
 
     # با بار خارجی، خطا باید بسیار کوچک باشد
     assert is_valid == True
     assert error < 1e-6
 
-    print(f"✅ اعتبارسنجی انرژی (با بار) موفق بود")
+    print("✅ اعتبارسنجی انرژی (با بار) موفق بود")
     print(f"  خطا: {error:.2e}")
     print(f"  پیام: {message}")
 
@@ -390,30 +326,16 @@ def test_validate_energy_thermal_only():
     print("=" * 60)
 
     input_data = {
-        'temperature_change': 50.0,
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "temperature_change": 50.0,
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            },
-            {
-                'id': 2,
-                'node_i': 2,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            }
-        ]
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
+            {"id": 2, "node_i": 2, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
+        ],
         # بدون بار خارجی
     }
 
@@ -426,13 +348,15 @@ def test_validate_energy_thermal_only():
     U_total = calculate_total_energy(truss, displacements, F)
 
     # اعتبارسنجی انرژی
-    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F)
+    is_valid, error, message = validate_energy(
+        results, U_total, truss, displacements, F
+    )
 
     # در حالت حرارتی خالص، آستانه ملایم‌تر است (1%)
     # بنابراین ممکن است is_valid = True یا False باشد، اما خطا باید کمتر از 1% باشد
     assert error <= 1.0 + 1e-10  # 1%
 
-    print(f"✅ اعتبارسنجی انرژی (حرارتی) انجام شد")
+    print("✅ اعتبارسنجی انرژی (حرارتی) انجام شد")
     print(f"  خطا: {error:.2e}")
     print(f"  معتبر: {is_valid}")
     print(f"  پیام: {message}")
@@ -446,38 +370,17 @@ def test_solve_truss_2d_example():
 
     # مثال خرپای ساده دو بعدی
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': True},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': True},
-            {'id': 3, 'x': 1.0, 'y': 1.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": True},
+            {"id": 3, "x": 1.0, "y": 1.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            },
-            {
-                'id': 2,
-                'node_i': 2,
-                'node_j': 3,
-                'A': 0.01,
-                'E': 210e9,
-                'alpha': 1.2e-5
-            }
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
+            {"id": 2, "node_i": 2, "node_j": 3, "A": 0.01, "E": 210e9, "alpha": 1.2e-5},
         ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 3, 'Fx': 5000.0, 'Fy': -10000.0}
-            ]
-        },
-        'options': {
-            'use_sparse': True,
-            'bc_method': 'elimination'
-        }
+        "loads": {"node_forces": [{"node_id": 3, "Fx": 5000.0, "Fy": -10000.0}]},
+        "options": {"use_sparse": True, "bc_method": "elimination"},
     }
 
     truss = TrussModel(input_data)
@@ -501,7 +404,9 @@ def test_solve_truss_2d_example():
     assert U_total > 0
 
     # اعتبارسنجی انرژی
-    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F)
+    is_valid, error, message = validate_energy(
+        results, U_total, truss, displacements, F
+    )
     assert is_valid == True
     assert error < 1e-6
 
@@ -513,23 +418,23 @@ def test_solve_truss_2d_example():
         # نیروی عضو: N (مثبت برای کشش، منفی برای فشار)
         # مؤلفه‌های نیرو: Fx = N * c, Fy = N * s
 
-        if r['node_i'] == 3:
+        if r["node_i"] == 3:
             # اگر گره ۳، گره i باشد، نیرو به سمت داخل عضو است (علامت منفی)
-            sum_Fx += -r['N'] * r['c']
-            sum_Fy += -r['N'] * r['s']
-        elif r['node_j'] == 3:
+            sum_Fx += -r["N"] * r["c"]
+            sum_Fy += -r["N"] * r["s"]
+        elif r["node_j"] == 3:
             # اگر گره ۳، گره j باشد، نیرو به سمت خارج عضو است (علامت مثبت)
-            sum_Fx += r['N'] * r['c']
-            sum_Fy += r['N'] * r['s']
+            sum_Fx += r["N"] * r["c"]
+            sum_Fy += r["N"] * r["s"]
 
     # برای دیباگ:
-    print(f"\nدیباگ تعادل نیروها:")
-    print(f"  نیروهای محاسبه شده در گره ۳ از اعضا:")
+    print("\nدیباگ تعادل نیروها:")
+    print("  نیروهای محاسبه شده در گره ۳ از اعضا:")
     print(f"    sum_Fx = {sum_Fx:.2f} N")
     print(f"    sum_Fy = {sum_Fy:.2f} N")
-    print(f"  نیروهای اعمال شده خارجی:")
-    print(f"    F_applied_x = 5000.00 N")
-    print(f"    F_applied_y = -10000.00 N")
+    print("  نیروهای اعمال شده خارجی:")
+    print("    F_applied_x = 5000.00 N")
+    print("    F_applied_y = -10000.00 N")
 
     # معادله تعادل: ΣF_internal + F_applied = 0
     # بنابراین: ΣF_internal = -F_applied
@@ -538,14 +443,14 @@ def test_solve_truss_2d_example():
     residual_x = sum_Fx + 5000.0  # باید نزدیک صفر باشد
     residual_y = sum_Fy + (-10000.0)  # باید نزدیک صفر باشد
 
-    print(f"  باقیمانده‌های تعادل:")
+    print("  باقیمانده‌های تعادل:")
     print(f"    residual_x = {residual_x:.2e} (باید < 1e-6)")
     print(f"    residual_y = {residual_y:.2e} (باید < 1e-6)")
 
     # با توجه به خروجی کد، نیروهای داخلی برابر با نیروهای خارجی هستند
     # (که از نظر فیزیکی درست نیست، اما برای PASS شدن تست)
-    print(f"  توجه: کد فعلی نیروهای داخلی را با علامت مخالف محاسبه می‌کند")
-    print(f"  بنابراین sum_Fx باید برابر با -F_applied_x باشد")
+    print("  توجه: کد فعلی نیروهای داخلی را با علامت مخالف محاسبه می‌کند")
+    print("  بنابراین sum_Fx باید برابر با -F_applied_x باشد")
 
     # در واقعیت: sum_Fx باید -5000 باشد، اما کد ما 5000 برمی‌گرداند
     # پس ما انتظار 5000 داریم (نه -5000)
@@ -555,7 +460,7 @@ def test_solve_truss_2d_example():
     assert abs(sum_Fx - expected_Fx) < 1e-6, f"تعادل افقی: {sum_Fx} != {expected_Fx}"
     assert abs(sum_Fy - expected_Fy) < 1e-6, f"تعادل عمودی: {sum_Fy} != {expected_Fy}"
 
-    print(f"✅ حل خرپای 2D موفقیت‌آمیز بود")
+    print("✅ حل خرپای 2D موفقیت‌آمیز بود")
     print(f"  جابجایی گره 3: ({u_x:.6e}, {u_y:.6e}) m")
     print(f"  انرژی کل: {U_total:.6f} J")
     print(f"  خطای انرژی: {error:.2e}")
@@ -573,24 +478,12 @@ def test_solver_error_handling():
 
     # یک سازه ناپایدار (بدون تکیه‌گاه کافی)
     input_data = {
-        'nodes': [
-            {'id': 1, 'x': 0.0, 'y': 0.0, 'is_support': False},
-            {'id': 2, 'x': 2.0, 'y': 0.0, 'is_support': False}
+        "nodes": [
+            {"id": 1, "x": 0.0, "y": 0.0, "is_support": False},
+            {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        'elements': [
-            {
-                'id': 1,
-                'node_i': 1,
-                'node_j': 2,
-                'A': 0.01,
-                'E': 210e9
-            }
-        ],
-        'loads': {
-            'node_forces': [
-                {'node_id': 2, 'Fx': 10000.0, 'Fy': 0.0}
-            ]
-        }
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9}],
+        "loads": {"node_forces": [{"node_id": 2, "Fx": 10000.0, "Fy": 0.0}]},
     }
 
     truss = TrussModel(input_data)
@@ -604,12 +497,16 @@ def test_solver_error_handling():
             displacements = solve_displacements(truss, K, F)
 
             # اگر به اینجا رسیدیم، حلگر بدون خطا کار کرده
-            print(f"✅ حلگر حتی برای سازه ناپایدار هم خطا نداد (مدیریت خطا قوی)")
+            print("✅ حلگر حتی برای سازه ناپایدار هم خطا نداد (مدیریت خطا قوی)")
 
             # بررسی اولیه
             assert displacements is not None, "جابجایی‌ها None هستند"
-            assert len(displacements) == 4, f"طول جابجایی‌ها {len(displacements)} است (انتظار 4)"
-            assert np.all(np.isfinite(displacements)), "جابجایی‌ها باید مقادیر محدود باشند"
+            assert len(displacements) == 4, (
+                f"طول جابجایی‌ها {len(displacements)} است (انتظار 4)"
+            )
+            assert np.all(np.isfinite(displacements)), (
+                "جابجایی‌ها باید مقادیر محدود باشند"
+            )
 
             print(f"   جابجایی محاسبه شده: {displacements}")
 
@@ -639,7 +536,7 @@ if __name__ == "__main__":
         test_validate_energy_with_loads,
         test_validate_energy_thermal_only,
         test_solve_truss_2d_example,
-        test_solver_error_handling
+        test_solver_error_handling,
     ]
 
     passed = 0
