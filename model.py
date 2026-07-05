@@ -6,10 +6,10 @@ from constants import DEFAULT_ALPHA
 
 import numpy as np
 from typing import Dict, List, Tuple, Optional
-import logging
 
 # ایمپورت از فایل جدید utils
 from utils import validate_units, convert_to_si
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class Element:
         alpha: float = DEFAULT_ALPHA,
         delta_T: float = 0.0,
         delta_L0: float = 0.0,
-        I: Optional[float] = None,
+        I: Optional[float] = None,  # noqa: E741
         effective_length_factor: float = 1.0,
         section_type: str = "general",
         **kwargs,

@@ -6,10 +6,12 @@ import csv
 import numpy as np
 from typing import Dict, List
 import os
-import logging
 from model import TrussModel
 import json
 from exceptions import InputDataError
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def load_json(filepath: str) -> dict:
@@ -183,9 +185,6 @@ def format_with_units(value: float, units: str, quantity_type: str) -> str:
         return f"{value_in_target:.4e} {unit_label}"
 
 
-logger = logging.getLogger(__name__)
-
-
 def parse_input(input_data: Dict) -> Dict:
     """
     تجزیه و اعتبارسنجی داده‌های ورودی
@@ -271,18 +270,6 @@ def parse_input(input_data: Dict) -> Dict:
                 raise ValueError(f"بار روی گره {node_id} که وجود ندارد.")
 
     return input_data
-
-
-def validate_units(units: str) -> str:
-    """
-    اعتبارسنجی واحدها با ارسال خطا در صورت نامعتبر بودن
-    """
-    valid_units = ["SI", "Imperial", "SI-mm", "SI-cm"]
-    if units not in valid_units:
-        error_msg = f"واحد نامعتبر: '{units}'. واحدهای مجاز: {', '.join(valid_units)}"
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-    return units
 
 
 def convert_units(

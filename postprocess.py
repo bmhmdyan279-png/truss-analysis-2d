@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 from typing import List, Dict, Tuple
 import os
 import warnings
-import logging
 from model import TrussModel
+import logging
 
 logger = logging.getLogger(__name__)
 

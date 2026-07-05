@@ -1,7 +1,3 @@
-import logging
-
-logger = logging.getLogger(__name__)
-
 """
 مونتاژ ماتریس‌های سراسری بهینه‌شده
 """
@@ -9,6 +5,9 @@ logger = logging.getLogger(__name__)
 import numpy as np
 from scipy import sparse
 from model import TrussModel, Element
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_element_stiffness(element: Element) -> np.ndarray:

@@ -10,8 +10,10 @@ import json
 import sys
 import traceback
 import time
-import logging
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 # تنظیم logging
 logging.basicConfig(
@@ -22,7 +24,6 @@ logging.basicConfig(
         logging.StreamHandler(),
     ],
 )
-logger = logging.getLogger(__name__)
 
 
 def sanity_check(truss):
@@ -59,7 +60,7 @@ def sanity_check(truss):
 
 
 try:
-    from fileio import parse_input, validate_units, write_output
+    from fileio import validate_units, write_output
     from model import TrussModel
     from assembly import build_global_matrices
     from solver import (

@@ -1,7 +1,3 @@
-import logging
-
-logger = logging.getLogger(__name__)
-
 """
 حلگر معادلات و محاسبه نتایج - نسخه نهایی با اصلاح اعتبارسنجی انرژی
 """
@@ -11,7 +7,10 @@ from typing import Dict, List
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from model import TrussModel
-from constants import TOLERANCES
+from constants import TOLERANCES, ZERO_LENGTH_TOLERANCE
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
