@@ -17,6 +17,9 @@ TOLERANCES = {
     "energy": 1e-6,  # دقت انرژی
     "force_balance": 1e-3,  # دقت تعادل نیرو
     "singular": 1e-12,  # تشخیص ماتریس منفرد
+    "DEFAULT_ALPHA" : 1.2e-5,
+    "ZERO_LENGTH_TOLERANCE" : 1e-12
+
 }
 
 # تبدیل واحدها
