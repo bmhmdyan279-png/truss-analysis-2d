@@ -2,8 +2,8 @@
 فایل پیکربندی pytest برای تست‌های خرپا
 """
 
-import sys
 import os
+import sys
 
 # اضافه کردن مسیر پوشه والد به sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

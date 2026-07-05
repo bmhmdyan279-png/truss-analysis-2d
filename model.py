@@ -1,15 +1,16 @@
-from constants import DEFAULT_ALPHA
+from constants import DEFAULT_ALPHA  # noqa: E402
 
 """
 مدل‌سازی خرپا - نسخه نهایی کامل
 """
 
-import numpy as np
-from typing import Dict, List, Tuple, Optional
+import logging  # noqa: E402
+from typing import Dict, List, Optional, Tuple  # noqa: E402
+
+import numpy as np  # noqa: E402
 
 # ایمپورت از فایل جدید utils
-from utils import validate_units, convert_to_si
-import logging
+from utils import convert_to_si, validate_units  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ class TrussModel:
         # ایجاد نگاشت DOFها
         self.dof_map = {}
         dof_index = 0
-        for id, node in sorted(self.nodes.items()):
+        for id, _node in sorted(self.nodes.items()):
             self.dof_map[id] = (dof_index, dof_index + 1)
             dof_index += 2
 

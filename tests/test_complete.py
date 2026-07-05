@@ -2,17 +2,18 @@
 تست‌های کامل تحلیلگر خرپا - نسخه نهایی بدون shortcuts
 """
 
-import pytest
-import numpy as np
 import os
 import sys
+
+import numpy as np
+import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # اضافه کردن مسیر پوشه والد برای import کردن ماژول‌ها
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model import TrussModel, Node, Element  # اضافه کردن Node و Element
+from model import Element, Node, TrussModel  # اضافه کردن Node و Element
 
 
 class TestNode:

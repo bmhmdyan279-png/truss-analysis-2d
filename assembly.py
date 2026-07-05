@@ -2,10 +2,12 @@
 مونتاژ ماتریس‌های سراسری بهینه‌شده
 """
 
+import logging
+
 import numpy as np
 from scipy import sparse
-from model import TrussModel, Element
-import logging
+
+from model import Element, TrussModel
 
 logger = logging.getLogger(__name__)
 

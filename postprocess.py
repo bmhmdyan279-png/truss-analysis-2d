@@ -2,16 +2,18 @@
 پس‌پردازش و تولید گزارش - نسخه کامل و نهایی
 """
 
-import numpy as np
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")  # استفاده از backend غیرتعاملی
-import matplotlib.pyplot as plt
-from typing import List, Dict, Tuple
+import logging
 import os
 import warnings
+from typing import Dict, List, Tuple
+
+import matplotlib.pyplot as plt
+
 from model import TrussModel
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +109,7 @@ def sort_elements(
         # مرتب‌سازی با توجه به کلید
         sorted_results.sort(key=get_sort_key, reverse=descending)
     except Exception as e:
-        raise ValueError(f"خطا در مرتب‌سازی بر اساس معیار '{by}': {str(e)}")
+        raise ValueError(f"خطا در مرتب‌سازی بر اساس معیار '{by}': {str(e)}")  # noqa: B904
 
     return sorted_results
 
@@ -196,7 +198,10 @@ def calculate_displacement_scale_factor(truss: TrussModel) -> float:
             return scale_factor
 
     except Exception as e:
-        warnings.warn(f"خطا در محاسبه ضریب بزرگنمایی: {e}. استفاده از ضریب پیش‌فرض 50.")
+        warnings.warn(
+            f"خطا در محاسبه ضریب بزرگنمایی: {e}. استفاده از ضریب پیش‌فرض 50.",
+            stacklevel=2,
+        )
         return 50.0
 
 

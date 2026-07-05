@@ -2,22 +2,23 @@
 تست مونتاژ ماتریس‌های سراسری - نسخه کامل
 """
 
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # اضافه کردن مسیر پروژه به sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model import TrussModel
 from assembly import (
     build_global_matrices,
     calculate_element_stiffness,
     calculate_element_thermal_force,
     get_reduced_system,
 )
+from model import TrussModel
 
 
 def test_calculate_element_stiffness():

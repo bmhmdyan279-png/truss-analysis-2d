@@ -2,14 +2,14 @@
 تست مرجع ساده‌شده
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model import TrussModel
 from assembly import build_global_matrices
-from solver import solve_displacements, calculate_element_results
+from model import TrussModel
+from solver import calculate_element_results, solve_displacements
 
 
 def test_golden_reference():

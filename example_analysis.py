@@ -2,9 +2,9 @@ import sys
 
 sys.path.append(".")
 
-from model import TrussModel
 from assembly import build_global_matrices
-from solver import solve_displacements, calculate_element_results
+from model import TrussModel
+from solver import calculate_element_results, solve_displacements
 
 # مثال: خرپای ساده مثلثی
 input_data = {

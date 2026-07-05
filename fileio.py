@@ -3,27 +3,29 @@
 """
 
 import csv
-import numpy as np
-from typing import Dict, List
-import os
-from model import TrussModel
 import json
-from exceptions import InputDataError
 import logging
+import os
+from typing import Dict, List
+
+import numpy as np
+
+from exceptions import InputDataError
+from model import TrussModel
 
 logger = logging.getLogger(__name__)
 
 
 def load_json(filepath: str) -> dict:
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
         logger.error(f"فایل یافت نشد: {filepath}")
-        raise InputDataError(f"فایل {filepath} وجود ندارد.")
+        raise InputDataError(f"فایل {filepath} وجود ندارد.")  # noqa: B904
     except json.JSONDecodeError as e:
         logger.error(f"خطای parsing در فایل {filepath}: {e}")
-        raise InputDataError("فرمت JSON فایل ورودی نامعتبر است.")
+        raise InputDataError("فرمت JSON فایل ورودی نامعتبر است.")  # noqa: B904
 
 
 UNIT_CONVERSION = {
@@ -214,7 +216,7 @@ def parse_input(input_data: Dict) -> Dict:
             float(node["x"])
             float(node["y"])
         except (ValueError, TypeError):
-            raise ValueError(f"گره {node_id} دارای مختصات نامعتبر است.")
+            raise ValueError(f"گره {node_id} دارای مختصات نامعتبر است.")  # noqa: B904
 
     # اعتبارسنجی اعضا
     element_ids = set()
@@ -248,7 +250,7 @@ def parse_input(input_data: Dict) -> Dict:
             if E <= 0:
                 raise ValueError(f"عضو {element_id}: مدول الاستیسیته باید مثبت باشد.")
         except (ValueError, TypeError):
-            raise ValueError(f"عضو {element_id}: مقادیر A یا E نامعتبر هستند.")
+            raise ValueError(f"عضو {element_id}: مقادیر A یا E نامعتبر هستند.")  # noqa: B904
 
         # بررسی I (اختیاری)
         if "I" in element and element["I"] is not None:
@@ -259,7 +261,7 @@ def parse_input(input_data: Dict) -> Dict:
                         f"عضو {element_id}: ممان اینرسی نمی‌تواند منفی باشد."
                     )
             except (ValueError, TypeError):
-                raise ValueError(f"عضو {element_id}: ممان اینرسی نامعتبر است.")
+                raise ValueError(f"عضو {element_id}: ممان اینرسی نامعتبر است.")  # noqa: B904
 
     # اعتبارسنجی بارها
     if "loads" in input_data:

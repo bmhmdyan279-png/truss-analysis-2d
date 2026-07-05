@@ -2,18 +2,19 @@
 تست حلگر معادلات - نسخه اصلاح شده با tolerance مناسب
 """
 
-import numpy as np
-import sys
 import os
+import sys
+
+import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model import TrussModel
 from assembly import build_global_matrices
+from model import TrussModel
 from solver import (
-    solve_displacements,
     calculate_element_results,
     calculate_total_energy,
+    solve_displacements,
     validate_energy,
 )
 
@@ -105,9 +106,9 @@ def test_solve_displacements_penalty():
     # خطای 0.2% برای روش پنالتی قابل قبول است
     tolerance = 0.002  # 0.2%
 
-    assert rel_error < tolerance, (
-        f"خطای {rel_error:.2%} بیشتر از tolerance {tolerance:.2%} است"
-    )
+    assert (
+        rel_error < tolerance
+    ), f"خطای {rel_error:.2%} بیشتر از tolerance {tolerance:.2%} است"
 
     # همچنین بررسی کنیم که جابجایی مثبت باشد (کشش)
     assert u_x > 0, f"جابجایی باید مثبت باشد: {u_x}"
@@ -226,9 +227,9 @@ def test_calculate_element_results_with_buckling():
 
     # اگر نسبت > 0.8 باشد، باید هشدار داده شود
     if buckling_ratio > 0.8:
-        assert element_result["buckling_warning"] == True
+        assert element_result["buckling_warning"] is True
     else:
-        assert element_result["buckling_warning"] == False
+        assert element_result["buckling_warning"] is False
 
     print("✅ نتایج کمانش محاسبه شد")
     print(f"  بار بحرانی: {element_result['P_cr']:.2f} N")
@@ -311,7 +312,7 @@ def test_validate_energy_with_loads():
     )
 
     # با بار خارجی، خطا باید بسیار کوچک باشد
-    assert is_valid == True
+    assert is_valid is True
     assert error < 1e-6
 
     print("✅ اعتبارسنجی انرژی (با بار) موفق بود")
@@ -407,7 +408,7 @@ def test_solve_truss_2d_example():
     is_valid, error, message = validate_energy(
         results, U_total, truss, displacements, F
     )
-    assert is_valid == True
+    assert is_valid is True
     assert error < 1e-6
 
     # محاسبه درست نیروهای وارد بر گره ۳
@@ -470,6 +471,7 @@ def test_solve_truss_2d_example():
 def test_solver_error_handling():
     """تست مدیریت خطاهای حلگر - نسخه نهایی بدون return"""
     import warnings
+
     from scipy.sparse.linalg import MatrixRankWarning
 
     print("\n" + "=" * 60)
@@ -501,12 +503,12 @@ def test_solver_error_handling():
 
             # بررسی اولیه
             assert displacements is not None, "جابجایی‌ها None هستند"
-            assert len(displacements) == 4, (
-                f"طول جابجایی‌ها {len(displacements)} است (انتظار 4)"
-            )
-            assert np.all(np.isfinite(displacements)), (
-                "جابجایی‌ها باید مقادیر محدود باشند"
-            )
+            assert (
+                len(displacements) == 4
+            ), f"طول جابجایی‌ها {len(displacements)} است (انتظار 4)"
+            assert np.all(
+                np.isfinite(displacements)
+            ), "جابجایی‌ها باید مقادیر محدود باشند"
 
             print(f"   جابجایی محاسبه شده: {displacements}")
 

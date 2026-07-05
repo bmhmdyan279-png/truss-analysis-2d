@@ -2,16 +2,17 @@
 تست تحلیل یک عضو منفرد - برای بررسی صحت محاسبات پایه
 """
 
-import pytest
-import sys
 import os
+import sys
+
+import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from model import TrussModel
 from assembly import build_global_matrices
-from solver import solve_displacements, calculate_element_results
+from model import TrussModel
+from solver import calculate_element_results, solve_displacements
 
 
 def test_single_element_tension():

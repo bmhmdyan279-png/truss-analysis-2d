@@ -1,17 +1,17 @@
-from constants import ZERO_LENGTH_TOLERANCE
+from constants import ZERO_LENGTH_TOLERANCE  # noqa: E402
 
 #!/usr/bin/env python3
 """
 تحلیلگر خرپای 2D با اثرات حرارتی و خطای ساخت - نسخه نهایی
 """
 
-import argparse
-import json
-import sys
-import traceback
-import time
-import os
-import logging
+import argparse  # noqa: E402
+import json  # noqa: E402
+import logging  # noqa: E402
+import os  # noqa: E402
+import sys  # noqa: E402
+import time  # noqa: E402
+import traceback  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -60,21 +60,21 @@ def sanity_check(truss):
 
 
 try:
+    from assembly import build_global_matrices
     from fileio import validate_units, write_output
     from model import TrussModel
-    from assembly import build_global_matrices
-    from solver import (
-        solve_displacements,
-        calculate_element_results,
-        calculate_total_energy,
-        validate_energy,
-    )
     from postprocess import (
-        sort_elements,
         calculate_percentages,
         generate_plots,
         generate_report,
         save_report_to_markdown,
+        sort_elements,
+    )
+    from solver import (
+        calculate_element_results,
+        calculate_total_energy,
+        solve_displacements,
+        validate_energy,
     )
 
     HAS_DEPENDENCIES = True
@@ -110,7 +110,7 @@ def run_analysis(
 
         # خواندن ورودی
         logger.info(f"📖 خواندن فایل ورودی: {input_file}")
-        with open(input_file, "r", encoding="utf-8") as f:
+        with open(input_file, encoding="utf-8") as f:
             input_data = json.load(f)
 
         # ذخیره نام فایل ورودی برای گزارش
