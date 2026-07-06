@@ -30,7 +30,9 @@ class Node:
             self.dofs = dof_map[self.id]
 
     def __repr__(self):
-        return f"Node({self.id}, ({self.x:.3f}, {self.y:.3f}), support={self.is_support})"
+        return (
+            f"Node({self.id}, ({self.x:.3f}, {self.y:.3f}), support={self.is_support})"
+        )
 
 
 class Element:
@@ -194,7 +196,9 @@ class TrussModel:
                 delta_T=delta_T_total,
                 delta_L0=float(element_data.get("delta_L0", 0.0)),
                 I=element_data.get("I"),
-                effective_length_factor=float(element_data.get("effective_length_factor", 1.0)),
+                effective_length_factor=float(
+                    element_data.get("effective_length_factor", 1.0)
+                ),
                 section_type=element_data.get("section_type", "general"),
             )
             elements[element.id] = element
@@ -207,7 +211,9 @@ class TrussModel:
             for i, load_data in enumerate(loads_data["node_forces"]):
                 loads.append(
                     {
-                        "id": load_data.get("id", load_data.get("node_id", i + 1)),  # انعطاف‌پذیر
+                        "id": load_data.get(
+                            "id", load_data.get("node_id", i + 1)
+                        ),  # انعطاف‌پذیر
                         "node_id": load_data.get("node_id"),  # اضافه کردن node_id
                         "Fx": float(load_data.get("Fx", 0.0)),
                         "Fy": float(load_data.get("Fy", 0.0)),
