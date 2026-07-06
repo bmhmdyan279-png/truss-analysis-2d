@@ -1,10 +1,34 @@
-# تحلیلگر خرپای دوبعدی با اثرات حرارتی، خطای ساخت و کمانش
+<div dir="rtl" align="center">
 
-![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)
-![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Tests](https://img.shields.io/badge/tests-65%20passed-brightgreen)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)
+# 🏗️ تحلیلگر خرپای دوبعدی با اثرات حرارتی، خطای ساخت و کمانش
+
+[![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-65%20passed-brightgreen)](#تستها-و-اعتبارسنجی)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#)
+
+</div>
+
+---
+
+<div dir="rtl">
+
+## 📋 فهرست مطالب
+
+- [معرفی](#معرفی)
+- [ویژگی‌های کلیدی](#ویژگیهای-کلیدی)
+- [شروع سریع (۵ دقیقه)](#شروع-سریع-۵-دقیقه)
+- [مبانی تئوری](#مبانی-تئوری)
+- [مثال‌های کاربردی](#مثالهای-کاربردی)
+- [معماری کد](#معماری-کد)
+- [تست‌ها و اعتبارسنجی](#تستها-و-اعتبارسنجی)
+- [خروجی‌های گرافیکی](#خروجیهای-گرافیکی)
+- [عیب‌یابی](#عیبیابی)
+- [مقایسه با ابزارهای دیگر](#مقایسه-با-ابزارهای-دیگر)
+- [مشارکت](#مشارکت)
+- [مجوز](#مجوز)
+- [توجه ایمنی](#توجه-ایمنی)
 
 ---
 
@@ -36,6 +60,7 @@
 ## 🚀 شروع سریع (۵ دقیقه)
 
 ### پیش‌نیازها
+
 - Python 3.8 یا بالاتر
 - pip
 
@@ -223,7 +248,7 @@ pytest tests/ -v
 ### پوشش تست
 
 | فایل تست | تعداد تست | هدف |
-|----------|-----------|------|
+|----------|:-----------:|------|
 | `test_model.py` | ۱۲ | ساخت Node, Element, TrussModel |
 | `test_assembly.py` | ۸ | مونتاژ ماتریس‌ها |
 | `test_solver.py` | ۵ | حل دستگاه معادلات |
@@ -267,7 +292,7 @@ pytest tests/ -v
 
 ## 📊 مقایسه با ابزارهای دیگر
 
-| ویژگی | این پروژه | ANSYS | SAP2000 | پروژه‌های مشابه متن‌باز |
+| ویژگی | این پروژه | ANSYS | SAP2000 | پروژه‌های متن‌باز مشابه |
 |--------|:---:|:---:|:---:|:---:|
 | متن‌باز | ✅ | ❌ | ❌ | ✅ |
 | کد کاملاً شفاف | ✅ | ❌ | ❌ | ⚠️ (وابسته) |
@@ -290,6 +315,7 @@ pytest tests/ -v
 5. یک Pull Request ایجاد کنید.
 
 ### راهنمای کدنویسی
+
 - از `ruff` برای linting استفاده کنید.
 - قبل از ارسال PR، تمام تست‌ها را اجرا کنید: `pytest`
 - توابع عمومی باید دارای docstring باشند.
@@ -303,3 +329,6 @@ pytest tests/ -v
 ## ⚠️ توجه ایمنی
 
 این نرم‌افزار برای **آموزش، تحقیق و نمونه‌سازی اولیه** طراحی شده است. برای طراحی سازه‌های واقعی و پروژه‌های حساس، نتایج را حتماً با نرم‌افزارهای تخصصی (مانند ANSYS یا SAP2000) صحه‌گذاری کنید و با مهندس سازه ذی‌صلاح مشورت نمایید.
+
+</div>
+```
