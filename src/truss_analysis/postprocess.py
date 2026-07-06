@@ -28,7 +28,9 @@ from .model import TrussModel
 logger = logging.getLogger(__name__)
 
 
-def sort_elements(results: List[Dict], by: str = "energy", descending: bool = True) -> List[Dict]:
+def sort_elements(
+    results: List[Dict], by: str = "energy", descending: bool = True
+) -> List[Dict]:
     """
     مرتب‌سازی اعضا بر اساس معیار مشخص - نسخه بهبودیافته
     """
@@ -74,7 +76,9 @@ def sort_elements(results: List[Dict], by: str = "energy", descending: bool = Tr
     elif by == "status":
         key = "status"
     else:
-        raise ValueError(f"معیار مرتب‌سازی نامعتبر: '{by}'. معیارهای مجاز: {', '.join(valid_keys)}")
+        raise ValueError(
+            f"معیار مرتب‌سازی نامعتبر: '{by}'. معیارهای مجاز: {', '.join(valid_keys)}"
+        )
 
     # تابع کمکی برای مدیریت مقادیر None و مقایسه ایمن
     def get_sort_key(x: Dict) -> Tuple:
@@ -99,10 +103,7 @@ def sort_elements(results: List[Dict], by: str = "energy", descending: bool = Tr
                 return (1, float("inf"))
 
         # برای اعداد
-        if isinstance(val, (int, float, np.number)):
-            return (0, val)
-        # برای رشته‌ها
-        elif isinstance(val, str):
+        if isinstance(val, (int, float, np.number)) or isinstance(val, str):
             return (0, val)
         # برای سایر انواع
         else:
@@ -211,7 +212,9 @@ def calculate_displacement_scale_factor(truss: TrussModel) -> float:
         return 50.0
 
 
-def calculate_displacement_statistics(truss: TrussModel, displacements: np.ndarray) -> Dict:
+def calculate_displacement_statistics(
+    truss: TrussModel, displacements: np.ndarray
+) -> Dict:
     """
     محاسبه آمار جابجایی‌ها
     """
@@ -238,7 +241,12 @@ def calculate_displacement_statistics(truss: TrussModel, displacements: np.ndarr
         dof_x, dof_y = node.dofs
 
         # بررسی محدوده DOFها
-        if dof_x >= len(displacements) or dof_y >= len(displacements) or dof_x < 0 or dof_y < 0:
+        if (
+            dof_x >= len(displacements)
+            or dof_y >= len(displacements)
+            or dof_x < 0
+            or dof_y < 0
+        ):
             continue
 
         u_x = displacements[dof_x]
@@ -314,7 +322,9 @@ def calculate_buckling_statistics(results: List[Dict]) -> Dict:
                             "nodes": f"{r.get('node_i', '?')}-{r.get('node_j', '?')}",
                             "buckling_ratio": float(ratio),
                             "force": float(r.get("N", 0)),
-                            "critical_load": float(r.get("P_cr", 0)) if r.get("P_cr") is not None else None,
+                            "critical_load": float(r.get("P_cr", 0))
+                            if r.get("P_cr") is not None
+                            else None,
                             "status": r.get("status", "Unknown"),
                         }
 
@@ -327,7 +337,9 @@ def calculate_buckling_statistics(results: List[Dict]) -> Dict:
     stats["warning_count"] = len(stats["warnings"])
 
     # مرتب‌سازی عناصر بحرانی بر اساس نسبت کمانش
-    stats["critical_elements"].sort(key=lambda x: x.get("buckling_ratio", 0), reverse=True)
+    stats["critical_elements"].sort(
+        key=lambda x: x.get("buckling_ratio", 0), reverse=True
+    )
     stats["warnings"].sort(key=lambda x: x.get("buckling_ratio", 0), reverse=True)
 
     return stats
@@ -531,7 +543,9 @@ def generate_plots(
                     autotext.set_fontweight("bold")
                     autotext.set_fontsize(8)
 
-                ax2.set_title("توزیع انرژی کرنشی بین اعضا", fontsize=14, fontweight="bold")
+                ax2.set_title(
+                    "توزیع انرژی کرنشی بین اعضا", fontsize=14, fontweight="bold"
+                )
 
                 # راهنمای رنگ‌ها
                 from matplotlib.patches import Patch  # type: ignore
@@ -567,7 +581,9 @@ def generate_plots(
     return plot_files
 
 
-def generate_report(truss: TrussModel, displacements: np.ndarray, results: List[Dict], units: str = "SI") -> Dict:
+def generate_report(
+    truss: TrussModel, displacements: np.ndarray, results: List[Dict], units: str = "SI"
+) -> Dict:
     """
     تولید گزارش کامل تحلیل
     """
@@ -591,7 +607,9 @@ def generate_report(truss: TrussModel, displacements: np.ndarray, results: List[
         compression_count = sum(1 for r in results if r.get("status") == "Compression")
 
         # نیروهای حداکثر
-        max_tension = max([r.get("N", 0) for r in results if r.get("status") == "Tension"], default=0)
+        max_tension = max(
+            [r.get("N", 0) for r in results if r.get("status") == "Tension"], default=0
+        )
         max_compression = min(
             [r.get("N", 0) for r in results if r.get("status") == "Compression"],
             default=0,
@@ -621,7 +639,9 @@ def generate_report(truss: TrussModel, displacements: np.ndarray, results: List[
             "supported_nodes": len(truss.supported_nodes),
             "total_elements": len(truss.elements),
             "boundary_condition_method": truss.options.get("bc_method", "elimination"),
-            "solver_type": "sparse" if truss.options.get("use_sparse", True) else "dense",
+            "solver_type": "sparse"
+            if truss.options.get("use_sparse", True)
+            else "dense",
             "global_temperature_change": truss.global_delta_T,
         },
         "energy_statistics": {
@@ -644,17 +664,27 @@ def generate_report(truss: TrussModel, displacements: np.ndarray, results: List[
             "tension_elements": tension_count,
             "compression_elements": compression_count,
             "tension_percentage": 100 * tension_count / len(results) if results else 0,
-            "compression_percentage": 100 * compression_count / len(results) if results else 0,
+            "compression_percentage": 100 * compression_count / len(results)
+            if results
+            else 0,
             "max_tensile_force": float(max_tension),
             "max_compressive_force": float(max_compression),
         },
         "displacement_statistics": disp_stats,
         "buckling_analysis": buckling_stats,
         "thermal_effects": {
-            "elements_with_delta_T": sum(1 for e in truss.elements.values() if e.delta_T != 0),
-            "elements_with_delta_L0": sum(1 for e in truss.elements.values() if e.delta_L0 != 0),
-            "max_delta_T": max([abs(e.delta_T) for e in truss.elements.values()], default=0),
-            "max_delta_L0": max([abs(e.delta_L0) for e in truss.elements.values()], default=0),
+            "elements_with_delta_T": sum(
+                1 for e in truss.elements.values() if e.delta_T != 0
+            ),
+            "elements_with_delta_L0": sum(
+                1 for e in truss.elements.values() if e.delta_L0 != 0
+            ),
+            "max_delta_T": max(
+                [abs(e.delta_T) for e in truss.elements.values()], default=0
+            ),
+            "max_delta_L0": max(
+                [abs(e.delta_L0) for e in truss.elements.values()], default=0
+            ),
         },
         "validation": {
             "sign_convention_valid": True,
@@ -678,7 +708,9 @@ def save_report_to_markdown(report: Dict, filepath: str):
             f.write("# گزارش تحلیل خرپا\n\n")
             f.write(f"**تاریخ تحلیل:** {report['metadata']['analysis_date']}\n")
             f.write(f"**واحدها:** {report['metadata']['units']}\n")
-            f.write(f"**روش شرایط مرزی:** {report['metadata']['boundary_condition_method']}\n\n")
+            f.write(
+                f"**روش شرایط مرزی:** {report['metadata']['boundary_condition_method']}\n\n"
+            )
 
             # خلاصه اجرا
             f.write("## خلاصه اجرا\n\n")
@@ -686,50 +718,88 @@ def save_report_to_markdown(report: Dict, filepath: str):
             f.write(f"- **گره‌های آزاد:** {report['metadata']['free_nodes']}\n")
             f.write(f"- **تکیه‌گاه‌ها:** {report['metadata']['supported_nodes']}\n")
             f.write(f"- **تعداد اعضا:** {report['metadata']['total_elements']}\n")
-            f.write(f"- **تغییر دمای سراسری:** {report['metadata']['global_temperature_change']} °C\n\n")
+            f.write(
+                f"- **تغییر دمای سراسری:** {report['metadata']['global_temperature_change']} °C\n\n"
+            )
 
             # آمار انرژی
             f.write("## آمار انرژی\n\n")
-            f.write(f"- **انرژی کل کرنشی:** {report['energy_statistics']['total_energy']:.4e} J\n")
+            f.write(
+                f"- **انرژی کل کرنشی:** {report['energy_statistics']['total_energy']:.4e} J\n"
+            )
             elem = report["energy_statistics"]["max_energy_element"]
             if elem["id"] is not None:
-                f.write(f"- **عضو با بیشترین انرژی:** عضو {elem['id']} (گره‌های {elem['nodes']})\n")
+                f.write(
+                    f"- **عضو با بیشترین انرژی:** عضو {elem['id']} (گره‌های {elem['nodes']})\n"
+                )
                 f.write(f"  - انرژی: {elem['energy']:.4e} J\n")
                 f.write(f"  - درصد انرژی کل: {elem['percentage']:.1f}%\n")
                 f.write(f"  - وضعیت: {elem['status']}\n\n")
 
             # آمار نیرو
             f.write("## آمار نیرو\n\n")
-            f.write(f"- **اعضای کششی:** {report['force_distribution']['tension_elements']}\n")
-            f.write(f"- **اعضای فشاری:** {report['force_distribution']['compression_elements']}\n")
-            f.write(f"- **بیشترین نیروی کششی:** {report['force_distribution']['max_tensile_force']:.4e} N\n")
-            f.write(f"- **بیشترین نیروی فشاری:** {report['force_distribution']['max_compressive_force']:.4e} N\n\n")
+            f.write(
+                f"- **اعضای کششی:** {report['force_distribution']['tension_elements']}\n"
+            )
+            f.write(
+                f"- **اعضای فشاری:** {report['force_distribution']['compression_elements']}\n"
+            )
+            f.write(
+                f"- **بیشترین نیروی کششی:** {report['force_distribution']['max_tensile_force']:.4e} N\n"
+            )
+            f.write(
+                f"- **بیشترین نیروی فشاری:** {report['force_distribution']['max_compressive_force']:.4e} N\n\n"
+            )
 
             # آمار جابجایی
             f.write("## آمار جابجایی\n\n")
-            f.write(f"- **بیشترین جابجایی:** {report['displacement_statistics']['max_displacement']:.4e} m\n")
+            f.write(
+                f"- **بیشترین جابجایی:** {report['displacement_statistics']['max_displacement']:.4e} m\n"
+            )
             if report["displacement_statistics"]["max_displacement_node"] is not None:
-                f.write(f"- **گره با بیشترین جابجایی:** {report['displacement_statistics']['max_displacement_node']}\n")
-            f.write(f"- **بیشترین جابجایی در X:** {report['displacement_statistics']['max_x_displacement']:.4e} m\n")
-            f.write(f"- **بیشترین جابجایی در Y:** {report['displacement_statistics']['max_y_displacement']:.4e} m\n")
-            f.write(f"- **میانگین مربعات جابجایی:** {report['displacement_statistics']['rms_displacement']:.4e} m\n\n")
+                f.write(
+                    f"- **گره با بیشترین جابجایی:** {report['displacement_statistics']['max_displacement_node']}\n"
+                )
+            f.write(
+                f"- **بیشترین جابجایی در X:** {report['displacement_statistics']['max_x_displacement']:.4e} m\n"
+            )
+            f.write(
+                f"- **بیشترین جابجایی در Y:** {report['displacement_statistics']['max_y_displacement']:.4e} m\n"
+            )
+            f.write(
+                f"- **میانگین مربعات جابجایی:** {report['displacement_statistics']['rms_displacement']:.4e} m\n\n"
+            )
 
             # تحلیل کمانش
             if report["buckling_analysis"]["elements_with_I"] > 0:
                 f.write("## تحلیل کمانش\n\n")
-                f.write(f"- **اعضای دارای ممان اینرسی:** {report['buckling_analysis']['elements_with_I']}\n")
-                f.write(f"- **اعضای در معرض خطر:** {report['buckling_analysis']['elements_at_risk']}\n")
-                f.write(f"- **تعداد هشدارها:** {report['buckling_analysis']['warning_count']}\n")
-                f.write(f"- **بیشترین نسبت کمانش:** {report['buckling_analysis']['max_buckling_ratio']:.3f}\n\n")
+                f.write(
+                    f"- **اعضای دارای ممان اینرسی:** {report['buckling_analysis']['elements_with_I']}\n"
+                )
+                f.write(
+                    f"- **اعضای در معرض خطر:** {report['buckling_analysis']['elements_at_risk']}\n"
+                )
+                f.write(
+                    f"- **تعداد هشدارها:** {report['buckling_analysis']['warning_count']}\n"
+                )
+                f.write(
+                    f"- **بیشترین نسبت کمانش:** {report['buckling_analysis']['max_buckling_ratio']:.3f}\n\n"
+                )
 
                 if report["buckling_analysis"]["critical_elements"]:
                     f.write("### اعضای بحرانی از نظر کمانش\n\n")
-                    f.write("| عضو | گره‌ها | نسبت کمانش | نیرو (N) | بار بحرانی (N) |\n")
-                    f.write("|-----|--------|------------|----------|----------------|\n")
+                    f.write(
+                        "| عضو | گره‌ها | نسبت کمانش | نیرو (N) | بار بحرانی (N) |\n"
+                    )
+                    f.write(
+                        "|-----|--------|------------|----------|----------------|\n"
+                    )
 
                     for elem in report["buckling_analysis"]["critical_elements"][:5]:
                         f.write(f"| {elem['element_id']} | {elem['nodes']} | ")
-                        f.write(f"{elem['buckling_ratio']:.3f} | {elem['force']:.2e} | ")
+                        f.write(
+                            f"{elem['buckling_ratio']:.3f} | {elem['force']:.2e} | "
+                        )
                         f.write(f"{elem['critical_load']:.2e} |\n")
                     f.write("\n")
 

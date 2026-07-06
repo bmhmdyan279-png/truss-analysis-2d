@@ -43,7 +43,9 @@ UNIT_CONVERSION = {
 
 def validate_units(units: str) -> Dict:
     if units not in UNIT_CONVERSION:
-        raise ValueError(f"واحد نامعتبر: '{units}'. واحدهای مجاز: {', '.join(UNIT_CONVERSION.keys())}")
+        raise ValueError(
+            f"واحد نامعتبر: '{units}'. واحدهای مجاز: {', '.join(UNIT_CONVERSION.keys())}"
+        )
 
     return UNIT_CONVERSION[units]
 
@@ -74,7 +76,9 @@ def format_with_units(value: float, units: str, quantity_type: str) -> str:
     if units not in UNIT_CONVERSION:
         units = "SI"
 
-    value_in_target = convert_from_si(convert_to_si(value, "SI", quantity_type), units, quantity_type)
+    value_in_target = convert_from_si(
+        convert_to_si(value, "SI", quantity_type), units, quantity_type
+    )
     unit_label = UNIT_CONVERSION[units][quantity_type]["label"]
 
     abs_val = abs(value_in_target)

@@ -18,27 +18,21 @@ from truss_analysis.solver import (
 
 
 @pytest.mark.skip(reason="API mismatch - needs rewrite for v1.4.0")
-def test_solve_displacements_penalty():
-    """تست حل جابجایی‌ها با روش penalty"""
+# tests/test_solver.py - اصلاح ساختار ورودی
+def test_solve_displacements_elimination():
+    """تست حل جابجایی‌ها با روش elimination"""
+    # ❌ ساختار اشتباه (dict با کلید string)
+    # "nodes": {"1": {"id": 1, "x": 0, "y": 0}}
+
+    # ✅ ساختار صحیح (list of dicts)
     input_data = {
-        "nodes": {
-            "1": {"id": 1, "x": 0, "y": 0},
-            "2": {"id": 2, "x": 2, "y": 0},
-        },
-        "elements": {
-            "1": {
-                "id": 1,
-                "node_i": 1,
-                "node_j": 2,
-                "E": 200e9,
-                "A": 0.01,
-            }
-        },
-        "supports": {
-            "1": {"ux": True, "uy": True},
-            "2": {"ux": False, "uy": True},
-        },
-        "loads": {"2": {"fx": 10000, "fy": 0}},
+        "units": "SI",
+        "nodes": [
+            {"id": 1, "x": 0, "y": 0, "is_support": True},
+            {"id": 2, "x": 2, "y": 0, "is_support": False},
+        ],
+        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "E": 200e9, "A": 0.01}],
+        "loads": {"node_forces": [{"node_id": 2, "Fx": 10000, "Fy": 0}]},
     }
 
     truss = TrussModel(input_data)
@@ -130,7 +124,9 @@ def test_validate_energy_with_loads():
     results = calculate_element_results(truss, displacements)
     U_total = calculate_total_energy(truss, displacements)
 
-    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F_global)
+    is_valid, error, message = validate_energy(
+        results, U_total, truss, displacements, F_global
+    )
 
     assert is_valid is not None
     print("✅ تست اعتبارسنجی انرژی با بارگذاری پاس شد")
@@ -171,7 +167,9 @@ def test_validate_energy_thermal_only():
     results = calculate_element_results(truss, displacements)
     U_total = calculate_total_energy(truss, displacements)
 
-    is_valid, error, message = validate_energy(results, U_total, truss, displacements, F_global)
+    is_valid, error, message = validate_energy(
+        results, U_total, truss, displacements, F_global
+    )
 
     assert is_valid is not None
     print("✅ تست اعتبارسنجی انرژی (حرارتی خالص) پاس شد")

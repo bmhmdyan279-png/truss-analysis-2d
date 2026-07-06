@@ -104,7 +104,9 @@ def test_single_element_compression():
             {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
             {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9, "alpha": 1.2e-5}],
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9, "alpha": 1.2e-5}
+        ],
         "loads": {"node_forces": [{"node_id": 2, "Fx": -10000.0, "Fy": 0.0}]},
     }
 
@@ -141,7 +143,9 @@ def test_single_element_thermal_expansion():
             {"id": 1, "x": 0.0, "y": 0.0, "is_support": True},
             {"id": 2, "x": 2.0, "y": 0.0, "is_support": False},
         ],
-        "elements": [{"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9, "alpha": 1.2e-5}],
+        "elements": [
+            {"id": 1, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9, "alpha": 1.2e-5}
+        ],
         # بدون بار خارجی
     }
 
@@ -171,7 +175,9 @@ def test_single_element_thermal_expansion():
     print(f"  تغییر طول آزاد انتظاری: {delta_L_free_analytical:.6f} m")
 
     # استفاده از pytest.approx برای مقایسه
-    assert element_result["delta_L_free"] == pytest.approx(delta_L_free_analytical, rel=1e-6)
+    assert element_result["delta_L_free"] == pytest.approx(
+        delta_L_free_analytical, rel=1e-6
+    )
 
     # وقتی یک انتها آزاد است، عضو می‌تواند آزادانه منبسط شود
     # نیرو باید نزدیک به صفر باشد
@@ -309,8 +315,12 @@ def test_single_element_combined():
     print(f"  تغییر طول مؤثر انتظاری: {delta_L_eff_analytical:.6f} m")
 
     # استفاده از pytest.approx برای مقایسه
-    assert element_result["delta_L_free"] == pytest.approx(delta_L_free_analytical, rel=1e-6)
-    assert element_result["delta_L_eff"] == pytest.approx(delta_L_eff_analytical, rel=1e-6)
+    assert element_result["delta_L_free"] == pytest.approx(
+        delta_L_free_analytical, rel=1e-6
+    )
+    assert element_result["delta_L_eff"] == pytest.approx(
+        delta_L_eff_analytical, rel=1e-6
+    )
 
     print("✅ تست یک عضو با ترکیب اثرات با موفقیت گذشت")
 

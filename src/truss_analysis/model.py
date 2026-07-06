@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Node:
+<<<<<<< HEAD
     """کلاس گره"""
     id: int
     x: float
@@ -21,6 +22,25 @@ class Node:
             raise TypeError(f"Node ID must be int, got {type(self.id).__name__}")
         if self.id <= 0:
             raise ValueError(f"Node ID must be positive, got {self.id}")
+=======
+    def __init__(self, id, x, y, is_support=False):
+        self.id = id
+        self.x = x
+        self.y = y
+        self.is_support = is_support
+        self.dofs = None
+        self.displacement = np.array([0.0, 0.0])
+
+    def set_dofs(self, dof_map: Dict[int, Tuple[int, int]]):
+        """تعیین شاخص DOFهای گره"""
+        if self.id in dof_map:
+            self.dofs = dof_map[self.id]
+
+    def __repr__(self):
+        return (
+            f"Node({self.id}, ({self.x:.3f}, {self.y:.3f}), support={self.is_support})"
+        )
+>>>>>>> 4a7e363 (style: apply ruff formatting and fix engineering conventions)
 
 
 @dataclass
@@ -94,11 +114,83 @@ class TrussModel:
             )
         
         nodes = {}
+<<<<<<< HEAD
         for i, node_data in enumerate(nodes_data):
             # validation هر گره
             if not isinstance(node_data, dict):
                 raise TypeError(
                     f"nodes[{i}] must be a dict, got {type(node_data).__name__}"
+=======
+        for node_data in nodes_data:
+            node = Node(
+                id=node_data["id"],  # تغییر node_id به id
+                x=convert_to_si(float(node_data["x"]), self.units, "length"),
+                y=convert_to_si(float(node_data["y"]), self.units, "length"),
+                is_support=bool(node_data.get("is_support", False)),
+            )
+            nodes[node.id] = node
+        return nodes
+
+    def _create_elements(self, elements_data: List[Dict]) -> Dict[int, Element]:
+        """ایجاد دیکشنری اعضا"""
+        elements = {}
+        for element_data in elements_data:
+            element_id = element_data["id"]
+
+            # پیدا کردن گره‌ها
+            node_i = self.nodes[element_data["node_i"]]
+            node_j = self.nodes[element_data["node_j"]]
+
+            # دمای کل (سراسری + محلی)
+            delta_T_total = self.global_delta_T + element_data.get("delta_T", 0.0)
+
+            # تبدیل مساحت مقطع به SI
+            if element_data.get("A") is not None:
+                A_value = convert_to_si(float(element_data["A"]), self.units, "length")
+                # برای مساحت: اگر واحد طول mm باشد، مساحت mm² است که باید به m² تبدیل شود
+                # اما convert_to_si فقط تبدیل طول انجام می‌دهد، پس باید مربع آن را بگیریم
+                if self.units == "SI-mm":
+                    A_si = A_value**2  # تبدیل mm² به m²
+                elif self.units == "SI-cm":
+                    A_si = A_value**2  # تبدیل cm² به m²
+                else:
+                    A_si = element_data["A"]  # در واحد SI مساحت مستقیماً m² است
+            else:
+                A_si = None
+
+            element = Element(
+                element_id=element_id,
+                node_i=node_i,
+                node_j=node_j,
+                A=A_si,
+                E=float(element_data["E"]),
+                alpha=float(element_data.get("alpha", 1.2e-5)),
+                delta_T=delta_T_total,
+                delta_L0=float(element_data.get("delta_L0", 0.0)),
+                I=element_data.get("I"),
+                effective_length_factor=float(
+                    element_data.get("effective_length_factor", 1.0)
+                ),
+                section_type=element_data.get("section_type", "general"),
+            )
+            elements[element.id] = element
+        return elements
+
+    def _create_loads(self, loads_data: Dict) -> List[Dict]:
+        """ایجاد لیست بارها"""
+        loads = []
+        if "node_forces" in loads_data:
+            for i, load_data in enumerate(loads_data["node_forces"]):
+                loads.append(
+                    {
+                        "id": load_data.get(
+                            "id", load_data.get("node_id", i + 1)
+                        ),  # انعطاف‌پذیر
+                        "node_id": load_data.get("node_id"),  # اضافه کردن node_id
+                        "Fx": float(load_data.get("Fx", 0.0)),
+                        "Fy": float(load_data.get("Fy", 0.0)),
+                    }
+>>>>>>> 4a7e363 (style: apply ruff formatting and fix engineering conventions)
                 )
             
             # بررسی فیلدهای ضروری

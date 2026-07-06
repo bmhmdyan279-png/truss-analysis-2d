@@ -88,7 +88,9 @@ def validate_units(units: str) -> Dict:
         Dict شامل فاکتورهای تبدیل برای انواع کمیت‌ها
     """
     if units not in UNIT_CONVERSION:
-        raise ValueError(f"واحد نامعتبر: '{units}'. واحدهای مجاز: {', '.join(UNIT_CONVERSION.keys())}")
+        raise ValueError(
+            f"واحد نامعتبر: '{units}'. واحدهای مجاز: {', '.join(UNIT_CONVERSION.keys())}"
+        )
 
     return UNIT_CONVERSION[units]
 
@@ -149,7 +151,9 @@ def format_with_units(value: float, units: str, quantity_type: str) -> str:
         units = "SI"  # fallback
 
     # تبدیل به واحد مقصد
-    value_in_target = convert_from_si(convert_to_si(value, "SI", quantity_type), units, quantity_type)
+    value_in_target = convert_from_si(
+        convert_to_si(value, "SI", quantity_type), units, quantity_type
+    )
 
     # گرفتن برچسب واحد
     unit_label = UNIT_CONVERSION[units][quantity_type]["label"]
@@ -264,7 +268,9 @@ def parse_input(input_data: Dict) -> Dict:
             try:
                 I_val = float(element["I"])
                 if I_val < 0:
-                    raise ValueError(f"عضو {element_id}: ممان اینرسی نمی‌تواند منفی باشد.")
+                    raise ValueError(
+                        f"عضو {element_id}: ممان اینرسی نمی‌تواند منفی باشد."
+                    )
             except (ValueError, TypeError):
                 raise ValueError(f"عضو {element_id}: ممان اینرسی نامعتبر است.")  # noqa: B904
 
@@ -279,7 +285,9 @@ def parse_input(input_data: Dict) -> Dict:
     return input_data
 
 
-def convert_units(value: float, from_unit: str, to_unit: str, quantity_type: str = "length") -> float:
+def convert_units(
+    value: float, from_unit: str, to_unit: str, quantity_type: str = "length"
+) -> float:
     """
     تبدیل واحدهای مختلف
 
@@ -484,7 +492,9 @@ def write_output(
                         if field == "stress":
                             # محاسبه تنش: σ = N/A
                             N_val = r.get("N", 0)
-                            A_val = r.get("A", 0) or getattr(truss.elements.get(r["id"]), "A", 0)
+                            A_val = r.get("A", 0) or getattr(
+                                truss.elements.get(r["id"]), "A", 0
+                            )
                             if A_val != 0:
                                 row[field] = N_val / A_val
                             else:
@@ -492,27 +502,39 @@ def write_output(
 
                         elif field == "A":
                             # اگر در نتایج نیست، از عنصر بگیر
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "A", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "A", ""
+                            )
                             row[field] = value
 
                         elif field == "E":
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "E", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "E", ""
+                            )
                             row[field] = value
 
                         elif field == "alpha":
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "alpha", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "alpha", ""
+                            )
                             row[field] = value
 
                         elif field == "delta_T":
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "delta_T", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "delta_T", ""
+                            )
                             row[field] = value
 
                         elif field == "delta_L0":
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "delta_L0", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "delta_L0", ""
+                            )
                             row[field] = value
 
                         elif field == "I":
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "I", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "I", ""
+                            )
 
                             if value is None or value == "":
                                 row[field] = "N/A"
@@ -540,11 +562,15 @@ def write_output(
                                 row[field] = str(value)
 
                         elif field == "section_type":
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "section_type", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "section_type", ""
+                            )
                             row[field] = value
 
                         elif field == "effective_length_factor":
-                            value = r.get(field) or getattr(truss.elements.get(r["id"]), "K_eff", "")
+                            value = r.get(field) or getattr(
+                                truss.elements.get(r["id"]), "K_eff", ""
+                            )
                             row[field] = value
 
                         elif field == "buckling_warning":
@@ -570,7 +596,9 @@ def write_output(
 
                     writer.writerow(row)
 
-        logger.info(f"✅ نتایج اعضا CSV با {len(fieldnames)} فیلد در {csv_file} ذخیره شد.")
+        logger.info(
+            f"✅ نتایج اعضا CSV با {len(fieldnames)} فیلد در {csv_file} ذخیره شد."
+        )
 
         # 2. ذخیره جابجایی گره‌ها به CSV
 
@@ -591,7 +619,9 @@ def write_output(
                     "تعداد کل گره‌ها",
                 ]
             )
-            writer.writerow(["Free Nodes", report["metadata"]["free_nodes"], "-", "گره‌های آزاد"])
+            writer.writerow(
+                ["Free Nodes", report["metadata"]["free_nodes"], "-", "گره‌های آزاد"]
+            )
             writer.writerow(
                 [
                     "Supported Nodes",
@@ -638,7 +668,9 @@ def write_output(
                         "شناسه عضو با بیشترین انرژی",
                     ]
                 )
-                writer.writerow(["Max Energy", max_energy["energy"], "J", "بیشترین انرژی عضو"])
+                writer.writerow(
+                    ["Max Energy", max_energy["energy"], "J", "بیشترین انرژی عضو"]
+                )
                 writer.writerow(
                     [
                         "Energy Percentage",
@@ -647,8 +679,12 @@ def write_output(
                         "درصد انرژی عضو بحرانی",
                     ]
                 )
-                writer.writerow(["Max Energy Nodes", max_energy["nodes"], "-", "گره‌های عضو بحرانی"])
-                writer.writerow(["Max Energy Status", max_energy["status"], "-", "وضعیت عضو بحرانی"])
+                writer.writerow(
+                    ["Max Energy Nodes", max_energy["nodes"], "-", "گره‌های عضو بحرانی"]
+                )
+                writer.writerow(
+                    ["Max Energy Status", max_energy["status"], "-", "وضعیت عضو بحرانی"]
+                )
 
             # عضو با بیشترین نیرو
             max_force = report["energy_statistics"]["max_force_element"]
@@ -802,8 +838,12 @@ def write_output(
                     "اعضا با خطای ساخت غیرصفر",
                 ]
             )
-            writer.writerow(["Max ΔT", thermal_stats["max_delta_T"], "°C", "بیشترین تغییر دما"])
-            writer.writerow(["Max δL₀", thermal_stats["max_delta_L0"], "m", "بیشترین خطای ساخت"])
+            writer.writerow(
+                ["Max ΔT", thermal_stats["max_delta_T"], "°C", "بیشترین تغییر دما"]
+            )
+            writer.writerow(
+                ["Max δL₀", thermal_stats["max_delta_L0"], "m", "بیشترین خطای ساخت"]
+            )
 
             # اعتبارسنجی
             validation_stats = report["validation"]
