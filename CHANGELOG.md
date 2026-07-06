@@ -1,3 +1,16 @@
+## [1.5.0] - 2026-07-06
+
+### Added
+- All 65 tests now passing (0 skipped)
+
+### Fixed
+- Unskipped 9 tests by updating to new input_data API
+- Fixed test_single_element.py: removed duplicate @pytest.mark.skip decorators
+- Fixed test_solver.py: rewrote input_data from dict to list format
+- Fixed calculate_total_energy() calls with F_global parameter
+
+### Changed
+- Improved test coverage from 56/65 to 65/65 (100% pass rate)
 ## [1.4.1] - 2026-07-06
 
 ### Fixed
@@ -49,7 +62,7 @@
 
 ### زیرساخت
 - راه‌اندازی GitHub Actions برای اجرای خودکار تست‌ها روی پایتون ۳.۸ تا ۳.۱۱.
-- 
+-
 # گزارش تغییرات
 
 ## [1.0.0] - 2026-01-01
@@ -60,3 +73,16 @@
 - پشتیبانی از واحدهای مختلف
 - خروجی‌های گرافیکی و گزارش‌های CSV/JSON/Markdown
 - ۶۵ تست کامل با پوشش ۱۰۰٪
+## [v1.5.0] - 2026-07-06
+
+### Added
+- All 65 tests now passing (0 skipped)
+
+### Fixed
+- Unskipped 9 tests by updating to new input_data API
+- Fixed test_single_element.py: removed duplicate @pytest.mark.skip decorators
+- Fixed test_solver.py: rewrote input_data from dict to list format
+- Fixed calculate_total_energy() calls with F_global parameter
+
+### Changed
+- Improved test coverage from 56/65 to 65/65 (100% pass rate)
