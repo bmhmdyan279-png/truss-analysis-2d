@@ -1,3 +1,18 @@
+## [1.4.1] - 2026-07-06
+
+### Fixed
+- **Critical**: 11 skipped tests now passing
+  - `test_edge_cases.py`: Rewritten to use list-based input_data API
+  - `test_single_element.py`: Migrated from non-existent add_node/add_element API
+  - `test_solver.py`: Fixed dict→list structure mismatch in nodes/elements
+
+### Added
+- `tests/test_api_contract.py`: Regression tests for API structure validation
+- Validation in `TrussModel._create_nodes()` to reject dict input with clear error
+
+### Documentation
+- Added API migration guide in README.md
+- Documented input_data schema in docs/schema.md
 ## [1.4.0] - 2026-07-06
 
 ### تغییرات عمده (Professional Polish)
