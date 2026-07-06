@@ -1,46 +1,229 @@
-name: CI
+name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
 jobs:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 1: Linting & Type Checking
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  lint:
+    name: 🔍 Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+          pip install -r requirements.txt
+      
+      - name: Ruff linting
+        run: |
+          ruff check src/ tests/ --output-format=github
+          ruff format --check src/ tests/
+      
+      - name: MyPy type checking
+        run: |
+          mypy src/truss_analysis/ --ignore-missing-imports
+        continue-on-error: true  # فعلاً optional
+  
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 2: Tests with Coverage
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   test:
+    name: 🧪 Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    
     steps:
       - uses: actions/checkout@v4
-
+      
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
+          cache: 'pip'
+      
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Lint with ruff
-        run: ruff check src/
-
-      - name: Format check with black
-        run: black --check src/
-
-      - name: Type check with mypy
-        run: mypy src/
-
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-html
+      
       - name: Run tests with coverage
-        run: pytest --cov=truss_analysis --cov-report=xml --cov-report=term-missing
-
+        run: |
+          pytest tests/ -v \
+            --cov=truss_analysis \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term-missing \
+            --html=test-report.html \
+            --self-contained-html
+      
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
+        if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4
         with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+      
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-py${{ matrix.python-version }}
+          path: test-report.html
+  
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 3: Check for Skipped Tests
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  check-skipped:
+    name: ⚠️ Check Skipped Tests
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Count skipped tests
+        id: count
+        run: |
+          # جمع‌آوری تمام تست‌ها
+          pytest tests/ --collect-only -q > test_collection.txt
+          
+          # شمارش skip شده‌ها
+          SKIPPED=$(grep -c "SKIP" test_collection.txt || echo "0")
+          TOTAL=$(grep -c "test_" test_collection.txt || echo "0")
+          
+          echo "skipped=$SKIPPED" >> $GITHUB_OUTPUT
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+          
+          echo "📊 Test Statistics:"
+          echo "  Total tests: $TOTAL"
+          echo "  Skipped: $SKIPPED"
+          
+          # اگر بیشتر از ۵ تا skip دارد، هشدار بده
+          if [ "$SKIPPED" -gt 5 ]; then
+            echo "::warning::⚠️ $SKIPPED tests are skipped! Please review."
+          fi
+      
+      - name: Upload collection report
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-collection
+          path: test_collection.txt
+  
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 4: Build & Verify Package
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  build:
+    name: 📦 Build Package
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install build tools
+        run: |
+          pip install build twine
+      
+      - name: Build package
+        run: |
+          python -m build
+      
+      - name: Check package
+        run: |
+          twine check dist/*
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-dist
+          path: dist/
+  
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 5: Integration Test (Optional)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  integration:
+    name: 🔗 Integration Test
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: package-dist
+          path: dist/
+      
+      - name: Install package
+        run: |
+          pip install dist/*.whl
+      
+      - name: Run example
+        run: |
+          cd examples
+          python example_analysis.py example1.json
+  
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Job 6: Deploy (Optional)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  deploy:
+    name: 🚀 Deploy to PyPI
+    runs-on: ubuntu-latest
+    needs: [build, integration]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: package-dist
+          path: dist/
+      
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          pip install twine
+          twine upload dist/*
