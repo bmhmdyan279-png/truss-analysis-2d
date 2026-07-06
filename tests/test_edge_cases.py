@@ -26,9 +26,15 @@ def test_singular_matrix_supports():
 
     K, F = build_global_matrices(model)
 
+    # تبدیل sparse به dense (اگر sparse باشد)
+    try:
+        K_dense = K.toarray()
+    except AttributeError:
+        K_dense = np.array(K)
+
     # rank باید کمتر از اندازه ماتریس باشد
-    rank = np.linalg.matrix_rank(K)
-    assert rank < K.shape[0], "ماتریس باید منفرد باشد"
+    rank = np.linalg.matrix_rank(K_dense)
+    assert rank < K_dense.shape[0], "ماتریس باید منفرد باشد"
 
 
 def test_extreme_loads():
@@ -49,5 +55,17 @@ def test_extreme_loads():
     from truss_analysis.assembly import build_global_matrices
 
     K, F = build_global_matrices(model)
-    assert np.all(np.isfinite(K)), "ماتریس سختی نباید NaN/Inf داشته باشد"
-    assert np.all(np.isfinite(F)), "بردار بار نباید NaN/Inf داشته باشد"
+
+    # تبدیل sparse به dense
+    try:
+        K_dense = K.toarray()
+    except AttributeError:
+        K_dense = np.array(K)
+
+    try:
+        F_dense = F.toarray().flatten()
+    except AttributeError:
+        F_dense = np.array(F).flatten()
+
+    assert np.all(np.isfinite(K_dense)), "ماتریس سختی نباید NaN/Inf داشته باشد"
+    assert np.all(np.isfinite(F_dense)), "بردار بار نباید NaN/Inf نداشته باشد"
