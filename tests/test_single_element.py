@@ -15,8 +15,6 @@ from truss_analysis.model import TrussModel
 from truss_analysis.solver import calculate_element_results, solve_displacements
 
 
-@pytest.mark.skip(reason="API mismatch - needs fix")
-@pytest.mark.skip(reason="API mismatch - needs fix")
 def test_single_element_tension():
     """تست یک عضو تحت کشش"""
     print("\n" + "=" * 60)
@@ -91,8 +89,6 @@ def test_single_element_tension():
     print("✅ تست یک عضو تحت کشش با موفقیت گذشت")
 
 
-@pytest.mark.skip(reason="API mismatch - needs fix")
-@pytest.mark.skip(reason="API mismatch - needs fix")
 def test_single_element_compression():
     """تست یک عضو تحت فشار"""
     print("\n" + "=" * 60)
@@ -129,8 +125,6 @@ def test_single_element_compression():
     print("✅ تست یک عضو تحت فشار با موفقیت گذشت")
 
 
-@pytest.mark.skip(reason="API mismatch - needs fix")
-@pytest.mark.skip(reason="API mismatch - needs fix")
 def test_single_element_thermal_expansion():
     """تست یک عضو با انبساط حرارتی"""
     print("\n" + "=" * 60)
@@ -243,8 +237,6 @@ def test_single_element_fabrication_error():
     print("✅ تست یک عضو با خطای ساخت با موفقیت گذشت")
 
 
-@pytest.mark.skip(reason="API mismatch - needs fix")
-@pytest.mark.skip(reason="API mismatch - needs fix")
 def test_single_element_combined():
     """تست یک عضو با ترکیب اثرات"""
     print("\n" + "=" * 60)
