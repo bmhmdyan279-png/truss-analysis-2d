@@ -1,0 +1,22 @@
+# گزارش تحلیل خرپا
+
+<table dir="rtl" border="1" style="border-collapse: collapse; width: 100%;">
+  <thead>
+    <tr>
+      <th>شناسه</th>
+      <th>مقدار</th>
+      <th>واحد</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in results %}
+    <tr>
+      <td>{{ row.id }}</td>
+      <td>{{ row.value }}</td>
+      <td>{{ row.unit }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p>زبان گزارش: {{ locale }}</p>
