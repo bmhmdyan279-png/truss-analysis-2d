@@ -28,12 +28,12 @@ results/
 htmlcov/
 .pytest_cache/
 
-# Script files
-*.py
-!src/**/*.py
-!tests/**/*.py
-!examples/**/*.py
+# Build and distribution
+dist/
+build/
+*.egg-info/
+
+# Result files
 results_*.md
 results_*.csv
 results_*.png
-results.json

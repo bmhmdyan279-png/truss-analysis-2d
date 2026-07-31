@@ -75,7 +75,7 @@ pip install .
 ### اجرای اولین تحلیل
 
 ```bash
-python main.py examples/example1.json --output demo --plot
+truss-analyze examples/example1.json --output demo --plot
 ```
 
 ### خروجی‌های تولید شده
@@ -193,7 +193,7 @@ U_total = 0.5 · U^T · F
 اجرا:
 
 ```bash
-python main.py single_tension.json
+truss-analyze single_tension.json
 ```
 
 فایل `single_tension_elements.csv` نشان می‌دهد که عضو در کشش خالص قرار دارد و نسبت کمانش صفر است.
@@ -269,10 +269,10 @@ pytest tests/ -v
 
 دو نمودار به صورت خودکار (در صورت فعال بودن گزینه `plot_results`) تولید می‌شوند:
 
-- **هندسه** (`results_geometry.png`)  
+- **هندسه** (`results_geometry.png`)
   سازه اولیه به رنگ آبی، تغییرشکل‌یافته به رنگ قرمز (با مقیاس خودکار)، گره‌ها به صورت دایره و تکیه‌گاه‌ها به صورت مثلث نمایش داده می‌شوند.
 
-- **نمودار انرژی** (`results_energy_pie.png`)  
+- **نمودار انرژی** (`results_energy_pie.png`)
   سهم هر عضو از انرژی کرنشی کل را نشان می‌دهد.
 
 ---
