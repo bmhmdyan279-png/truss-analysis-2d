@@ -1,3 +1,6 @@
+import os
+import sys
+
 #!/usr/bin/env python3
 """
 Backward compatibility shim for running truss_analysis from the root.
@@ -10,7 +13,10 @@ Exit Code Taxonomy:
   4: Internal error (خطای داخلی - استثناهای غیرمنتظره)
 """
 
-import sys
+
+# مدیریت TTY در ویندوز برای جلوگیری از Mojibake
+if os.name == "nt" and sys.stdout.isatty():
+    os.system("chcp 65001 > nul")
 
 try:
     from truss_analysis.main import main as app_main

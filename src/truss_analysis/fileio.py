@@ -442,7 +442,7 @@ def write_output(
         csv_file = f"{output_prefix}_elements.csv"
         ensure_output_dir(csv_file)
 
-        with open(csv_file, "w", newline="", encoding="utf-8") as f:
+        with open(csv_file, "w", newline="", encoding="utf-8-sig") as f:
             if results:
                 # لیست کامل فیلدهایی که باید ذخیره شوند
                 fieldnames = [
@@ -606,7 +606,7 @@ def write_output(
         summary_file = f"{output_prefix}_summary.csv"
         ensure_output_dir(summary_file)
 
-        with open(summary_file, "w", newline="", encoding="utf-8") as f:
+        with open(summary_file, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
             writer.writerow(["Parameter", "Value", "Unit", "Description"])
 

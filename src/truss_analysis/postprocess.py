@@ -2,6 +2,8 @@
 پس‌پردازش و تولید گزارش - نسخه کامل و نهایی
 """
 
+import importlib.resources
+
 import matplotlib
 import numpy as np
 
@@ -366,7 +368,15 @@ def generate_plots(
             except Exception:
                 plt.style.use("default")
 
-    plt.rcParams["font.family"] = "DejaVu Sans"
+    # مدیریت فونت مدرن (سازگار با پایتون ۳.۹+)
+    try:
+        font_path = importlib.resources.files("truss_analysis").joinpath(
+            "assets/fonts/Vazirmatn-Regular.ttf"
+        )
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [str(font_path)]
+    except Exception:
+        plt.rcParams["font.family"] = "DejaVu Sans"  # fallback
     plt.rcParams["axes.unicode_minus"] = False
     plt.rcParams["figure.autolayout"] = True
 
