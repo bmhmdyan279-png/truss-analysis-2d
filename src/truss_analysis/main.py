@@ -21,14 +21,20 @@ from .constants import (
 logger = logging.getLogger(__name__)
 
 # تنظیم logging
+# Sacred Separation of Logging and Console
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("truss_analysis.log", encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
+    format="%(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("truss_analysis.log", encoding="utf-8", mode="a")],
 )
+try:
+    from rich.console import Console
+
+    console = Console()
+    HAS_RICH = True
+except ImportError:
+    HAS_RICH = False
+    console = None
 
 
 def sanity_check(truss):
@@ -110,11 +116,11 @@ def run_analysis(
 
     try:
         logger.info("=" * 60)
-        logger.info("🔧 تحلیلگر خرپای 2D - نسخه نهایی")
+        logger.info("Truss Analyzer 2D - Final Version")
         logger.info("=" * 60)
 
         # خواندن ورودی
-        logger.info(f"📖 خواندن فایل ورودی: {input_file}")
+        logger.info(f"Reading input file: {input_file}")
         with open(input_file, encoding="utf-8") as f:
             input_data = json.load(f)
 
@@ -319,7 +325,7 @@ def run_analysis(
         }
 
     except FileNotFoundError:
-        logger.error(f"❌ خطا: فایل {input_file} یافت نشد.")
+        logger.error(f"File not found: {input_file}")
         return {
             "success": False,
             "error": "FileNotFound",
@@ -327,22 +333,21 @@ def run_analysis(
         }
 
     except json.JSONDecodeError as e:
-        logger.error("❌ خطا: فایل ورودی فرمت JSON نامعتبر دارد.")
+        logger.error("Invalid JSON format in input file.")
         logger.error(f"   جزئیات: {str(e)}")
         return {"success": False, "error": "InvalidJSON", "message": str(e)}
 
     except ValueError as e:
-        logger.error(f"❌ خطا در داده‌های ورودی: {str(e)}")
+        logger.error(f"Input data error: {str(e)}")
         return {"success": False, "error": "ValueError", "message": str(e)}
 
     except Exception as e:
         error_type = type(e).__name__
-
         error_msg = str(e)
+        error_code = getattr(e, "error_code", "TRUSS-4001")
 
-        logger.error(f"❌ خطای {error_type}: {error_msg}")
-
-        logger.error("برای جزئیات بیشتر فایل لاگ را بررسی کنید.")
+        logger.error(f"Error [{error_code}] {error_type}: {error_msg}")
+        logger.error("Check log file for details.")
 
         # ذخیره جزئیات فقط در لاگ
 

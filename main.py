@@ -1,5 +1,12 @@
-import os
+import io
 import sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except AttributeError:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 #!/usr/bin/env python3
 """
@@ -15,8 +22,7 @@ Exit Code Taxonomy:
 
 
 # مدیریت TTY در ویندوز برای جلوگیری از Mojibake
-if os.name == "nt" and sys.stdout.isatty():
-    os.system("chcp 65001 > nul")
+
 
 try:
     from truss_analysis.main import main as app_main
