@@ -25,9 +25,9 @@ def test_help_performance_regression():
     assert result.returncode == 0, f"main.py --help failed: {result.stderr}"
     if baseline_file.exists():
         baseline = float(baseline_file.read_text().strip())
-        assert (
-            elapsed <= baseline * 1.20
-        ), f"Regression: {elapsed:.4f}s > {baseline * 1.20:.4f}s"
+        assert elapsed <= baseline * 1.20, (
+            f"Regression: {elapsed:.4f}s > {baseline * 1.20:.4f}s"
+        )
     else:
         baseline_file.write_text(f"{elapsed:.6f}")
         assert elapsed < 2.0, f"Initial baseline too high: {elapsed:.4f}s"

@@ -16,9 +16,9 @@ def test_version_sync():
     with open(changelog_path, encoding="utf-8") as f:
         changelog = f.read()
 
-    assert (
-        f"[{version}]" in changelog or f"Version {version}" in changelog
-    ), f"Version {version} not in CHANGELOG.md"
+    assert f"[{version}]" in changelog or f"Version {version}" in changelog, (
+        f"Version {version} not in CHANGELOG.md"
+    )
 
     if os.getenv("CI"):
         result = subprocess.run(
@@ -28,6 +28,6 @@ def test_version_sync():
         )
         if result.returncode == 0:
             tag_version = result.stdout.strip().lstrip("v")
-            assert (
-                tag_version == version
-            ), f"Git tag {tag_version} != pyproject {version}"
+            assert tag_version == version, (
+                f"Git tag {tag_version} != pyproject {version}"
+            )

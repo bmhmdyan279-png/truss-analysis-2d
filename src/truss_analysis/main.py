@@ -1,9 +1,18 @@
+import io
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+else:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 #!/usr/bin/env python3
 """
 تحلیلگر خرپای 2D با اثرات حرارتی و خطای ساخت - نسخه نهایی
 """
 
-import argparse
+import argparse  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
@@ -11,7 +20,7 @@ import sys  # noqa: E402
 import time  # noqa: E402
 import traceback  # noqa: E402
 
-from .constants import (
+from .constants import (  # noqa: E402
     MIN_SUPPORTS,
     THERMAL_ENERGY_WARN,
     VALIDATION_REL_ERR,

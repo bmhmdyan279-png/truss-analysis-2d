@@ -1,6 +1,10 @@
-# سیستم کد خطای مستند
+# Truss Analysis Error Codes
+Every user-facing exception must include its corresponding code.
 
-- `TRUSS-1xxx`: خطای ورودی (Input)
-- `TRUSS-2xxx`: خطای محاسباتی/حل‌گر (Solver)
-- `TRUSS-3xxx`: خطای خروجی/بصری‌سازی (Output)
-- `TRUSS-4xxx`: خطای داخلی (Internal)
+## Code Ranges
+- `TRUSS-1000` to `TRUSS-1999`: Input & Validation Errors
+- `TRUSS-2000` to `TRUSS-2999`: Computational & Solver Errors
+- `TRUSS-3000` to `TRUSS-3999`: File I/O & Environment Errors
+- `TRUSS-4000` to `TRUSS-4999`: Rendering & Reporting Errors
+
+## Usage Example

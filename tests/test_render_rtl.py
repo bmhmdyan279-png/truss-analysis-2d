@@ -22,9 +22,9 @@ def test_persian_render_no_tofu() -> None:
         try:
             plt.savefig(temp_path, bbox_inches="tight")
             assert os.path.exists(temp_path), "Rendered file was not created."
-            assert (
-                os.path.getsize(temp_path) > 1000
-            ), "Rendered file is suspiciously small."
+            assert os.path.getsize(temp_path) > 1000, (
+                "Rendered file is suspiciously small."
+            )
         finally:
             plt.close()
             if os.path.exists(temp_path):
