@@ -2,7 +2,7 @@ version = "1.6.0"
 
 [tool.ruff]
 line-length = 88
-target-version = "1.6.0"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [
