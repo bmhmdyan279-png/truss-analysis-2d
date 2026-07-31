@@ -1,6 +1,1 @@
 * text=auto eol=lf
-*.json text eol=lf
-*.toml text eol=lf
-*.po text eol=lf
-*.ttf binary
-*.log text eol=lf

@@ -5,7 +5,7 @@ from .constants import DEFAULT_ALPHA  # noqa: E402
 """
 
 import logging  # noqa: E402
-from typing import Dict, List, Optional, Tuple  # noqa: E402
+from typing import Dict, List, Tuple  # noqa: E402
 
 import numpy as np  # noqa: E402
 
@@ -48,7 +48,7 @@ class Element:
         alpha: float = DEFAULT_ALPHA,
         delta_T: float = 0.0,
         delta_L0: float = 0.0,
-        I: Optional[float] = None,  # noqa: E741
+        I: float | None = None,  # noqa: E741
         effective_length_factor: float = 1.0,
         section_type: str = "general",
         **kwargs,
@@ -95,7 +95,7 @@ class Element:
         delta_thermal = self.alpha * self.delta_T * self.L
         return delta_thermal + self.delta_L0
 
-    def calculate_buckling_load(self) -> Optional[float]:
+    def calculate_buckling_load(self) -> float | None:
         """محاسبه بار کمانش برای عضو فشاری"""
         if self.I is None or self.I <= 0:
             return None
