@@ -1,14 +1,28 @@
 #!/usr/bin/env python3
-"""Backward compatibility shim for running truss_analysis from the root."""
+"""
+Backward compatibility shim for running truss_analysis from the root.
 
-import warnings
+Exit Code Taxonomy:
+  0: Success (موفقیت)
+  1: Input error (خطای ورودی - مثلاً فایل نامعتبر یا داده ناقص)
+  2: Solver error (خطای حل‌گر - مثلاً ماتریس منفرد یا عدم همگرایی)
+  3: Output/Visualization error (خطای خروجی/بصری‌سازی - مثلاً خطا در ذخیره نمودار)
+  4: Internal error (خطای داخلی - استثناهای غیرمنتظره)
+"""
 
-from truss_analysis.main import main
+import sys
 
-if __name__ == "__main__":
-    warnings.warn(
-        "Running root main.py is deprecated. Please use 'truss-analyze' command instead.",
-        DeprecationWarning,
-        stacklevel=2,
+try:
+    from truss_analysis.main import main as app_main
+
+    if __name__ == "__main__":
+        sys.exit(app_main())
+except ImportError as e:
+    print(
+        f"Internal error (4): Failed to import truss_analysis.main ({e})",
+        file=sys.stderr,
     )
-    main()
+    sys.exit(4)
+except Exception as e:
+    print(f"Internal error (4): {e}", file=sys.stderr)
+    sys.exit(4)

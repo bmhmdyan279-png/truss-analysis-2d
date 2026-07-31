@@ -74,3 +74,12 @@ exclude_lines = [
 ]
 fail_under = 80
 show_missing = true
+
+[[tool.mypy.overrides]]
+module = [
+    "matplotlib.*",
+    "yaml",
+    "arabic_reshaper",
+    "pytest"
+]
+ignore_missing_imports = true
