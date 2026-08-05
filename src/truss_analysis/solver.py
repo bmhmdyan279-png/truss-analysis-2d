@@ -368,17 +368,11 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
     # اگر فقط یکی از آنها بسیار کوچک است
     if abs(U_total) < ZERO_LENGTH_TOLERANCE and abs(U_elements) > ZERO_ENERGY_TOL:
         # این حالت در اثرات حرارتی خالص رخ می‌دهد
-        if max(abs(U_total), abs(U_elements)) < 1e-12:
-        error = 0.0
-    else:
         error = abs(U_total - U_elements) / (max(abs(U_total), abs(U_elements)) + 1e-12)
         msg = f"حالت حرارتی خالص: انرژی کل ({U_total:.2e}) ناچیز است ⚠️"
         return True, error, msg  # باز هم True چون طبیعی است
 
     if abs(U_elements) < ZERO_LENGTH_TOLERANCE and abs(U_total) > ZERO_ENERGY_TOL:
-        if max(abs(U_total), abs(U_elements)) < 1e-12:
-        error = 0.0
-    else:
         error = abs(U_total - U_elements) / (max(abs(U_total), abs(U_elements)) + 1e-12)
         msg = f"انرژی اعضا ناچیز است در حالی که انرژی کل ({U_total:.2e}) نیست ⚠️"
         return False, error, msg
