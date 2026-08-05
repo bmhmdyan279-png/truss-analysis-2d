@@ -70,12 +70,10 @@ def test_golden_reference():
     # تحمل خطا
     tolerance = 0.01  # 1%
 
-    if abs(element["N"] - N_expected) / abs(N_expected) < tolerance:
-        print("\n✅ تست با موفقیت گذشت!")
-    else:
-        print("\n❌ تست شکست خورد!")
-        print(f"  خطا: {(abs(element['N'] - N_expected) / abs(N_expected)) * 100:.2f}%")
-        return False
+    relative_error = abs(element["N"] - N_expected) / abs(N_expected)
+    assert (
+        relative_error < tolerance
+    ), f"تست مرجع شکست خورد! خطای نسبی: {relative_error * 100:.2f}%"
 
 
 if __name__ == "__main__":

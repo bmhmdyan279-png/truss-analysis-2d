@@ -1,18 +1,16 @@
-from __future__ import annotations
-
-from .constants import DEFAULT_ALPHA, DEFAULT_PENALTY_VALUE  # noqa: E402
-
 """
 مدل‌سازی خرپا - نسخه نهایی کامل
 """
 
-import logging  # noqa: E402
-from typing import Dict, List, Tuple  # noqa: E402
+from __future__ import annotations
 
-import numpy as np  # noqa: E402
+import logging
+from typing import Dict, List, Tuple
 
-# ایمپورت از فایل جدید utils
-from .utils import convert_to_si, validate_units  # noqa: E402
+import numpy as np
+
+from .constants import DEFAULT_ALPHA, DEFAULT_PENALTY_VALUE
+from .utils import convert_to_si, validate_units
 
 logger = logging.getLogger(__name__)
 
@@ -190,11 +188,21 @@ class TrussModel:
                 node_i=node_i,
                 node_j=node_j,
                 A=A_si,
-                E=float(element_data["E"]),
+                E=convert_to_si(float(element_data["E"]), self.units, "stress")
+                if self.units != "SI"
+                else float(element_data["E"]),
                 alpha=float(element_data.get("alpha", 1.2e-5)),
                 delta_T=delta_T_total,
-                delta_L0=float(element_data.get("delta_L0", 0.0)),
-                I=element_data.get("I"),
+                delta_L0=convert_to_si(
+                    float(element_data.get("delta_L0", 0.0)), self.units, "length"
+                )
+                if self.units != "SI"
+                else float(element_data.get("delta_L0", 0.0)),
+                I=convert_to_si(
+                    float(element_data["I"]), self.units, "moment_of_inertia"
+                )
+                if element_data.get("I") is not None and self.units != "SI"
+                else element_data.get("I"),
                 effective_length_factor=float(
                     element_data.get("effective_length_factor", 1.0)
                 ),
@@ -246,14 +254,14 @@ class TrussModel:
         # ایجاد نگاشت DOFها
         self.dof_map = {}
         dof_index = 0
-        for id, _node in sorted(self.nodes.items()):
-            self.dof_map[id] = (dof_index, dof_index + 1)
+        for node_id, _node in sorted(self.nodes.items()):
+            self.dof_map[node_id] = (dof_index, dof_index + 1)
             dof_index += 2
 
         # تعیین DOFهای آزاد و قفل شده
-        for id, node in self.nodes.items():
+        for _id, node in self.nodes.items():
             node.set_dofs(self.dof_map)
-            dof_x, dof_y = self.dof_map[id]
+            dof_x, dof_y = self.dof_map[node_id]
 
             if node.is_support:
                 self.fixed_dofs.extend([dof_x, dof_y])

@@ -130,13 +130,10 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
                         else:
                             U_reduced = np.linalg.solve(K_reduced, F_reduced)
                     except Exception:
-                        # fallback: تبدیل به dense و حل
-                        K_dense = (
-                            K_reduced.toarray()  # type: ignore
-                            if isinstance(K_reduced, sparse.spmatrix)
-                            else K_reduced
-                        )
-                        U_reduced = np.linalg.solve(K_dense, F_reduced)
+                        # Fail-fast: مکانیزم یا ماتریس منفرد
+                        raise np.linalg.LinAlgError(
+                            "ماتریس سختی منفرد است (مکانیزم)."
+                        ) from None
 
                     # بازسازی U_f با مقدار صفر برای DOFهای حذف‌شده
                     U_f = np.zeros(len(row_sums))
@@ -213,13 +210,7 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
                         f"⚠️ خطا در حل با روش پنالتی: {e}. استفاده از روش fallback..."
                     )
 
-                    # تبدیل به dense و حل با lstsq
-
-                    K_modified_dense = K_modified.toarray()  # type: ignore
-
-                    # اضافه کردن یک مقدار کوچک به قطر برای جلوگیری از انحراف
-
-                    K_modified_dense += np.eye(K_modified_dense.shape[0]) * 1e-8
+                    # Fail-fast: مکانیزم یا ماتریس منفرد
 
                     raise np.linalg.LinAlgError(
                         "ماتریس سختی در روش پنالتی منفرد است. حل متوقف شد."
