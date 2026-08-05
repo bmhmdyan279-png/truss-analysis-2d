@@ -16,7 +16,6 @@ def test_negative_validation_fuzz():
         KeyError,
         IndexError,
         ZeroDivisionError,
-        Exception,
     )
     skip_mods = ("main", "fileio", "postprocess")
 

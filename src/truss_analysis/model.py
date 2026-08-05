@@ -1,4 +1,4 @@
-from .constants import DEFAULT_ALPHA  # noqa: E402
+from .constants import DEFAULT_ALPHA, DEFAULT_PENALTY_VALUE  # noqa: E402
 
 """
 مدل‌سازی خرپا - نسخه نهایی کامل
@@ -124,7 +124,7 @@ class TrussModel:
         self.options = {
             "use_sparse": True,
             "bc_method": "elimination",
-            "penalty_value": 1e12,
+            "penalty_value": DEFAULT_PENALTY_VALUE,
             "plot_results": True,
             "displacement_scale": "auto",
         }
@@ -172,17 +172,14 @@ class TrussModel:
             # دمای کل (سراسری + محلی)
             delta_T_total = self.global_delta_T + element_data.get("delta_T", 0.0)
 
-            # تبدیل مساحت مقطع به SI
+            # تبدیل مساحت مقطع به SI (اصلاح باگ توان‌رسانی)
             if element_data.get("A") is not None:
-                A_value = convert_to_si(float(element_data["A"]), self.units, "length")
-                # برای مساحت: اگر واحد طول mm باشد، مساحت mm² است که باید به m² تبدیل شود
-                # اما convert_to_si فقط تبدیل طول انجام می‌دهد، پس باید مربع آن را بگیریم
-                if self.units == "SI-mm":
-                    A_si = A_value**2  # تبدیل mm² به m²
-                elif self.units == "SI-cm":
-                    A_si = A_value**2  # تبدیل cm² به m²
-                else:
-                    A_si = element_data["A"]  # در واحد SI مساحت مستقیماً m² است
+                L_conv = (
+                    convert_to_si(1.0, self.units, "length")
+                    if self.units != "SI"
+                    else 1.0
+                )
+                A_si = float(element_data["A"]) * (L_conv**2)
             else:
                 A_si = None
 
@@ -209,14 +206,29 @@ class TrussModel:
         loads = []
         if "node_forces" in loads_data:
             for i, load_data in enumerate(loads_data["node_forces"]):
+                # استفاده از node_id به عنوان کلید اصلی گره
+                node_id = load_data.get("node_id", load_data.get("id"))
+                if node_id is None:
+                    node_id = i + 1
+
+                # تبدیل واحدهای نیرو به SI
+                Fx_si = (
+                    convert_to_si(float(load_data.get("Fx", 0.0)), self.units, "force")
+                    if self.units != "SI"
+                    else float(load_data.get("Fx", 0.0))
+                )
+                Fy_si = (
+                    convert_to_si(float(load_data.get("Fy", 0.0)), self.units, "force")
+                    if self.units != "SI"
+                    else float(load_data.get("Fy", 0.0))
+                )
+
                 loads.append(
                     {
-                        "id": load_data.get(
-                            "id", load_data.get("node_id", i + 1)
-                        ),  # انعطاف‌پذیر
-                        "node_id": load_data.get("node_id"),  # اضافه کردن node_id
-                        "Fx": float(load_data.get("Fx", 0.0)),
-                        "Fy": float(load_data.get("Fy", 0.0)),
+                        "id": node_id,
+                        "node_id": node_id,
+                        "Fx": Fx_si,
+                        "Fy": Fy_si,
                     }
                 )
         return loads
@@ -265,7 +277,7 @@ class TrussModel:
             # بررسی جهت نیروهای خارجی
             for load in self.loads:
                 # هیچ نیرویی نباید به تکیه‌گاه اعمال شود
-                node = self.nodes[load["id"]]
+                node = self.nodes.get(load.get("node_id", load.get("id")))
                 if node.is_support:
                     logger.warning(f"⚠️ نیرو به تکیه‌گاه (گره {node.id}) اعمال شده است.")
                     return False

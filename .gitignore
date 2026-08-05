@@ -39,3 +39,6 @@ results_*.csv
 results_*.png
 RELEASE_NOTES.md
 .baseline_perf/
+
+# Build artifacts
+dist/

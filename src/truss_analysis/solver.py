@@ -9,7 +9,12 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 
-from .constants import TOLERANCES, ZERO_ENERGY_TOL, ZERO_LENGTH_TOLERANCE
+from .constants import (
+    DEFAULT_PENALTY_VALUE,
+    TOLERANCES,
+    ZERO_ENERGY_TOL,
+    ZERO_LENGTH_TOLERANCE,
+)
 from .model import TrussModel
 
 logger = logging.getLogger(__name__)
@@ -20,7 +25,7 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
     حل دستگاه معادلات برای یافتن جابجایی‌ها با مدیریت خطا - نسخه اصلاح شده
     """
     bc_method = truss.options.get("bc_method", "elimination")
-    penalty_value = truss.options.get("penalty_value", 1e12)
+    penalty_value = truss.options.get("penalty_value", DEFAULT_PENALTY_VALUE)
     use_sparse = truss.options.get("use_sparse", True)
 
     n_dof = truss.n_dof
@@ -149,7 +154,9 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
                             U_f = np.linalg.solve(K_ff_dense, F_f)
                         else:
                             # اگر هنوز خطا داد، از کمترین مربعات استفاده کن
-                            U_f = np.linalg.lstsq(K_ff, F_f, rcond=None)[0]
+                            raise np.linalg.LinAlgError(
+                                "ماتریس سختی منفرد است (مکانیزم). حل متوقف شد."
+                            ) from None
             else:
                 # حالت معمول: حل مستقیم
                 try:
@@ -163,7 +170,9 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
                         U_f = np.linalg.solve(K_ff_dense, F_f)
                     else:
                         # اگر هنوز خطا داد، از کمترین مربعات استفاده کن
-                        U_f = np.linalg.lstsq(K_ff, F_f, rcond=None)[0]
+                        raise np.linalg.LinAlgError(
+                            "ماتریس سختی منفرد است (مکانیزم). حل متوقف شد."
+                        ) from None
 
             # جایگذاری جابجایی‌ها
             displacements[free_dofs] = U_f
@@ -211,9 +220,9 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
 
                     K_modified_dense += np.eye(K_modified_dense.shape[0]) * 1e-8
 
-                    displacements = np.linalg.lstsq(
-                        K_modified_dense, F_modified, rcond=None
-                    )[0]
+                    raise np.linalg.LinAlgError(
+                        "ماتریس سختی در روش پنالتی منفرد است. حل متوقف شد."
+                    ) from None
 
             else:
                 try:
@@ -231,9 +240,9 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
 
                     K_modified += np.eye(K_modified.shape[0]) * 1e-8
 
-                    displacements = np.linalg.lstsq(K_modified, F_modified, rcond=None)[
-                        0
-                    ]
+                    raise np.linalg.LinAlgError(
+                        "ماتریس سختی در روش پنالتی منفرد است. حل متوقف شد."
+                    ) from None
 
         else:
             raise ValueError(f"روش شرایط مرزی نامعتبر: {bc_method}")
@@ -246,31 +255,15 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
         return displacements  # اینجا حتماً return می‌شود
 
     except np.linalg.LinAlgError as e:
-        logger.info(f"❌ خطای جبر خطی: {str(e)}")
-        logger.info(
-            "🔍 پیشنهاد: بررسی کنید که سازه ایستا باشد و تکیه‌گاه‌های کافی داشته باشد."
+        logger.error(f"❌ خطای بحرانی جبر خطی: {str(e)}")
+        logger.error(
+            "🔍 سازه ناپایدار است (مکانیزم) یا ماتریس سختی منفرد است. تحلیل متوقف می‌شود."
         )
-
-        # حتی در صورت خطا، یک آرایه صفر برمی‌گردانیم (به جای None)
-        displacements = np.zeros(n_dof)
-        for node in truss.nodes.values():
-            dof_x, dof_y = node.dofs
-            node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
-
-        logger.info("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
-        return displacements  # اینجا هم return داریم
+        raise ValueError(f"TRUSS-3001: خطای حلگر - {str(e)}") from e
 
     except Exception as e:
-        logger.info(f"❌ خطای غیرمنتظره در حلگر: {str(e)}")
-
-        # حتی در صورت خطا، یک آرایه صفر برمی‌گردانیم
-        displacements = np.zeros(n_dof)
-        for node in truss.nodes.values():
-            dof_x, dof_y = node.dofs
-            node.displacement = np.array([displacements[dof_x], displacements[dof_y]])
-
-        logger.info("⚠️ جابجایی‌ها به صورت صفر تنظیم شدند (ممکن است نتایج نادرست باشد)")
-        return displacements  # اینجا هم return داریم
+        logger.error(f"❌ خطای غیرمنتظره در حلگر: {str(e)}")
+        raise RuntimeError(f"TRUSS-3999: خطای ناشناخته در حلگر - {str(e)}") from e
 
 
 def calculate_element_results(
@@ -398,7 +391,7 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
 
     # ۴. تعیین آستانه دینامیک
     if has_thermal_effects:
-        threshold = 0.2  # ۲۰٪ برای حالت‌های حرارتی (بیشتر از قبل)
+        threshold = 0.01  # ۱٪ برای حالت‌های حرارتی (اصلاح شده)
     else:
         threshold = 0.01  # ۱٪ برای حالت‌های معمولی
 

@@ -84,7 +84,7 @@ def test_energy_balance_thermal_only():
     )
 
     # در حالت حرارتی خالص، خطای نسبی می‌تواند بیشتر باشد، اما باید کمتر از 1% باشد
-    assert error <= 1.0 + 1e-10, f"خطای انرژی در حالت حرارتی زیاد است: {error}"
+    assert error < 0.01, f"خطای انرژی در حالت حرارتی زیاد است: {error}"
 
 
 def test_energy_balance_fabrication_error():
@@ -121,8 +121,8 @@ def test_energy_balance_fabrication_error():
         results, U_total, truss, displacements, F
     )
 
-    assert error <= 1.0 + 1e-10, f"تعادل انرژی برقرار نیست: {message}"
-    assert error <= 1.0 + 1e-10, f"خطای انرژی زیاد است: {error}"
+    assert error < 0.01, f"تعادل انرژی برقرار نیست: {message}"
+    assert error < 0.01, f"خطای انرژی زیاد است: {error}"
 
 
 if __name__ == "__main__":

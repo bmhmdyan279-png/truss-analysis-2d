@@ -26,7 +26,7 @@ dependencies = [
   "scipy>=1.7",
   "matplotlib>=3.4",
   "pyyaml>=6.0",
-  "arabic-reshaper>=3.0",
+
   "python-bidi>=0.4"
 ]
 
@@ -72,13 +72,7 @@ addopts = ["-v", "--strict-markers", "--tb=short"]
 
 [tool.coverage.run]
 source = ["src/truss_analysis"]
-omit = [
-  "*/tests/*",
-  "*/examples/*",
-  "src/truss_analysis/main.py",
-  "src/truss_analysis/fileio.py",
-  "src/truss_analysis/postprocess.py"
-]
+omit = []
 
 [tool.coverage.report]
 exclude_lines = [
@@ -88,7 +82,7 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:"
 ]
-fail_under = 70
+fail_under = 90
 show_missing = true
 
 [tool.importlinter]

@@ -15,7 +15,7 @@ TOLERANCES = {
 }
 
 # تنظیمات پیش‌فرض
-DEFAULT_PENALTY_VALUE = 1e10
+DEFAULT_PENALTY_VALUE = 1e12
 DEFAULT_DISPLACEMENT_SCALE = 50.0
 
 # واحدهای پشتیبانی شده

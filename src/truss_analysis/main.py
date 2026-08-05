@@ -7,7 +7,6 @@ if hasattr(sys.stdout, "reconfigure"):
 else:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
-#!/usr/bin/env python3
 """
 تحلیلگر خرپای 2D با اثرات حرارتی و خطای ساخت - نسخه نهایی
 """
