@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import io
 import sys
 
@@ -30,11 +31,6 @@ logger = logging.getLogger(__name__)
 
 # تنظیم logging
 # Sacred Separation of Logging and Console
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("truss_analysis.log", encoding="utf-8", mode="a")],
-)
 try:
     from rich.console import Console
 
@@ -376,6 +372,14 @@ def run_analysis(
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.FileHandler("truss_analysis.log"),
+            logging.StreamHandler(),
+        ],
+    )
     parser = argparse.ArgumentParser(
         description="تحلیل خرپای 2D با اثرات حرارتی و خطای ساخت - نسخه نهایی",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from .constants import DEFAULT_ALPHA, DEFAULT_PENALTY_VALUE  # noqa: E402
 
 """
@@ -41,8 +43,8 @@ class Element:
     def __init__(
         self,
         element_id: int = None,
-        node_i: "Node" = None,
-        node_j: "Node" = None,
+        node_i: Node = None,
+        node_j: Node = None,
         A: float = None,
         E: float = None,
         alpha: float = DEFAULT_ALPHA,

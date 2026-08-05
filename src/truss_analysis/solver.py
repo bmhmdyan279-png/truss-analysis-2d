@@ -11,6 +11,7 @@ from scipy.sparse.linalg import spsolve
 
 from .constants import (
     DEFAULT_PENALTY_VALUE,
+    THERMAL_ENERGY_WARN,
     TOLERANCES,
     ZERO_ENERGY_TOL,
     ZERO_LENGTH_TOLERANCE,
@@ -391,9 +392,9 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
 
     # ۴. تعیین آستانه دینامیک
     if has_thermal_effects:
-        threshold = 0.01  # ۱٪ برای حالت‌های حرارتی (اصلاح شده)
+        threshold = THERMAL_ENERGY_WARN  # ۱٪ برای حالت‌های حرارتی (اصلاح شده)
     else:
-        threshold = 0.01  # ۱٪ برای حالت‌های معمولی
+        threshold = THERMAL_ENERGY_WARN  # ۱٪ برای حالت‌های معمولی
 
     # ۵. تصمیم
     if error < threshold:
