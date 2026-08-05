@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "truss_analysis"
-version = "1.6.0"
+version = "1.7.0"
 description = "A professional 2D truss analysis engine with thermal and fabrication error effects."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -51,7 +51,7 @@ ignore = ["E501", "B008", "N803", "N806", "N802", "UP006", "UP035", "SIM105", "S
 known-first-party = ["truss_analysis"]
 
 [tool.mypy]
-python_version = "1.6.0"
+python_version = "1.7.0"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
