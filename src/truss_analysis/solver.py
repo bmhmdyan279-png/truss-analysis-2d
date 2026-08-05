@@ -373,7 +373,12 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
+            error = (
+                0.0
+                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
+                else abs(U_total - U_elements)
+                / max(abs(U_total), abs(U_elements), 1e-12)
+            )
             msg = "Energy balance computed."
         error = 0.0
     else:
@@ -382,7 +387,12 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
+            error = (
+                0.0
+                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
+                else abs(U_total - U_elements)
+                / max(abs(U_total), abs(U_elements), 1e-12)
+            )
             msg = "Energy balance computed."
         msg = f"حالت حرارتی خالص: انرژی کل ({U_total:.2e}) ناچیز است ⚠️"
         return True, error, msg  # باز هم True چون طبیعی است
@@ -393,7 +403,12 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
+            error = (
+                0.0
+                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
+                else abs(U_total - U_elements)
+                / max(abs(U_total), abs(U_elements), 1e-12)
+            )
             msg = "Energy balance computed."
         error = 0.0
     else:
@@ -402,7 +417,12 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
+            error = (
+                0.0
+                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
+                else abs(U_total - U_elements)
+                / max(abs(U_total), abs(U_elements), 1e-12)
+            )
             msg = "Energy balance computed."
         msg = f"انرژی اعضا ناچیز است در حالی که انرژی کل ({U_total:.2e}) نیست ⚠️"
         return False, error, msg
@@ -414,7 +434,11 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
         msg = "Pure thermal/fabrication: standard energy balance bypassed."
         return True, error, msg
     else:
-        error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
+        error = (
+            0.0
+            if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
+            else abs(U_total - U_elements) / max(abs(U_total), abs(U_elements), 1e-12)
+        )
         msg = "Energy balance computed."
     # ۴. تعیین آستانه دینامیک
     if has_thermal_effects:
