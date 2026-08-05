@@ -373,7 +373,8 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
         return True, error, msg  # باز هم True چون طبیعی است
 
     if abs(U_elements) < ZERO_LENGTH_TOLERANCE and abs(U_total) > ZERO_ENERGY_TOL:
-        error = np.linalg.norm(delta_u) / (np.linalg.norm(u + delta_u) + 1e-12)msg = f"انرژی اعضا ناچیز است در حالی که انرژی کل ({U_total:.2e}) نیست ⚠️"
+        error = np.linalg.norm(delta_u) / (np.linalg.norm(u + delta_u) + 1e-12)
+        msg = f"انرژی اعضا ناچیز است در حالی که انرژی کل ({U_total:.2e}) نیست ⚠️"
         return False, error, msg
 
     # ۳. محاسبه خطای نسبی
