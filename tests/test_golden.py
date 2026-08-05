@@ -71,9 +71,9 @@ def test_golden_reference():
     tolerance = 0.01  # 1%
 
     relative_error = abs(element["N"] - N_expected) / abs(N_expected)
-    assert (
-        relative_error < tolerance
-    ), f"تست مرجع شکست خورد! خطای نسبی: {relative_error * 100:.2f}%"
+    assert relative_error < tolerance, (
+        f"تست مرجع شکست خورد! خطای نسبی: {relative_error * 100:.2f}%"
+    )
 
 
 if __name__ == "__main__":

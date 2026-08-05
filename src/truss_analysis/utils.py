@@ -16,6 +16,7 @@ UNIT_CONVERSION = {
         "stress": {"factor": 1.0, "base": "Pa", "label": "Pa"},
         "energy": {"factor": 1.0, "base": "J", "label": "J"},
         "temperature": {"factor": 1.0, "base": "°C", "label": "°C"},
+        "moment_of_inertia": 1.0,
     },
     "SI-mm": {
         "length": {"factor": 0.001, "base": "m", "label": "mm"},
