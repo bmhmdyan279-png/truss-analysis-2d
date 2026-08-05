@@ -11,14 +11,15 @@ logger = logging.getLogger(__name__)
 
 UNIT_CONVERSION = {
     "SI": {
+        "moment_of_inertia": {"factor": 1.0, "base": "m^4", "label": "m^4"},
         "length": {"factor": 1.0, "base": "m", "label": "m"},
         "force": {"factor": 1.0, "base": "N", "label": "N"},
         "stress": {"factor": 1.0, "base": "Pa", "label": "Pa"},
         "energy": {"factor": 1.0, "base": "J", "label": "J"},
         "temperature": {"factor": 1.0, "base": "°C", "label": "°C"},
-        "moment_of_inertia": 1.0,
     },
     "SI-mm": {
+        "moment_of_inertia": {"factor": 1e-12, "base": "m^4", "label": "mm^4"},
         "length": {"factor": 0.001, "base": "m", "label": "mm"},
         "force": {"factor": 1.0, "base": "N", "label": "N"},
         "stress": {"factor": 1.0, "base": "Pa", "label": "Pa"},
@@ -26,6 +27,7 @@ UNIT_CONVERSION = {
         "temperature": {"factor": 1.0, "base": "°C", "label": "°C"},
     },
     "SI-cm": {
+        "moment_of_inertia": {"factor": 1e-8, "base": "m^4", "label": "cm^4"},
         "length": {"factor": 0.01, "base": "m", "label": "cm"},
         "force": {"factor": 1.0, "base": "N", "label": "N"},
         "stress": {"factor": 1.0, "base": "Pa", "label": "Pa"},
@@ -33,6 +35,7 @@ UNIT_CONVERSION = {
         "temperature": {"factor": 1.0, "base": "°C", "label": "°C"},
     },
     "Imperial": {
+        "moment_of_inertia": {"factor": 0.00863, "base": "m^4", "label": "ft^4"},
         "length": {"factor": 0.3048, "base": "m", "label": "ft"},
         "force": {"factor": 4.44822, "base": "N", "label": "lbf"},
         "stress": {"factor": 6894.76, "base": "Pa", "label": "psi"},

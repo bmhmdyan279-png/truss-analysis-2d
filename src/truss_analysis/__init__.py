@@ -10,4 +10,4 @@ except Exception:
     __version__ = "1.4.0"
 
 
-__all__ = ["main", "__version__"]
+__all__ = ["__version__"]

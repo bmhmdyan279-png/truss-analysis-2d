@@ -261,7 +261,7 @@ class TrussModel:
         # تعیین DOFهای آزاد و قفل شده
         for _id, node in self.nodes.items():
             node.set_dofs(self.dof_map)
-            dof_x, dof_y = self.dof_map[node_id]
+            dof_x, dof_y = self.dof_map[node.id]
 
             if node.is_support:
                 self.fixed_dofs.extend([dof_x, dof_y])

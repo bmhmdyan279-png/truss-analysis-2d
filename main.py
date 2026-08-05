@@ -9,7 +9,6 @@ except AttributeError:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
-#!/usr/bin/env python3
 """
 Backward compatibility shim for running truss_analysis from the root.
 

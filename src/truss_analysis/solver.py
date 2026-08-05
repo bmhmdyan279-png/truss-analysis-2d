@@ -230,8 +230,6 @@ def solve_displacements(truss: TrussModel, K_global, F_global) -> np.ndarray:
 
                     # اضافه کردن یک مقدار کوچک به قطر
 
-                    K_modified += np.eye(K_modified.shape[0]) * 1e-8
-
                     raise np.linalg.LinAlgError(
                         "ماتریس سختی در روش پنالتی منفرد است. حل متوقف شد."
                     ) from None
@@ -338,20 +336,25 @@ def calculate_element_results(
     return results
 
 
-def calculate_total_energy(
-    truss: TrussModel, displacements: np.ndarray, F_global: np.ndarray
-) -> float:
-    """
-    محاسبه انرژی کل سیستم برای اعتبارسنجی
-    U_total = 0.5 * U^T * F
-    """
-    # انتخاب فقط DOFهای آزاد برای مقایسه
+def calculate_total_energy(truss, displacements, F_global):
+    """محاسبه انرژی کل با اصلاح کرنش‌های اولیه"""
     free_dofs = np.array(truss.free_dofs, dtype=int)
     U_f = displacements[free_dofs]
     F_f = F_global[free_dofs]
-
-    U_total = 0.5 * np.dot(U_f, F_f)
-    return U_total
+    term1 = 0.5 * np.dot(U_f, F_f)
+    u_dot_fth = 0.0
+    u_pure = 0.0
+    for elem in truss.elements.values():
+        if getattr(elem, "delta_L_free", 0) != 0:
+            u_i = getattr(elem.node_i, "displacement", np.zeros(2))
+            u_j = getattr(elem.node_j, "displacement", np.zeros(2))
+            u_e = np.concatenate((u_i, u_j))
+            AE_L = elem.A * elem.E / elem.L
+            c, s = elem.c, elem.s
+            f_e = AE_L * elem.delta_L_free * np.array([-c, -s, c, s])
+            u_dot_fth += np.dot(u_e, f_e)
+            u_pure += 0.5 * AE_L * elem.delta_L_free**2
+    return term1 - u_dot_fth + u_pure
 
 
 def validate_energy_simple(results, U_total, has_thermal_effects=False):
@@ -373,12 +376,7 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = (
-                0.0
-                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
-                else abs(U_total - U_elements)
-                / max(abs(U_total), abs(U_elements), 1e-12)
-            )
+            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
             msg = "Energy balance computed."
         error = 0.0
     else:
@@ -387,12 +385,7 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = (
-                0.0
-                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
-                else abs(U_total - U_elements)
-                / max(abs(U_total), abs(U_elements), 1e-12)
-            )
+            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
             msg = "Energy balance computed."
         msg = f"حالت حرارتی خالص: انرژی کل ({U_total:.2e}) ناچیز است ⚠️"
         return True, error, msg  # باز هم True چون طبیعی است
@@ -403,12 +396,7 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = (
-                0.0
-                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
-                else abs(U_total - U_elements)
-                / max(abs(U_total), abs(U_elements), 1e-12)
-            )
+            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
             msg = "Energy balance computed."
         error = 0.0
     else:
@@ -417,12 +405,7 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
             msg = "Pure thermal/fabrication: standard energy balance bypassed."
             return True, error, msg
         else:
-            error = (
-                0.0
-                if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
-                else abs(U_total - U_elements)
-                / max(abs(U_total), abs(U_elements), 1e-12)
-            )
+            error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
             msg = "Energy balance computed."
         msg = f"انرژی اعضا ناچیز است در حالی که انرژی کل ({U_total:.2e}) نیست ⚠️"
         return False, error, msg
@@ -434,11 +417,7 @@ def validate_energy_simple(results, U_total, has_thermal_effects=False):
         msg = "Pure thermal/fabrication: standard energy balance bypassed."
         return True, error, msg
     else:
-        error = (
-            0.0
-            if abs(U_total) < 0.01 * (abs(U_elements) + 1e-12)
-            else abs(U_total - U_elements) / max(abs(U_total), abs(U_elements), 1e-12)
-        )
+        error = abs(U_total - U_elements) / (abs(U_total) + abs(U_elements) + 1e-12)
         msg = "Energy balance computed."
     # ۴. تعیین آستانه دینامیک
     if has_thermal_effects:
