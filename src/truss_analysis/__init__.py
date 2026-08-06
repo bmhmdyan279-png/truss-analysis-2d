@@ -1,13 +1,11 @@
-"""
-truss_analysis — A professional 2D truss analysis engine.
-"""
+from __future__ import annotations
 
 try:
-    from importlib.metadata import version
+    from importlib.metadata import PackageNotFoundError, version
 
-    __version__ = version("truss-analysis-2d")
-except Exception:
-    __version__ = "1.4.0"
-
-
-__all__ = ["__version__"]
+    try:
+        __version__ = version("truss-analysis-2d")
+    except PackageNotFoundError:
+        __version__ = "2.0.0-dev"
+except ImportError:
+    __version__ = "2.0.0-dev"

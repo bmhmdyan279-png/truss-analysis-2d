@@ -1,313 +1,42 @@
-"""
-مدل‌سازی خرپا - نسخه نهایی کامل
-"""
-
 from __future__ import annotations
 
-import logging
-from typing import Dict, List, Tuple
+import math
+from dataclasses import dataclass
 
-import numpy as np
-
-from .constants import DEFAULT_ALPHA, DEFAULT_PENALTY_VALUE
-from .utils import convert_to_si, validate_units
-
-logger = logging.getLogger(__name__)
+from .exceptions import InputValidationError
 
 
+@dataclass
 class Node:
-    def __init__(self, id, x, y, is_support=False):
-        self.id = id
-        self.x = x
-        self.y = y
-        self.is_support = is_support
-        self.dofs = None
-        self.displacement = np.array([0.0, 0.0])
-
-    def set_dofs(self, dof_map: Dict[int, Tuple[int, int]]):
-        """تعیین شاخص DOFهای گره"""
-        if self.id in dof_map:
-            self.dofs = dof_map[self.id]
-
-    def __repr__(self):
-        return (
-            f"Node({self.id}, ({self.x:.3f}, {self.y:.3f}), support={self.is_support})"
-        )
+    id: str
+    x: float
+    y: float
+    is_support: bool = False
+    support_dx: bool = False  # True = Fixed, False = Roller/Free
+    support_dy: bool = False
 
 
+@dataclass
 class Element:
-    """کلاس عضو خرپا"""
-
-    def __init__(
-        self,
-        element_id: int = None,
-        node_i: Node = None,
-        node_j: Node = None,
-        A: float = None,
-        E: float = None,
-        alpha: float = DEFAULT_ALPHA,
-        delta_T: float = 0.0,
-        delta_L0: float = 0.0,
-        I: float | None = None,  # noqa: E741
-        effective_length_factor: float = 1.0,
-        section_type: str = "general",
-        **kwargs,
-    ):
-        # backward compatibility: accept 'id' kwarg
-        if element_id is None and "id" in kwargs:
-            element_id = kwargs.get("id")
-        self.id = element_id
-        self.node_i = node_i
-        self.node_j = node_j
-        self.A = A
-        self.E = E
-        self.alpha = alpha
-        self.I = I
-        self.K_eff = effective_length_factor
-        self.section_type = section_type
-
-        # محاسبه طول و کسینوس‌ها
-        dx = node_j.x - node_i.x
-        dy = node_j.y - node_i.y
-        self.L = np.sqrt(dx**2 + dy**2)
-
-        if self.L == 0:
-            raise ValueError(f"طول عضو {element_id} صفر است.")
-
-        self.c = dx / self.L
-        self.s = dy / self.L
-
-        # اثرات حرارتی و خطای ساخت
-        self.delta_T = delta_T
-        self.delta_L0 = delta_L0
-
-        # محاسبه تغییر طول آزاد (حرارتی + خطای ساخت)
-        self.delta_L_free = self.calculate_thermal_effects()
-
-        # نتایج
-        self.delta_L_eff = None
-        self.N = None
-        self.U = None
-        self.status = None
-
-    def calculate_thermal_effects(self) -> float:
-        """محاسبه تغییر طول ناشی از حرارت و خطای ساخت"""
-        delta_thermal = self.alpha * self.delta_T * self.L
-        return delta_thermal + self.delta_L0
-
-    def calculate_buckling_load(self) -> float | None:
-        """محاسبه بار کمانش برای عضو فشاری"""
-        if self.I is None or self.I <= 0:
-            return None
-
-        # فرمول اویلر: P_cr = π²EI / (K_eff * L)²
-        if self.L > 0 and self.E > 0:
-            return (np.pi**2 * self.E * self.I) / (self.K_eff * self.L) ** 2
-        return None
-
-    def __repr__(self):
-        return f"Element({self.id}: {self.node_i.id}→{self.node_j.id}, L={self.L:.3f}, A={self.A:.6f}, E={self.E:.3e})"
+    id: str
+    node_i: str
+    node_j: str
+    E: float
+    A: float
+    I: float | None = None  # noqa: E741
+    delta_L_free: float = 0.0  # noqa: N815
 
 
-class TrussModel:
-    """مدل کامل خرپا"""
-
-    def __init__(self, input_data: Dict):
-        # تنظیم واحدها
-        self.units = input_data.get("units", "SI")
-        # اعتبارسنجی واحدها
-        self._units_conv = validate_units(self.units)
-        self._convert_to_si = convert_to_si
-        self.global_delta_T = input_data.get("temperature_change", 0.0)
-
-        # گزینه‌ها
-        self.options = {
-            "use_sparse": True,
-            "bc_method": "elimination",
-            "penalty_value": DEFAULT_PENALTY_VALUE,
-            "plot_results": True,
-            "displacement_scale": "auto",
-        }
-        if "options" in input_data:
-            self.options.update(input_data["options"])
-
-        # ذخیره داده ورودی
-        self.input_data = input_data
-
-        # ایجاد گره‌ها
-        self.nodes = self._create_nodes(input_data["nodes"])
-
-        # ایجاد اعضا
-        self.elements = self._create_elements(input_data["elements"])
-
-        # بارها
-        self.loads = self._create_loads(input_data.get("loads", {}))
-
-        # محاسبه DOFها
-        self._setup_dofs()
-
-    def _create_nodes(self, nodes_data: List[Dict]) -> Dict[int, Node]:
-        """ایجاد دیکشنری گره‌ها"""
-        nodes = {}
-        for node_data in nodes_data:
-            node = Node(
-                id=node_data["id"],  # تغییر node_id به id
-                x=convert_to_si(float(node_data["x"]), self.units, "length"),
-                y=convert_to_si(float(node_data["y"]), self.units, "length"),
-                is_support=bool(node_data.get("is_support", False)),
+def validate_inputs(nodes: dict, elements: dict):
+    for nid, n in nodes.items():
+        if not all(math.isfinite(v) for v in [n.x, n.y]):
+            raise InputValidationError(f"گره {nid}: مختصات نامعتبر (NaN/Inf).")
+    for eid, e in elements.items():
+        if not math.isfinite(e.E) or e.E <= 0:
+            raise InputValidationError(
+                f"عضو {eid}: مدول الاستیسیته (E) باید مثبت و محدود باشد."
             )
-            nodes[node.id] = node
-        return nodes
-
-    def _create_elements(self, elements_data: List[Dict]) -> Dict[int, Element]:
-        """ایجاد دیکشنری اعضا"""
-        elements = {}
-        for element_data in elements_data:
-            element_id = element_data["id"]
-
-            # پیدا کردن گره‌ها
-            node_i = self.nodes[element_data["node_i"]]
-            node_j = self.nodes[element_data["node_j"]]
-
-            # دمای کل (سراسری + محلی)
-            delta_T_total = self.global_delta_T + element_data.get("delta_T", 0.0)
-
-            # تبدیل مساحت مقطع به SI (اصلاح باگ توان‌رسانی)
-            if element_data.get("A") is not None:
-                L_conv = (
-                    convert_to_si(1.0, self.units, "length")
-                    if self.units != "SI"
-                    else 1.0
-                )
-                A_si = float(element_data["A"]) * (L_conv**2)
-            else:
-                A_si = None
-
-            element = Element(
-                element_id=element_id,
-                node_i=node_i,
-                node_j=node_j,
-                A=A_si,
-                E=convert_to_si(float(element_data["E"]), self.units, "stress")
-                if self.units != "SI"
-                else float(element_data["E"]),
-                alpha=float(element_data.get("alpha", 1.2e-5)),
-                delta_T=delta_T_total,
-                delta_L0=convert_to_si(
-                    float(element_data.get("delta_L0", 0.0)), self.units, "length"
-                )
-                if self.units != "SI"
-                else float(element_data.get("delta_L0", 0.0)),
-                I=convert_to_si(
-                    float(element_data["I"]), self.units, "moment_of_inertia"
-                )
-                if element_data.get("I") is not None and self.units != "SI"
-                else element_data.get("I"),
-                effective_length_factor=float(
-                    element_data.get("effective_length_factor", 1.0)
-                ),
-                section_type=element_data.get("section_type", "general"),
-            )
-            elements[element.id] = element
-        return elements
-
-    def _create_loads(self, loads_data: Dict) -> List[Dict]:
-        """ایجاد لیست بارها"""
-        loads = []
-        if "node_forces" in loads_data:
-            for i, load_data in enumerate(loads_data["node_forces"]):
-                # استفاده از node_id به عنوان کلید اصلی گره
-                node_id = load_data.get("node_id", load_data.get("id"))
-                if node_id is None:
-                    node_id = i + 1
-
-                # تبدیل واحدهای نیرو به SI
-                Fx_si = (
-                    convert_to_si(float(load_data.get("Fx", 0.0)), self.units, "force")
-                    if self.units != "SI"
-                    else float(load_data.get("Fx", 0.0))
-                )
-                Fy_si = (
-                    convert_to_si(float(load_data.get("Fy", 0.0)), self.units, "force")
-                    if self.units != "SI"
-                    else float(load_data.get("Fy", 0.0))
-                )
-
-                loads.append(
-                    {
-                        "id": node_id,
-                        "node_id": node_id,
-                        "Fx": Fx_si,
-                        "Fy": Fy_si,
-                    }
-                )
-        return loads
-
-    def _setup_dofs(self):
-        """تنظیم DOFهای سیستم"""
-        self.n_dof = 2 * len(self.nodes)
-        self.free_dofs = []
-        self.fixed_dofs = []
-        self.free_nodes = []
-        self.supported_nodes = []
-
-        # ایجاد نگاشت DOFها
-        self.dof_map = {}
-        dof_index = 0
-        for node_id, _node in sorted(self.nodes.items()):
-            self.dof_map[node_id] = (dof_index, dof_index + 1)
-            dof_index += 2
-
-        # تعیین DOFهای آزاد و قفل شده
-        for _id, node in self.nodes.items():
-            node.set_dofs(self.dof_map)
-            dof_x, dof_y = self.dof_map[node.id]
-
-            if node.is_support:
-                self.fixed_dofs.extend([dof_x, dof_y])
-                self.supported_nodes.append(node)
-            else:
-                self.free_dofs.extend([dof_x, dof_y])
-                self.free_nodes.append(node)
-
-        # مرتب‌سازی لیست DOFها
-        self.free_dofs.sort()
-        self.fixed_dofs.sort()
-
-    def get_dof_indices(self) -> Dict[int, Tuple[int, int]]:
-        """دریافت نگاشت DOFها"""
-        return self.dof_map
-
-    def validate_sign_convention(self) -> bool:
-        """
-        اعتبارسنجی قرارداد علامت برای نیروها و جابجایی‌ها
-        بازگشت: True اگر قرارداد علامت رعایت شده باشد
-        """
-        try:
-            # بررسی جهت نیروهای خارجی
-            for load in self.loads:
-                # هیچ نیرویی نباید به تکیه‌گاه اعمال شود
-                node = self.nodes.get(load.get("node_id", load.get("id")))
-                if node.is_support:
-                    logger.warning(f"⚠️ نیرو به تکیه‌گاه (گره {node.id}) اعمال شده است.")
-                    return False
-
-            # بررسی جهت‌های عضوها
-            for element in self.elements.values():
-                # محاسبه بردار عضو
-                dx = element.node_j.x - element.node_i.x
-                dy = element.node_j.y - element.node_i.y
-
-                # زاویه عضو
-                angle = np.arctan2(dy, dx)
-
-                # بررسی منطقی بودن زاویه (اختیاری)
-                if not np.isfinite(angle):
-                    logger.warning(f"⚠️ زاویه نامعتبر برای عضو {element.id}")
-                    return False
-
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ خطا در اعتبارسنجی قرارداد علامت: {e}")
-            return False
+        if not math.isfinite(e.A) or e.A <= 0:
+            raise InputValidationError(f"عضو {eid}: مساحت (A) باید مثبت و محدود باشد.")
+        if e.I is not None and (not math.isfinite(e.I) or e.I < 0):
+            raise InputValidationError(f"عضو {eid}: ممان اینرسی (I) نامعتبر.")

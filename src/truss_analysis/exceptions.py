@@ -1,31 +1,32 @@
-"""مدیریت استثناها و کدهای خطای مستند (Masterplan v6.0)"""
+from __future__ import annotations
 
 
-class TrussAnalysisError(Exception):
-    def __init__(self, message: str, error_code: str = "TRUSS-0000"):
-        super().__init__(message)
-        self.error_code = error_code
-        self.message = message
+class TrussError(Exception):
+    """Base exception for all truss analysis errors."""
 
-    def __str__(self) -> str:
-        return f"[{self.error_code}] {self.message}"
+    pass
 
 
-class InputDataError(TrussAnalysisError):
-    def __init__(self, message: str, error_code: str = "TRUSS-1001"):
-        super().__init__(message, error_code)
+class SingularMatrixError(TrussError):
+    """TRUSS-3001: Stiffness matrix is singular (mechanism or unstable)."""
+
+    def __init__(self, msg="ماتریس سختی منفرد است (مکانیزم یا سازه ناپایدار)."):
+        super().__init__(f"[TRUSS-3001] {msg}")
 
 
-class SingularMatrixError(TrussAnalysisError):
-    def __init__(self, message: str, error_code: str = "TRUSS-2001"):
-        super().__init__(message, error_code)
+class InputValidationError(TrussError):
+    """TRUSS-3002: Invalid input data (NaN, Inf, Negative)."""
+
+    pass
 
 
-class SolverError(TrussAnalysisError):
-    def __init__(self, message: str, error_code: str = "TRUSS-2002"):
-        super().__init__(message, error_code)
+class UnitConversionError(TrussError):
+    """TRUSS-3003: Unit conversion failed."""
+
+    pass
 
 
-class OutputError(TrussAnalysisError):
-    def __init__(self, message: str, error_code: str = "TRUSS-3001"):
-        super().__init__(message, error_code)
+class EnergyValidationError(TrussError):
+    """TRUSS-3004: Clapeyron's Theorem energy balance failed."""
+
+    pass
