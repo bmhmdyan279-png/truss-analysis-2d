@@ -355,12 +355,4 @@ truss-analysis-2d/
 - Docstring بنویسید
 - تمام ۲۹ تست باید پاس شوند
 
----
-
-<div align="center">
-
-**اگر این پروژه برای شما مفید بود، لطفاً ⭐ بدهید!**
-
-[![GitHub stars](https://img.shields.io/github/stars/bmhmdyan279-png/truss-analysis-2d.svg?style=social)](https://github.com/bmhmdyan279-png/truss-analysis-2d/stargazers)
-
 </div>
