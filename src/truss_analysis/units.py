@@ -1,35 +1,51 @@
 from __future__ import annotations
 
-from enum import Enum
+import enum
 
 from .exceptions import UnitConversionError
 
 
-class UnitSystem(Enum):
+class UnitSystem(enum.Enum):
     SI = "SI"
-    SI_MM = "SI-mm"
-    IMPERIAL = "Imperial"
+    IMPERIAL = "IMPERIAL"
+    SI_MM = "SI_MM"
 
 
-FACTORS = {
-    UnitSystem.SI: {"L": 1.0, "L2": 1.0, "L4": 1.0, "F": 1.0, "dT": 1.0},
-    UnitSystem.SI_MM: {"L": 1e-3, "L2": 1e-6, "L4": 1e-12, "F": 1.0, "dT": 1.0},
+_CONVERSION_FACTORS = {
+    UnitSystem.SI: {
+        "L": 1.0,
+        "A": 1.0,
+        "I": 1.0,
+        "E": 1.0,
+        "delta_T": 1.0,
+    },
     UnitSystem.IMPERIAL: {
-        "L": 0.3048,
-        "L2": 0.092903,
-        "L4": 0.008630,
-        "F": 4.44822,
-        "dT": 5.0 / 9.0,
+        "L": 0.0254,  # in to m
+        "A": 0.00064516,  # in² to m²
+        "I": 4.162314e-7,  # in⁴ to m⁴
+        "E": 6894.757,  # psi to Pa
+        "delta_T": 5 / 9,  # °F to °C (change)
+    },
+    UnitSystem.SI_MM: {
+        "L": 0.001,  # mm to m
+        "A": 1e-6,  # mm² to m²
+        "I": 1e-12,  # mm⁴ to m⁴
+        "E": 1.0,
+        "delta_T": 1.0,
     },
 }
 
 
-def to_si(value: float | None, system: str | UnitSystem, qty: str) -> float | None:
-    if value is None:
-        return None
-    if isinstance(system, str):
-        system = UnitSystem(system)
+def to_si(value: float, system: str, quantity: str) -> float:
     try:
-        return float(value) * FACTORS[system][qty]
-    except (KeyError, ValueError) as e:
-        raise UnitConversionError(f"تبدیل واحد نامعتبر: {e}") from None
+        sys_enum = UnitSystem(system)
+    except ValueError:
+        raise UnitConversionError(f"Unsupported unit system: {system}") from None
+    if sys_enum not in _CONVERSION_FACTORS:
+        raise UnitConversionError(f"No conversion factors for system: {system}")
+    factors = _CONVERSION_FACTORS[sys_enum]
+    if quantity not in factors:
+        raise UnitConversionError(
+            f"Unsupported quantity '{quantity}' for system {system}"
+        )
+    return value * factors[quantity]
