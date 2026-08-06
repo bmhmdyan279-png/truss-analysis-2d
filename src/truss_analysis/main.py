@@ -38,19 +38,31 @@ def run(filepath, unit_sys="SI"):
         for e in data["elements"]
     ]
     validate_inputs(nodes, elements)
-    K, F_ext, fixed_dofs = assemble_global_matrices(nodes, elements)
+
+    K, F_ext, F_mechanical, fixed_dofs = assemble_global_matrices(nodes, elements)
+
     loads = data.get("loads", [])
     node_map = {node.id: i for i, node in enumerate(nodes)}
     for lf in loads:
         nid = str(lf.get("node_id", lf.get("id")))
         if nid in node_map:
             idx = node_map[nid]
-            F_ext[idx * 2] += to_si(lf.get("Fx", 0.0), unit_sys, "F")
-            F_ext[idx * 2 + 1] += to_si(lf.get("Fy", 0.0), unit_sys, "F")
+            Fx = to_si(lf.get("Fx", 0.0), unit_sys, "F")
+            Fy = to_si(lf.get("Fy", 0.0), unit_sys, "F")
+            F_ext[idx * 2] += Fx
+            F_ext[idx * 2 + 1] += Fy
+            F_mechanical[idx * 2] += Fx
+            F_mechanical[idx * 2 + 1] += Fy
+
     U = solve(K, F_ext, fixed_dofs)
-    results, strain_energy = calculate_element_forces(nodes, elements, U)
-    check_energy(U, F_ext, strain_energy)
-    print("Analysis successful. Energy balanced.")
+
+    results, strain_energy, prestress_work = calculate_element_forces(
+        nodes, elements, U
+    )
+
+    check_energy(U, F_mechanical, strain_energy, prestress_work)
+
+    print("Analysis successful. Energy balanced (with thermal effects).")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ def calculate_element_forces(nodes: list[Node], elements: list[Element], U):
     node_map = {node.id: i for i, node in enumerate(nodes)}
     results = []
     total_strain_energy = 0.0
+    total_prestress_work = 0.0
 
     for elem in elements:
         n1_idx = node_map[elem.node_i]
@@ -28,12 +29,16 @@ def calculate_element_forces(nodes: list[Node], elements: list[Element], U):
         u2y = U[n2_idx * 2 + 1]
 
         delta_l_u = (u2x - u1x) * c + (u2y - u1y) * s
-        delta_l_mech = delta_l_u - (elem.alpha * elem.delta_T * L + elem.delta_L_free)
+        delta_l_thermal = elem.alpha * elem.delta_T * L + elem.delta_L_free
+        delta_l_mech = delta_l_u - delta_l_thermal
 
         k_axial = elem.E * elem.A / L
         n_force = k_axial * delta_l_mech
         u_elem = 0.5 * k_axial * (delta_l_mech**2)
         total_strain_energy += u_elem
+
+        w_prestress = k_axial * delta_l_thermal * delta_l_mech
+        total_prestress_work += w_prestress
 
         results.append(
             {
@@ -45,7 +50,7 @@ def calculate_element_forces(nodes: list[Node], elements: list[Element], U):
             }
         )
 
-    return results, total_strain_energy
+    return results, total_strain_energy, total_prestress_work
 
 
 def calculate_percentages(results):
@@ -63,5 +68,4 @@ def calculate_displacement_scale_factor(nodes, U):
     if max_u < 1e-12 or max_dim < 1e-12:
         return 1000.0
     scale = max_dim / max_u
-    # Clamp the scale factor to a reasonable maximum (1000.0)
     return min(scale, 1000.0)

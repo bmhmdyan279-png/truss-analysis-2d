@@ -25,24 +25,24 @@ def solve(K, F, fixed_dofs):
     return U
 
 
-def check_energy(U, F, strain_energy, tol=0.01):
-    W = 0.5 * np.dot(U, F)
-    if abs(W) < 1e-12 and abs(strain_energy) < 1e-12:
+def check_energy(U, F_mechanical, strain_energy, prestress_work, tol=0.01):
+    W_mech = 0.5 * np.dot(U, F_mechanical)
+    expected = strain_energy + prestress_work
+
+    if abs(W_mech) < 1e-12 and abs(expected) < 1e-12:
         return True
-    if abs(W) < 1e-12:
+
+    denominator = max(abs(expected), 1e-12)
+    err = abs(W_mech - expected) / denominator
+
+    if err > tol:
         msg = (
-            "Energy validation failed: External work is zero but strain energy is "
-            f"{strain_energy}"
+            f"Energy validation failed: W_mech={W_mech:.4e}, "
+            f"U_strain={strain_energy:.4e}, W_prestress={prestress_work:.4e}, "
+            f"Error {err:.4%} exceeds tolerance {tol:.2%}"
         )
         raise EnergyValidationError(msg)
 
-    err = abs(strain_energy - W) / abs(W)
-    if err > tol:
-        msg2 = (
-            "Energy validation failed: Error {err_val:.4%} exceeds tolerance "
-            "{tol_val:.2%}"
-        )
-        raise EnergyValidationError(msg2.format(err_val=err, tol_val=tol))
     return True
 
 

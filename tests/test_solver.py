@@ -24,14 +24,24 @@ def test_singular_matrix_raises_truss_3001():
         solve(k, f, fixed)
 
 
-def test_check_energy_pass():
+def test_check_energy_pass_no_thermal():
     u = np.array([1.0, 0.0])
-    f = np.array([2.0, 0.0])
-    assert check_energy(u, f, 1.0) is True
+    f_mech = np.array([2.0, 0.0])
+    strain_energy = 1.0
+    prestress_work = 0.0
+    assert check_energy(u, f_mech, strain_energy, prestress_work) is True
+
+
+def test_check_energy_pass_with_thermal():
+    u = np.array([2.0, 0.0])
+    f_mech = np.array([4.0, 0.0])
+    strain_energy = 3.0
+    prestress_work = 1.0
+    assert check_energy(u, f_mech, strain_energy, prestress_work) is True
 
 
 def test_check_energy_fail():
     u = np.array([1.0, 0.0])
-    f = np.array([2.0, 0.0])
+    f_mech = np.array([2.0, 0.0])
     with pytest.raises(EnergyValidationError):
-        check_energy(u, f, 5.0)
+        check_energy(u, f_mech, 5.0, 0.0)

@@ -10,14 +10,23 @@ from truss_analysis.postprocess import (
 )
 
 
-def test_calculate_element_forces():
+def test_calculate_element_forces_no_thermal():
     nodes = [Node("1", 0.0, 0.0), Node("2", 1.0, 0.0)]
     elements = [Element("e1", "1", "2", E=200e9, A=0.01)]
     u = np.array([0.0, 0.0, 0.001, 0.0])
-    res, energy = calculate_element_forces(nodes, elements, u)
+    res, energy, prestress = calculate_element_forces(nodes, elements, u)
     assert len(res) == 1
     assert res[0]["element"] == "e1"
     assert abs(res[0]["force"] - 2e6) < 1.0
+    assert prestress == 0.0
+
+
+def test_calculate_element_forces_with_thermal():
+    nodes = [Node("1", 0.0, 0.0), Node("2", 1.0, 0.0)]
+    elements = [Element("e1", "1", "2", E=200e9, A=0.01, delta_T=50, alpha=1.2e-5)]
+    u = np.array([0.0, 0.0, 0.001, 0.0])
+    res, energy, prestress = calculate_element_forces(nodes, elements, u)
+    assert prestress != 0.0
 
 
 def test_calculate_percentages_zero_energy():

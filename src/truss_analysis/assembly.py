@@ -11,6 +11,7 @@ def assemble_global_matrices(nodes: list[Node], elements: list[Element]):
     num_dofs = len(nodes) * 2
     K = np.zeros((num_dofs, num_dofs))
     F_ext = np.zeros(num_dofs)
+    F_mechanical = np.zeros(num_dofs)
     fixed_dofs = []
 
     for node in nodes:
@@ -66,4 +67,4 @@ def assemble_global_matrices(nodes: list[Node], elements: list[Element]):
         F_ext[n2_idx * 2] += f_thermal * c
         F_ext[n2_idx * 2 + 1] += f_thermal * s
 
-    return K, F_ext, sorted(list(set(fixed_dofs)))
+    return K, F_ext, F_mechanical, sorted(list(set(fixed_dofs)))
