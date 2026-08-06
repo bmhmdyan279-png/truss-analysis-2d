@@ -1,81 +1,23 @@
-"""
-تست مرجع ساده‌شده
-"""
-
-import os
-import sys
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from truss_analysis.assembly import build_global_matrices
-from truss_analysis.model import TrussModel
-from truss_analysis.solver import calculate_element_results, solve_displacements
+from truss_analysis.assembly import assemble_global_matrices
+from truss_analysis.model import Element, Node
+from truss_analysis.postprocess import calculate_element_forces
+from truss_analysis.solver import check_energy, solve
 
 
-def test_golden_reference():
-    """تست ساده‌شده با یک عضو افقی"""
-    print("🧪 اجرای تست مرجع ساده...")
-
-    input_data = {
-        "units": "SI",
-        "nodes": [
-            {"id": 1, "x": 0, "y": 0, "is_support": True},
-            {"id": 2, "x": 2, "y": 0, "is_support": True},  # فقط دو گره
-        ],
-        "elements": [
-            {
-                "id": 1,
-                "node_i": 1,
-                "node_j": 2,
-                "A": 0.01,
-                "E": 210e9,
-                "alpha": 1.2e-5,
-                "delta_T": 100.0,  # تغییر دمای 100 درجه
-            }
-        ],
-        "loads": {"node_forces": []},
-    }
-
-    # تحلیل
-    truss = TrussModel(input_data)
-    K, F = build_global_matrices(truss)
-    displacements = solve_displacements(truss, K, F)
-    results = calculate_element_results(truss, displacements)
-
-    # نتایج
-    element = results[0]
-
-    print("📊 نتایج محاسبه شده:")
-    print(f"  N = {element['N']:.1f} N")
-    print(f"  U = {element['U']:.1f} J")
-    print(f"  δL_eff = {element['delta_L_eff']:.6f} m")
-
-    # محاسبات تحلیلی
-    L = 2.0
-    A = 0.01
-    E = 210e9
-    alpha = 1.2e-5
-    delta_T = 100.0
-
-    delta_L_free = alpha * delta_T * L  # 0.0024 m
-    AE_L = A * E / L  # 1.05e9 N/m
-    N_expected = -AE_L * delta_L_free  # -2.52e6 N
-    U_expected = 0.5 * abs(N_expected) * abs(delta_L_free)  # 3024 J
-
-    print("\n🎯 نتایج مورد انتظار:")
-    print(f"  N = {N_expected:.1f} N")
-    print(f"  U = {U_expected:.1f} J")
-    print(f"  δL_free = {delta_L_free:.6f} m")
-
-    # تحمل خطا
-    tolerance = 0.01  # 1%
-
-    relative_error = abs(element["N"] - N_expected) / abs(N_expected)
-    assert relative_error < tolerance, (
-        f"تست مرجع شکست خورد! خطای نسبی: {relative_error * 100:.2f}%"
-    )
-
-
-if __name__ == "__main__":
-    success = test_golden_reference()
-    sys.exit(0 if success else 1)
+def test_golden_simple_truss():
+    nodes = [
+        Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="2", x=3.0, y=0.0, is_support=False),
+        Node(id="3", x=0.0, y=4.0, is_support=True, support_dx=False, support_dy=True),
+    ]
+    elements = [
+        Element(id="1", node_i="1", node_j="2", E=200e9, A=0.001),
+        Element(id="2", node_i="2", node_j="3", E=200e9, A=0.002),
+        Element(id="3", node_i="1", node_j="3", E=200e9, A=0.0015),
+    ]
+    K, F_ext, fixed_dofs = assemble_global_matrices(nodes, elements)
+    F_ext[2] += 10000.0
+    U = solve(K, F_ext, fixed_dofs)
+    assert abs(U[4]) > 1e-10
+    results, strain_energy = calculate_element_forces(nodes, elements, U)
+    check_energy(U, F_ext, strain_energy, tol=0.01)

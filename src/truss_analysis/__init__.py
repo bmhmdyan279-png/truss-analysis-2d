@@ -1,13 +1,6 @@
-"""
-truss_analysis — A professional 2D truss analysis engine.
-"""
+from .model import Element, Node
+from .solver import check_energy, solve
 
-try:
-    from importlib.metadata import version
+solve_truss = solve
 
-    __version__ = version("truss-analysis-2d")
-except Exception:
-    __version__ = "1.4.0"
-
-
-__all__ = ["__version__"]
+__all__ = ["solve", "solve_truss", "check_energy", "Node", "Element"]
