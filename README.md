@@ -4,10 +4,10 @@
 
 ![Python Version](https://img.shields.io/badge/python-≥3.9-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Version](https://img.shields.io/badge/version-2.0.4-orange.svg)
+![Version](https://img.shields.io/badge/version-2.0.8-orange.svg)
 [![CI Status](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions)
 
-**یک ابزار تحلیل خرپای دوبعدی کاملاً پایتون، با معماری Fail-Fast، اعتبارسنجی سخت‌گیرانه انرژی و پشتیبانی کامل از شرایط مرزی مستقل**
+**یک ابزار تحلیل خرپای دوبعدی کاملاً پایتون، با معماری Critic-Proof، اعتبارسنجی ترمودینامیکی تعمیم‌یافته و پایداری سینماتیکی تضمین‌شده**
 
 </div>
 
@@ -21,7 +21,7 @@
 - [استفاده سریع](#-استفاده-سریع)
 - [مثال کامل](#-مثال-کامل)
 - [سیستم واحد](#-سیستم-واحد)
-- [اعتبارسنجی انرژی](#-اعتبارسنجی-انرژی)
+- [اعتبارسنجی ترمودینامیکی](#-اعتبارسنجی-ترمودینامیکی)
 - [تست‌ها](#-تست‌ها)
 - [ساختار پروژه](#-ساختار-پروژه)
 - [تغییرات نسخه](#-تغییرات-نسخه)
@@ -31,23 +31,23 @@
 
 ## ✨ ویژگی‌های کلیدی
 
-### 🎯 معماری مدرن و تمیز
+### 🎯 معماری Critic-Proof
 - **Pure DTO Architecture**: جداسازی کامل داده (`model.py`)، اسمبل (`assembly.py`) و حل (`solver.py`)
-- **Fail-Fast Validation**: تشخیص فوری خطاهای هندسی، ماتریس‌های تکین و عدم تعادل انرژی
-- **Zero Side-Effects**: تمام محاسبات در توابع خالص، بدون تغییر وضعیت پنهان
-- **Centralized Exceptions**: مدیریت متمرکز خطاها در `exceptions.py`
+- **Centralized Exceptions**: سلسله‌مراتب متمرکز `TrussError` در `exceptions.py`
+- **Fail-Fast Validation**: تشخیص فوری خطاهای هندسی، ماتریس‌های تکین و ناپایداری سینماتیکی
 
-### 🔧 قابلیت‌های فنی
-- **پشتیبانی کامل از تکیه‌گاه غلتکی (Roller)**: شرایط مرزی مستقل در راستاهای X و Y
-- **اثرات حرارتی و خطای ساخت**: محاسبه دقیق نیروهای ناشی از تغییر دما (α·ΔT) و خطای مونتاژ (`delta_L_free`)
-- **سیستم واحد متمرکز**: تبدیل خودکار SI ↔ Imperial با یک منبع حقیقت
-- **اعتبارسنجی انرژی مکانیکی**: بررسی تعادل انرژی بر اساس تغییر شکل مکانیکی خالص (قضیه کلپیرون)
+### 🔧 قابلیت‌های فنی پیشرفته
+- **Thermodynamic Consistency**: تفکیک بردارهای نیرو (`F_ext` vs `F_mechanical`) برای محاسبه صحیح تعادل انرژی در حضور بارهای حرارتی
+- **Prestress Work Tracking**: محاسبه کار پیش‌تنیدگی (`W_prestress = Σ k·ΔL_thermal·ΔL_mech`) برای قضیه کلپیرون تعمیم‌یافته
+- **Kinematic Stability**: اعتبارسنجی پایداری سینماتیکی تکیه‌گاه‌ها (جلوگیری از مکانیزم‌های ناپایدار)
+- **Roller Support**: شرایط مرزی مستقل در X و Y
+- **Thermal + Fabrication**: پشتیبانی همزمان از `α·ΔT` و `delta_L_free`
 
 ### 🛡️ ایمنی و قابلیت اطمینان
-- **Fail-Fast Rank Check**: تشخیص صریح ماتریس‌های تکین (بدون حذف صامت ردیف‌های صفر)
-- **Zero-Length Element Detection**: خطای صریح برای المان‌های با طول صفر یا منفی
-- **Strict JSON Schema Validation**: اعتبارسنجی ساختار فایل ورودی و فیلد `loads` قبل از پردازش
-- **Comprehensive Test Suite**: تست‌های Golden با دقت تحلیلی و پوشش ۱۰۰٪ APIها
+- **Fail-Fast Rank Check**: تشخیص صریح ماتریس‌های تکین (`SingularMatrixError`)
+- **Zero-Length Element Detection**: `AssemblyError` برای المان‌های با طول صفر
+- **Strict JSON Schema Validation**: اعتبارسنجی ساختار فایل ورودی و فیلد `loads`
+- **Division-by-Zero Guards**: محافظت در برابر مسائل خودمتعادل (`abs(W) < 1e-12`)
 
 ---
 
@@ -56,25 +56,26 @@
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │                         main.py                              │
-│  (ورودی JSON → تبدیل واحد → اسمبل → حل → پس‌پردازش → خروجی)  │
+│  (JSON → Units → Assemble → Solve → Postprocess → Energy)    │
 └─────────────────────────────────────────────────────────────┘
                             ↓
         ┌───────────────────┼───────────────────┐
         ↓                   ↓                   ↓
   ┌──────────┐      ┌──────────────┐     ┌────────────┐
   │ fileio.py │      │  assembly.py │     │  solver.py │
-  │(بارگذاری)│      │  (اسمبل K,F)  │     │ (حل KU=F)  │
+  │(Schema✓) │      │ (K,F_ext,F_mech)  │ (KU=F + Energy) │
   └──────────┘      └──────────────┘     └────────────┘
         ↓                   ↓                   ↓
   ┌──────────────────────────────────────────────────┐
   │              model.py (Pure DTOs)                │
   │  @dataclass Node: id, x, y, support_dx, support_dy │
-  │  @dataclass Element: id, node_i, node_j, E, A    │
+  │  @dataclass Element: id, node_i, node_j, E, A, ... │
   └──────────────────────────────────────────────────┘
         ↓                   ↓                   ↓
   ┌──────────┐      ┌──────────────┐     ┌────────────────┐
   │ units.py  │      │postprocess.py│     │ exceptions.py  │
-  │(SI↔Imperial)│    │  (نیروها، انرژی)│    │ (مدیریت خطاها) │
+  │(SI↔Imperial)│    │ (forces, energy,│    │ (TrussError    │
+  │  5/9 ✓    │      │  prestress)   │    │  hierarchy)    │
   └──────────┘      └──────────────┘     └────────────────┘
 ```
 
@@ -82,35 +83,27 @@
 
 1. **Single Responsibility**: هر ماژول فقط یک مسئولیت دارد
 2. **Pure Functions**: توابع بدون side-effect، قابل تست و پیش‌بینی
-3. **Fail-Fast**: خطاها در اولین فرصت گزارش می‌شوند، نه در مراحل بعدی
-4. **Type Safety**: استفاده از `@dataclass` و Type Hints برای ساختارهای داده
+3. **Fail-Fast**: خطاها در اولین فرصت گزارش می‌شوند
+4. **Type Safety**: `@dataclass` و Type Hints کامل
+5. **Thermodynamic Consistency**: فرمول‌های صحیح انرژی حتی در حضور بارهای حرارتی
 
 ---
 
 ## 📦 نصب
 
-### روش ۱: نصب از PyPI (به زودی)
 ```bash
-pip install truss-analysis-2d
-```
-
-### روش ۲: نصب از سورس
-```bash
+# نصب از سورس
 git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
 cd truss-analysis-2d
 pip install .
-```
 
-### روش ۳: نصب برای توسعه
-```bash
-git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
-cd truss-analysis-2d
+# نصب برای توسعه
 pip install -e ".[dev]"
 pre-commit install
 ```
 
 ### وابستگی‌ها
-- `numpy>=1.20`: محاسبات برداری و ماتریسی (تنها وابستگی اجرایی پروژه)
+- `numpy>=1.20`: محاسبات برداری و ماتریسی (تنها وابستگی)
 
 ---
 
@@ -126,34 +119,38 @@ python -m truss_analysis.main examples/example1.json SI
 from truss_analysis import solve, Node, Element
 from truss_analysis.assembly import assemble_global_matrices
 from truss_analysis.postprocess import calculate_element_forces
+from truss_analysis.solver import check_energy
 
 # تعریف گره‌ها
 nodes = [
     Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
     Node(id="2", x=3.0, y=0.0, is_support=False),
-    Node(id="3", x=0.0, y=4.0, is_support=True, support_dx=False, support_dy=True),
+    Node(id="3", x=0.0, y=4.0, is_support=True, support_dx=True, support_dy=True),
 ]
 
-# تعریف المان‌ها
+# تعریف المان‌ها (با اثر حرارتی)
 elements = [
-    Element(id="1", node_i="1", node_j="2", E=200e9, A=0.001),
+    Element(id="1", node_i="1", node_j="2", E=200e9, A=0.001, alpha=1.2e-5, delta_T=50),
     Element(id="2", node_i="2", node_j="3", E=200e9, A=0.002),
     Element(id="3", node_i="1", node_j="3", E=200e9, A=0.0015),
 ]
 
-# اسمبل ماتریس‌ها
-K, F, fixed_dofs = assemble_global_matrices(nodes, elements)
+# اسمبل ماتریس‌ها - API جدید: 4 خروجی
+K, F_ext, F_mech, fixed_dofs = assemble_global_matrices(nodes, elements)
 
-# اعمال بار
-F[2] += 10000.0  # 10 kN در راستای X گره 2
+# اعمال بار مکانیکی به هر دو بردار
+F_ext[2] += 10000.0
+F_mech[2] += 10000.0
 
 # حل
-U = solve(K, F, fixed_dofs)
+U = solve(K, F_ext, fixed_dofs)
 
-# محاسبه نیروهای داخلی
-results, strain_energy = calculate_element_forces(nodes, elements, U)
+# محاسبه نیروها + انرژی + کار پیش‌تنیدگی
+results, strain_energy, prestress_work = calculate_element_forces(nodes, elements, U)
 
-# نمایش نتایج
+# اعتبارسنجی ترمودینامیکی با فرمول تعمیم‌یافته
+check_energy(U, F_mech, strain_energy, prestress_work)
+
 for r in results:
     print(f"Element {r['element']}: Force = {r['force']:.2f} N")
 ```
@@ -168,10 +165,11 @@ for r in results:
   "nodes": [
     {"id": "1", "x": 0.0, "y": 0.0, "is_support": true, "support_dx": true, "support_dy": true},
     {"id": "2", "x": 3.0, "y": 0.0, "is_support": false},
-    {"id": "3", "x": 0.0, "y": 4.0, "is_support": true, "support_dx": false, "support_dy": true}
+    {"id": "3", "x": 0.0, "y": 4.0, "is_support": true, "support_dx": true, "support_dy": true}
   ],
   "elements": [
-    {"id": "1", "node_i": "1", "node_j": "2", "E": 200e9, "A": 0.001, "alpha": 1.2e-5, "delta_T": 50},
+    {"id": "1", "node_i": "1", "node_j": "2", "E": 200e9, "A": 0.001,
+     "alpha": 1.2e-5, "delta_T": 50},
     {"id": "2", "node_i": "2", "node_j": "3", "E": 200e9, "A": 0.002},
     {"id": "3", "node_i": "1", "node_j": "3", "E": 200e9, "A": 0.0015}
   ],
@@ -182,50 +180,59 @@ for r in results:
 ```
 
 ### توضیحات
-- **گره ۱**: تکیه‌گاه ثابت کامل (گیردار در X و Y)
-- **گره ۲**: گره آزاد (بدون تکیه‌گاه)
-- **گره ۳**: تکیه‌گاه غلتکی (آزاد در X، مقید در Y)
+- **گره ۱**: تکیه‌گاه مفصلی کامل
+- **گره ۲**: گره آزاد
+- **گره ۳**: تکیه‌گاه مفصلی (پایداری سینماتیکی تضمین‌شده)
 - **المان ۱**: دارای اثر حرارتی (α=1.2e-5, ΔT=50°C)
-- **بارگذاری**: ۱۰ kN در راستای X و -۵ kN در راستای Y روی گره ۲
+- **بارگذاری**: ۱۰ kN در X و -۵ kN در Y روی گره ۲
 
 ---
 
 ## 📏 سیستم واحد
 
-### واحد‌های پشتیبانی شده
-
 | کمیت | SI | Imperial |
 |------|-----|----------|
 | طول (L) | متر | فوت |
 | مساحت (A) | متر² | فوت² |
-| ممان اینرسی (I) | متر⁴ | فوت⁴ |
 | مدول الاستیسیته (E) | پاسکال | psi |
 | نیرو (F) | نیوتن | پوند-نیرو |
 | ضریب انبساط حرارتی (α) | ۱/°C | ۱/°F |
 | تغییر دما (ΔT) | °C | °F |
 
+**نکته مهم**: ضریب تبدیل `delta_T` از °F به °C برابر با `5/9 ≈ 0.5556` است (نه 1.0)، و `alpha` برابر با `1.8` است (چرا که `1/°F = 1.8 × 1/°C`). این دو ضریب مکمل یکدیگرند و از نظر فیزیکی صحیح هستند.
+
 ---
 
-## ⚡ اعتبارسنجی انرژی
+## ⚡ اعتبارسنجی ترمودینامیکی
 
-### قضیه کلپیرون (تعمیم‌یافته)
+### قضیه کلپیرون تعمیم‌یافته
 
-برای یک سیستم خطی الاستیک، انرژی کرنشی تنها بر اساس **تغییر شکل مکانیکی** (`delta_l_mech`) محاسبه می‌شود تا از خطاهای Double-Counting حرارتی جلوگیری گردد:
+در حضور بارهای حرارتی، فرمول ساده `W = U_strain` دیگر برقرار نیست. این پروژه از فرمول تعمیم‌یافته استفاده می‌کند:
+
 ```text
-کار خارجی = انرژی کرنشی
-W = ½ · U^T · F = Σ (½ · k_axial · ΔL_mech²)
+W_mech = U_strain + W_prestress
 ```
+
+که:
+- **`W_mech = ½·Uᵀ·F_mechanical`**: کار بارهای خارجی مکانیکی (نه حرارتی)
+- **`U_strain = Σ (½·k·ΔL_mech²)`**: انرژی کرنشی مکانیکی
+- **`W_prestress = Σ (k·ΔL_thermal·ΔL_mech)`**: کار پیش‌تنیدگی حرارتی
 
 ### پیاده‌سازی
 ```python
 from truss_analysis.solver import check_energy
 
-# بررسی تعادل انرژی با تلورانس ۰.۰۱٪
-check_energy(U, F_ext, strain_energy, tol=0.01)
+# بررسی تعادل انرژی ترمودینامیکی
+check_energy(U, F_mech, strain_energy, prestress_work, tol=0.01)
 
 # در صورت عدم تعادل:
-# EnergyValidationError: Energy validation failed: Error 0.0234% exceeds tolerance 1.00%
+# EnergyValidationError: W_mech=..., U_strain=..., W_prestress=..., Error ...%
 ```
+
+### مزایا
+- **تشخیص باگ‌های Double-Counting**: اگر اثر حرارتی دو بار محاسبه شود، تعادل انرژی برقرار نخواهد شد
+- **حفاظت از مسائل خودمتعادل**: Guard در برابر `abs(W) < 1e-12`
+- **اعتبارسنجی خودکار هر تحلیل**: هر run به صورت خودکار بررسی می‌شود
 
 ---
 
@@ -233,12 +240,26 @@ check_energy(U, F_ext, strain_energy, tol=0.01)
 
 ### اجرای تست‌ها
 ```bash
-# اجرای تمام تست‌ها
-pytest
+# تمام تست‌ها (29 تست)
+pytest tests/
 
 # با پوشش کد
 pytest --cov=truss_analysis --cov-report=term-missing
 ```
+
+### انواع تست‌ها
+
+| تست | هدف |
+|-----|------|
+| `test_assembly.py` | اسمبل، شرایط مرزی، نیروهای حرارتی |
+| `test_golden.py` | پایداری سینماتیکی، انبساط آزاد، حالت مقید |
+| `test_solver.py` | حل، ماتریس تکین، تعادل انرژی ترمودینامیکی |
+| `test_postprocess.py` | نیروها، انرژی، درصدها، Scale Factor |
+| `test_model.py` | DTOها، `validate_inputs` |
+| `test_fileio.py` | Schema validation برای JSON |
+| `test_exceptions.py` | سلسله‌مراتب `TrussError` |
+| `test_units.py` | تبدیل واحدها، `None` guard |
+| `test_dof_mapping.py` | نگاشت صحیح درجات آزادی |
 
 ---
 
@@ -246,51 +267,73 @@ pytest --cov=truss_analysis --cov-report=term-missing
 
 ```text
 truss-analysis-2d/
-├── src/
-│   └── truss_analysis/
-│       ├── __init__.py          # Public API
-│       ├── model.py             # Pure DTOs (Node, Element)
-│       ├── assembly.py          # Assembly logic
-│       ├── solver.py            # Linear solver + energy check
-│       ├── postprocess.py       # Element forces & strain energy
-│       ├── units.py             # Unit conversion (SI ↔ Imperial)
-│       ├── fileio.py            # JSON loader with schema validation
-│       ├── exceptions.py        # Centralized custom exceptions
-│       ├── main.py              # CLI entry point
-│       └── logger.py            # Logging utilities
-├── tests/                       # Comprehensive Pytest suite
-├── examples/                    # JSON input examples
-├── pyproject.toml               # Project metadata & dependencies
-├── CHANGELOG.md                 # Version history
-└── README.md                    # This file
+├── src/truss_analysis/
+│   ├── __init__.py          # Public API
+│   ├── model.py             # Pure DTOs (Node, Element)
+│   ├── assembly.py          # Assembly (K, F_ext, F_mech)
+│   ├── solver.py            # KU=F + Energy check
+│   ├── postprocess.py       # Forces, energy, prestress
+│   ├── units.py             # SI ↔ Imperial (5/9 for ΔT)
+│   ├── fileio.py            # JSON loader + schema
+│   ├── exceptions.py        # TrussError hierarchy
+│   ├── main.py              # CLI entry
+│   └── logger.py            # Lazy logging
+├── tests/                   # 29 comprehensive tests
+├── examples/                # JSON inputs
+├── pyproject.toml           # Python ≥3.9, numpy only
+├── CHANGELOG.md             # Version history
+└── README.md                # This file
 ```
 
 ---
 
 ## 📊 تغییرات نسخه
 
+### نسخه ۲.۰.۸ (۲۰۲۶-۰۸-۰۷) - Production-Ready Release
+#### 🎯 تثبیت نهایی
+- همگام‌سازی کامل مستندات با معماری Critic-Proof
+- پوشش کامل تمام دستاوردهای v2.0.5 تا v2.0.7 در مستندات
+
+### نسخه ۲.۰.۷ (۲۰۲۶-۰۸-۰۷) - Kinematic Stability
+#### 🔧 اصلاحات
+- **test_golden_simple_truss**: گره ۳ به تکیه‌گاه مفصلی تبدیل شد (جلوگیری از مکانیزم ناشی از المان عمودی)
+- **test_golden_thermal_loading**: گره ۲ در Y مقید شد (جلوگیری از مود چرخشی جسم صلب)
+- تمام ۲۹ تست با ماتریس‌های سختی پایدار ریاضی پاس می‌شوند
+
+### نسخه ۲.۰.۶ (۲۰۲۶-۰۸-۰۷) - API Alignment
+#### 🔧 اصلاحات
+- **test_dof_mapping**: به‌روزرسانی برای unpack چهار خروجی `assemble_global_matrices`
+- رفع ناسازگاری‌های باقی‌مانده در suite تست
+
+### نسخه ۲.۰.۵ (۲۰۲۶-۰۸-۰۷) - Thermodynamic Consistency
+#### 🚀 دستاورد بزرگ
+- **رفع باگ Double-Counting حرارتی**: قضیه کلپیرون تعمیم‌یافته
+- **تفکیک بردارهای نیرو**: `F_ext` (کل) در برابر `F_mechanical` (خارجی مکانیکی)
+- **محاسبه `W_prestress`**: کار پیش‌تنیدگی حرارتی در `postprocess.py`
+- **فرمول جدید `check_energy`**: `W_mech = U_strain + W_prestress`
+- **تست جدید**: `test_golden_thermal_constrained` برای میله مقید
+- **تست جدید**: `test_check_energy_pass_with_thermal` برای اثبات درستی فرمول
+
 ### نسخه ۲.۰.۴ (۲۰۲۶-۰۸-۰۷) - Documentation Sync
-#### 📚 مستندات
-- همگام‌سازی کامل README با معماری ضدگلوله v2.0.3
-- به‌روزرسانی Badgeها به Python ≥3.9
-- اصلاح ساختار JSON مثال برای فیلد `loads`
-- به‌روزرسانی دیاگرام معماری با `exceptions.py`
+- همگام‌سازی README با معماری v2.0.3
+- اصلاح ساختار JSON مثال (`loads` به صورت flat list)
+- به‌روزرسانی Badgeها و دیاگرام معماری
 
 ### نسخه ۲.۰.۳ (۲۰۲۶-۰۸-۰۷) - Critic-Proof Architecture
-#### 🚀 دستاوردهای بزرگ
-- **اصلاح باگ فیزیکی Double-Counting**: انرژی کرنشی اکنون صرفاً بر اساس تغییر شکل مکانیکی محاسبه می‌شود.
-- **یکپارچگی مطلق API**: همگام‌سازی کامل ساختار `list` بین تمام ماژول‌ها و تست‌ها.
-- **اعتبارسنجی Schema**: بررسی سخت‌گیرانه فیلد `loads` در `fileio.py` برای جلوگیری از پردازش JSONهای ناقص.
-- **اصلاح واحدهای Imperial**: رفع باگ تبدیل `delta_T` (اعمال ضریب 5/9).
-- **مدیریت خطای متمرکز**: انتقال تمام Exceptionها به `exceptions.py` و حذف تعاریف محلی.
-- **حذف وابستگی‌های مرده**: حذف `scipy` از `pyproject.toml` و پارامتر `use_sparse` از `solver.py`.
-- **استانداردسازی کد**: ارتقا به Python `>=3.9`، اضافه شدن `ruff` به CI و اصلاح متغیر مبهم `I` به `I_sec`.
+- یکپارچگی مطلق API (list-based)
+- مدیریت خطای متمرکز (`exceptions.py`)
+- اعتبارسنجی Schema برای `loads`
+- اصلاح Imperial `delta_T` به `5/9`
+- حذف `scipy` و `use_sparse`
+- ارتقا به Python `>=3.9` + Ruff در CI
+- اصلاح متغیر مبهم `I` به `I_sec`
+- حذف side-effect در `logger.py`
 
 ### نسخه ۲.۰.۱ (۲۰۲۶-۰۸-۰۶)
-#### ✅ اضافه شده
-- **معماری Pure DTO**: جداسازی کامل داده و منطق
-- **Fail-Fast Rank Check**: تشخیص صریح ماتریس‌های تکین
-- **پشتیبانی از Roller**: شرایط مرزی مستقل در X و Y
+- معماری Pure DTO
+- Fail-Fast Rank Check
+- پشتیبانی از Roller Support
+- Zero-Length Element Detection
 
 برای تاریخچه کامل، [CHANGELOG.md](CHANGELOG.md) را مشاهده کنید.
 
@@ -298,11 +341,26 @@ truss-analysis-2d/
 
 ## 🤝 مشارکت
 
-مشارکت‌ها خوش‌آمد هستند! لطفاً:
+مشارکت‌ها خوش‌آمد هستند!
 1. Fork کنید
-2. Branch ویژگی بسازید (`git checkout -b feature/amazing-feature`)
-3. Commit کنید (`git commit -m 'feat: add amazing feature'`)
-4. Push کنید (`git push origin feature/amazing-feature`)
+2. Branch ویژگی بسازید (`git checkout -b feature/...`)
+3. Commit کنید (`git commit -m 'feat: ...'`)
+4. Push کنید
 5. Pull Request باز کنید
+
+### دستورالعمل‌ها
+- از `ruff` برای linting استفاده کنید
+- تست بنویسید (`pytest`)
+- Type hints اضافه کنید
+- Docstring بنویسید
+- تمام ۲۹ تست باید پاس شوند
+
+---
+
+<div align="center">
+
+**اگر این پروژه برای شما مفید بود، لطفاً ⭐ بدهید!**
+
+[![GitHub stars](https://img.shields.io/github/stars/bmhmdyan279-png/truss-analysis-2d.svg?style=social)](https://github.com/bmhmdyan279-png/truss-analysis-2d/stargazers)
 
 </div>
