@@ -1,4 +1,5 @@
 import pytest
+
 from truss_analysis.units import UnitConversionError, to_si
 
 

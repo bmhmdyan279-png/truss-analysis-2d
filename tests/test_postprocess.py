@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 from truss_analysis.model import Element, Node
 from truss_analysis.postprocess import (
     calculate_displacement_scale_factor,

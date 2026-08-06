@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 
 import pytest
+
 from truss_analysis.exceptions import InputValidationError
 from truss_analysis.model import Element, Node, validate_inputs
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from truss_analysis.exceptions import EnergyValidationError, SingularMatrixError
 from truss_analysis.solver import check_energy, solve
 

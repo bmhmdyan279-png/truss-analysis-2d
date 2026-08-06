@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+
 from truss_analysis.assembly import assemble_global_matrices
 from truss_analysis.model import Element, Node
 
