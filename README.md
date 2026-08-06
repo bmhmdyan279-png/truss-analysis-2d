@@ -131,14 +131,14 @@ from truss_analysis.postprocess import calculate_element_forces
 nodes = [
     Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
     Node(id="2", x=3.0, y=0.0, is_support=False),
-    Node(id="3", x=0.0, y=4.0, is_support=True, support_dx=False, support_dy=True)
+    Node(id="3", x=0.0, y=4.0, is_support=True, support_dx=False, support_dy=True),
 ]
 
 # تعریف المان‌ها
 elements = [
     Element(id="1", node_i="1", node_j="2", E=200e9, A=0.001),
     Element(id="2", node_i="2", node_j="3", E=200e9, A=0.002),
-    Element(id="3", node_i="1", node_j="3", E=200e9, A=0.0015)
+    Element(id="3", node_i="1", node_j="3", E=200e9, A=0.0015),
 ]
 
 # اسمبل ماتریس‌ها
@@ -287,7 +287,7 @@ def test_to_si_imperial_length():
 def test_dof_mapping():
     nodes = [
         Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
-        Node(id="2", x=1.0, y=0.0, is_support=False)
+        Node(id="2", x=1.0, y=0.0, is_support=False),
     ]
     K, F, fixed = assemble_global_matrices(nodes, [])
     assert 0 in fixed and 1 in fixed  # DOF 0,1 مقید

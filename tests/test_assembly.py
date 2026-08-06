@@ -6,15 +6,15 @@ from truss_analysis.model import Element, Node
 
 
 def test_assemble_simple_truss():
-    nodes = {
-        "1": Node("1", 0.0, 0.0, is_support=True, support_dx=True, support_dy=True),
-        "2": Node("2", 1.0, 0.0, is_support=True, support_dx=False, support_dy=True),
-        "3": Node("3", 0.5, 1.0, is_support=False),
-    }
-    elements = {
-        "e1": Element("e1", "1", "3", E=200e9, A=0.01),
-        "e2": Element("e2", "2", "3", E=200e9, A=0.01),
-    }
+    nodes = [
+        Node("1", 0.0, 0.0, is_support=True, support_dx=True, support_dy=True),
+        Node("2", 1.0, 0.0, is_support=True, support_dx=False, support_dy=True),
+        Node("3", 0.5, 1.0, is_support=False),
+    ]
+    elements = [
+        Element("e1", "1", "3", E=200e9, A=0.01),
+        Element("e2", "2", "3", E=200e9, A=0.01),
+    ]
     k, f_th, fixed = assemble_global_matrices(nodes, elements)
     assert k.shape == (6, 6)
     assert sorted(fixed) == [0, 1, 3]
@@ -22,12 +22,10 @@ def test_assemble_simple_truss():
 
 
 def test_thermal_force_sign_convention():
-    nodes = {
-        "1": Node("1", 0.0, 0.0, is_support=True, support_dx=True, support_dy=True),
-        "2": Node("2", 1.0, 0.0, is_support=True, support_dx=True, support_dy=True),
-    }
-    elements = {
-        "e1": Element("e1", "1", "2", E=200e9, A=0.01, delta_L_free=0.001),
-    }
+    nodes = [
+        Node("1", 0.0, 0.0, is_support=True, support_dx=True, support_dy=True),
+        Node("2", 1.0, 0.0, is_support=True, support_dx=True, support_dy=True),
+    ]
+    elements = [Element("e1", "1", "2", E=200e9, A=0.01, delta_L_free=0.001)]
     k, f_th, fixed = assemble_global_matrices(nodes, elements)
     assert np.any(f_th != 0)

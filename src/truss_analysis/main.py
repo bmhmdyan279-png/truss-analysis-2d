@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import sys
 
 from .assembly import assemble_global_matrices
 from .fileio import load_json
-from .model import Element, Node
+from .model import Element, Node, validate_inputs
 from .postprocess import calculate_element_forces
 from .solver import check_energy, solve
 from .units import to_si
@@ -21,7 +23,6 @@ def run(filepath, unit_sys="SI"):
         )
         for n in data["nodes"]
     ]
-
     elements = [
         Element(
             id=str(e["id"]),
@@ -29,26 +30,23 @@ def run(filepath, unit_sys="SI"):
             node_j=str(e["node_j"]),
             E=to_si(e["E"], unit_sys, "E"),
             A=to_si(e["A"], unit_sys, "A"),
-            I=to_si(e.get("I", 0.0), unit_sys, "I"),
+            I_sec=to_si(e.get("I_sec", e.get("I", 0.0)), unit_sys, "I_sec"),
             alpha=to_si(e.get("alpha", 0.0), unit_sys, "alpha"),
             delta_T=to_si(e.get("delta_T", 0.0), unit_sys, "delta_T"),
+            delta_L_free=to_si(e.get("delta_L_free", 0.0), unit_sys, "L"),
         )
         for e in data["elements"]
     ]
-
+    validate_inputs(nodes, elements)
     K, F_ext, fixed_dofs = assemble_global_matrices(nodes, elements)
-
     loads = data.get("loads", [])
-    node_forces = loads.get("node_forces", []) if isinstance(loads, dict) else loads
     node_map = {node.id: i for i, node in enumerate(nodes)}
-
-    for lf in node_forces:
+    for lf in loads:
         nid = str(lf.get("node_id", lf.get("id")))
         if nid in node_map:
             idx = node_map[nid]
             F_ext[idx * 2] += to_si(lf.get("Fx", 0.0), unit_sys, "F")
             F_ext[idx * 2 + 1] += to_si(lf.get("Fy", 0.0), unit_sys, "F")
-
     U = solve(K, F_ext, fixed_dofs)
     results, strain_energy = calculate_element_forces(nodes, elements, U)
     check_energy(U, F_ext, strain_energy)

@@ -10,13 +10,12 @@ from truss_analysis.postprocess import (
 
 
 def test_calculate_element_forces():
-    nodes = {"1": Node("1", 0.0, 0.0), "2": Node("2", 1.0, 0.0)}
-    elements = {"e1": Element("e1", "1", "2", E=200e9, A=0.01)}
-    dof_map = {"1": (0, 1), "2": (2, 3)}
+    nodes = [Node("1", 0.0, 0.0), Node("2", 1.0, 0.0)]
+    elements = [Element("e1", "1", "2", E=200e9, A=0.01)]
     u = np.array([0.0, 0.0, 0.001, 0.0])
-    res = calculate_element_forces(nodes, elements, u, dof_map)
+    res, energy = calculate_element_forces(nodes, elements, u)
     assert len(res) == 1
-    assert res[0]["element_id"] == "e1"
+    assert res[0]["element"] == "e1"
     assert abs(res[0]["force"] - 2e6) < 1.0
 
 
@@ -34,7 +33,7 @@ def test_calculate_percentages_normal():
 
 
 def test_scale_factor_limits():
-    nodes = {"1": Node("1", 0.0, 0.0), "2": Node("2", 10.0, 0.0)}
+    nodes = [Node("1", 0.0, 0.0), Node("2", 10.0, 0.0)]
     u = np.array([0.0, 0.0, 1e-9, 0.0])
     scale = calculate_displacement_scale_factor(nodes, u)
     assert scale == 1000.0

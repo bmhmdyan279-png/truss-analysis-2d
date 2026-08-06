@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 import numpy as np
 
-
-class SingularMatrixError(Exception):
-    pass
+from .exceptions import EnergyValidationError, SingularMatrixError
 
 
-def solve(K, F, fixed_dofs, use_sparse=False):
+def solve(K, F, fixed_dofs):
     all_dofs = np.arange(K.shape[0])
     free_dofs = np.setdiff1d(all_dofs, fixed_dofs)
 
@@ -34,7 +34,7 @@ def check_energy(U, F, strain_energy, tol=0.01):
             "Energy validation failed: External work is zero but strain energy is "
             f"{strain_energy}"
         )
-        raise ValueError(msg)
+        raise EnergyValidationError(msg)
 
     err = abs(strain_energy - W) / abs(W)
     if err > tol:
@@ -42,7 +42,7 @@ def check_energy(U, F, strain_energy, tol=0.01):
             "Energy validation failed: Error {err_val:.4%} exceeds tolerance "
             "{tol_val:.2%}"
         )
-        raise ValueError(msg2.format(err_val=err, tol_val=tol))
+        raise EnergyValidationError(msg2.format(err_val=err, tol_val=tol))
     return True
 
 

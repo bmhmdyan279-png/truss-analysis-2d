@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 from .model import Element, Node
@@ -25,13 +27,12 @@ def calculate_element_forces(nodes: list[Node], elements: list[Element], U):
         u2x = U[n2_idx * 2]
         u2y = U[n2_idx * 2 + 1]
 
-        delta_l_mech = (u2x - u1x) * c + (u2y - u1y) * s
-        delta_l_thermal = elem.alpha * elem.delta_T * L
-        delta_l_total = delta_l_mech + delta_l_thermal
+        delta_l_u = (u2x - u1x) * c + (u2y - u1y) * s
+        delta_l_mech = delta_l_u - (elem.alpha * elem.delta_T * L + elem.delta_L_free)
 
         k_axial = elem.E * elem.A / L
-        n_force = k_axial * delta_l_total
-        u_elem = 0.5 * k_axial * (delta_l_total**2)
+        n_force = k_axial * delta_l_mech
+        u_elem = 0.5 * k_axial * (delta_l_mech**2)
         total_strain_energy += u_elem
 
         results.append(
@@ -39,9 +40,28 @@ def calculate_element_forces(nodes: list[Node], elements: list[Element], U):
                 "element": elem.id,
                 "force": n_force,
                 "stress": n_force / elem.A,
-                "strain": delta_l_total / L,
+                "strain": delta_l_mech / L,
                 "energy": u_elem,
             }
         )
 
     return results, total_strain_energy
+
+
+def calculate_percentages(results):
+    total_e = sum(r.get("energy", 0.0) for r in results)
+    for r in results:
+        r["pct_U"] = (
+            (r.get("energy", 0.0) / total_e * 100.0) if total_e > 1e-12 else 0.0
+        )
+    return results
+
+
+def calculate_displacement_scale_factor(nodes, U):
+    max_u = np.max(np.abs(U)) if len(U) > 0 else 0.0
+    max_dim = max(max(abs(n.x), abs(n.y)) for n in nodes) if nodes else 0.0
+    if max_u < 1e-12 or max_dim < 1e-12:
+        return 1000.0
+    scale = max_dim / max_u
+    # Clamp the scale factor to a reasonable maximum (1000.0)
+    return min(scale, 1000.0)

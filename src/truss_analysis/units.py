@@ -1,8 +1,6 @@
+from __future__ import annotations
+
 from enum import Enum
-
-
-class UnitConversionError(Exception):
-    pass
 
 
 class UnitSystem(Enum):
@@ -16,7 +14,7 @@ _CONVERSION_FACTORS = {
         "L2": 1.0,
         "L4": 1.0,
         "A": 1.0,
-        "I": 1.0,
+        "I_sec": 1.0,
         "E": 1.0,
         "F": 1.0,
         "delta_T": 1.0,
@@ -27,13 +25,17 @@ _CONVERSION_FACTORS = {
         "L2": 0.092903,
         "L4": 0.0086309,
         "A": 0.092903,
-        "I": 0.0086309,
+        "I_sec": 0.0086309,
         "E": 6894.757,
         "F": 4.44822,
-        "delta_T": 1.0,
+        "delta_T": 5.0 / 9.0,
         "alpha": 1.8,
     },
 }
+
+
+class UnitConversionError(Exception):
+    pass
 
 
 def to_si(value, unit_system: str, quantity: str):
@@ -43,9 +45,7 @@ def to_si(value, unit_system: str, quantity: str):
         sys_enum = UnitSystem(unit_system)
     except ValueError:
         raise UnitConversionError(f"Unknown unit system: {unit_system}")
-
     factors = _CONVERSION_FACTORS.get(sys_enum)
     if not factors or quantity not in factors:
         raise UnitConversionError(f"Unknown quantity '{quantity}' for {unit_system}")
-
     return float(value) * factors[quantity]
