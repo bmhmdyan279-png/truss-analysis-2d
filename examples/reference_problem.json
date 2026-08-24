@@ -2,11 +2,40 @@
   "units": "SI",
   "temperature_change": 0.0,
   "nodes": [
-    {"id": 1, "x": 0.0, "y": 0.0, "is_support": true},
-    {"id": 2, "x": 4.0, "y": 0.0, "is_support": false},
-    {"id": 3, "x": 8.0, "y": 0.0, "is_support": true},
-    {"id": 4, "x": 2.0, "y": 3.0, "is_support": false},
-    {"id": 5, "x": 6.0, "y": 3.0, "is_support": false}
+    {
+      "id": 1,
+      "x": 0.0,
+      "y": 0.0,
+      "is_support": true,
+      "support_dx": true,
+      "support_dy": true
+    },
+    {
+      "id": 2,
+      "x": 4.0,
+      "y": 0.0,
+      "is_support": false
+    },
+    {
+      "id": 3,
+      "x": 8.0,
+      "y": 0.0,
+      "is_support": true,
+      "support_dx": true,
+      "support_dy": true
+    },
+    {
+      "id": 4,
+      "x": 2.0,
+      "y": 3.0,
+      "is_support": false
+    },
+    {
+      "id": 5,
+      "x": 6.0,
+      "y": 3.0,
+      "is_support": false
+    }
   ],
   "elements": [
     {
@@ -14,103 +43,109 @@
       "node_i": 1,
       "node_j": 2,
       "A": 0.01,
-      "E": 210e9,
-      "alpha": 1.2e-5,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
       "delta_T": 0.0,
       "delta_L0": 0.0,
-      "I": 8.33e-10,
       "effective_length_factor": 1.0,
-      "section_type": "rectangular"
+      "section_type": "rectangular",
+      "I_sec": 8.33e-10
     },
     {
       "id": 2,
       "node_i": 2,
       "node_j": 3,
       "A": 0.01,
-      "E": 210e9,
-      "alpha": 1.2e-5,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
       "delta_T": 0.0,
       "delta_L0": 0.0,
-      "I": 8.33e-10,
       "effective_length_factor": 1.0,
-      "section_type": "rectangular"
+      "section_type": "rectangular",
+      "I_sec": 8.33e-10
     },
     {
       "id": 3,
       "node_i": 1,
       "node_j": 4,
       "A": 0.015,
-      "E": 210e9,
-      "alpha": 1.2e-5,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
       "delta_T": 0.0,
       "delta_L0": 0.0,
-      "I": 1.25e-9,
       "effective_length_factor": 1.0,
-      "section_type": "rectangular"
+      "section_type": "rectangular",
+      "I_sec": 1.25e-09
     },
     {
       "id": 4,
       "node_i": 4,
       "node_j": 2,
       "A": 0.015,
-      "E": 210e9,
-      "alpha": 1.2e-5,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
       "delta_T": 0.0,
       "delta_L0": 0.0,
-      "I": 1.25e-9,
       "effective_length_factor": 1.0,
-      "section_type": "rectangular"
+      "section_type": "rectangular",
+      "I_sec": 1.25e-09
     },
     {
       "id": 5,
       "node_i": 2,
       "node_j": 5,
       "A": 0.015,
-      "E": 210e9,
-      "alpha": 1.2e-5,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
       "delta_T": 0.0,
       "delta_L0": 0.0,
-      "I": 1.25e-9,
       "effective_length_factor": 1.0,
-      "section_type": "rectangular"
+      "section_type": "rectangular",
+      "I_sec": 1.25e-09
     },
     {
       "id": 6,
       "node_i": 5,
       "node_j": 3,
       "A": 0.015,
-      "E": 210e9,
-      "alpha": 1.2e-5,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
       "delta_T": 0.0,
       "delta_L0": 0.0,
-      "I": 1.25e-9,
       "effective_length_factor": 1.0,
-      "section_type": "rectangular"
+      "section_type": "rectangular",
+      "I_sec": 1.25e-09
     },
     {
       "id": 7,
       "node_i": 4,
       "node_j": 5,
       "A": 0.02,
-      "E": 210e9,
-      "alpha": 1.2e-5,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
       "delta_T": 0.0,
       "delta_L0": 0.0,
-      "I": 1.67e-9,
       "effective_length_factor": 1.0,
-      "section_type": "rectangular"
+      "section_type": "rectangular",
+      "I_sec": 1.67e-09
     }
   ],
-  "loads": {
-    "node_forces": [
-      {"node_id": 4, "Fx": 20000.0, "Fy": -30000.0},
-      {"node_id": 5, "Fx": -20000.0, "Fy": -30000.0}
-    ]
-  },
+  "loads": [
+    {
+      "node_id": 4,
+      "Fx": 20000.0,
+      "Fy": -30000.0
+    },
+    {
+      "node_id": 5,
+      "Fx": -20000.0,
+      "Fy": -30000.0
+    }
+  ],
   "options": {
     "use_sparse": true,
     "bc_method": "elimination",
-    "penalty_value": 1e12,
+    "penalty_value": 1000000000000.0,
     "plot_results": true,
     "displacement_scale": "auto"
   }

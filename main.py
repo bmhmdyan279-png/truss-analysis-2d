@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import io
 import sys
+import io
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -8,21 +8,6 @@ try:
 except AttributeError:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
-
-"""
-Backward compatibility shim for running truss_analysis from the root.
-
-Exit Code Taxonomy:
-  0: Success (موفقیت)
-  1: Input error (خطای ورودی - مثلاً فایل نامعتبر یا داده ناقص)
-  2: Solver error (خطای حل‌گر - مثلاً ماتریس منفرد یا عدم همگرایی)
-  3: Output/Visualization error (خطای خروجی/بصری‌سازی - مثلاً خطا در ذخیره نمودار)
-  4: Internal error (خطای داخلی - استثناهای غیرمنتظره)
-"""
-
-
-# مدیریت TTY در ویندوز برای جلوگیری از Mojibake
-
 
 try:
     from truss_analysis.main import main as app_main

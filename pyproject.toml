@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "truss_analysis"
-version = "2.0.3"
+version = "2.0.9"
 description = "2D Truss Analysis Tool"
 requires-python = ">=3.9"
 dependencies = ["numpy>=1.20"]

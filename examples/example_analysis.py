@@ -1,35 +1,31 @@
-import sys
-
-sys.path.append(".")
-
-from assembly import build_global_matrices
-from model import TrussModel
-from solver import calculate_element_results, solve_displacements
+from truss_analysis import Element, Node, solve
+from truss_analysis.assembly import assemble_global_matrices
+from truss_analysis.postprocess import calculate_element_forces
 
 # مثال: خرپای ساده مثلثی
-input_data = {
-    "units": "SI",
-    "nodes": [
-        {"id": 1, "x": 0, "y": 0, "is_support": True},
-        {"id": 2, "x": 2, "y": 0, "is_support": True},
-        {"id": 3, "x": 1, "y": 1.5, "is_support": False},
-    ],
-    "elements": [
-        {"id": 1, "node_i": 1, "node_j": 3, "A": 0.01, "E": 210e9},
-        {"id": 2, "node_i": 2, "node_j": 3, "A": 0.01, "E": 210e9},
-        {"id": 3, "node_i": 1, "node_j": 2, "A": 0.01, "E": 210e9},
-    ],
-    "loads": {"node_forces": [{"node_id": 3, "Fx": 0, "Fy": -10000}]},
-    "options": {"use_sparse": True, "bc_method": "elimination"},
-}
+nodes = [
+    Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+    Node(id="2", x=2.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+    Node(id="3", x=1.0, y=1.5, is_support=False),
+]
+
+elements = [
+    Element(id="1", node_i="1", node_j="3", E=210e9, A=0.01),
+    Element(id="2", node_i="2", node_j="3", E=210e9, A=0.01),
+    Element(id="3", node_i="1", node_j="2", E=210e9, A=0.01),
+]
+
+K, F_ext, F_mech, fixed_dofs = assemble_global_matrices(nodes, elements)
+
+# اعمال بار -10000 نیوتن در جهت Y به گره 3
+F_ext[5] += -10000.0
+F_mech[5] += -10000.0
 
 print("🔍 تحلیل خرپای نمونه...")
-truss = TrussModel(input_data)
-K, F = build_global_matrices(truss)
-displacements = solve_displacements(truss, K, F)
-results = calculate_element_results(truss, displacements)
+U = solve(K, F_ext, fixed_dofs)
+results, strain_energy, prestress_work = calculate_element_forces(nodes, elements, U)
 
 print("\n📊 نتایج:")
 for r in results:
-    status_icon = "📈" if r["status"] == "Tension" else "📉"
-    print(f"  عضو {r['id']}: {status_icon} N={r['N']:.2f} N ({r['status']})")
+    status_icon = "📈" if r["force"] > 0 else "📉"
+    print(f"  عضو {r['element']}: {status_icon} N={r['force']:.2f} N")

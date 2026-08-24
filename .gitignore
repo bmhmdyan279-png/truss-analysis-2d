@@ -1,44 +1,66 @@
+
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+.venv
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.dll
+*.dylib
 
-# Virtual environments
-venv/
-env/
-.env
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# Logs
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
 *.log
-truss_analysis.log
-
-# Output files
-results/
-*.png
-*.csv
-*.json
-!examples/*.json
-
-# Test coverage
-.coverage
-htmlcov/
-.pytest_cache/
-
-# Build and distribution
-dist/
-build/
-*.egg-info/
-
-# Result files
-results_*.md
-results_*.csv
-results_*.png
-RELEASE_NOTES.md
-.baseline_perf/
-
-# Build artifacts
-dist/
+logs/
+*.db
+*.sqlite

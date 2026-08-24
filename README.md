@@ -4,10 +4,10 @@
 
 ![Python Version](https://img.shields.io/badge/python-≥3.9-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Version](https://img.shields.io/badge/version-2.0.8-orange.svg)
+![Version](https://img.shields.io/badge/version-2.0.9-orange.svg)
 [![CI Status](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions)
 
-**یک ابزار تحلیل خرپای دوبعدی کاملاً پایتون، با معماری Critic-Proof، اعتبارسنجی ترمودینامیکی تعمیم‌یافته و پایداری سینماتیکی تضمین‌شده**
+**یک ابزار تحلیل خرپای دوبعدی کاملاً پایتون، با معماری استاندارد، اعتبارسنجی ترمودینامیکی تعمیم‌یافته و پایداری سینماتیکی تضمین‌شده**
 
 </div>
 
@@ -31,7 +31,7 @@
 
 ## ✨ ویژگی‌های کلیدی
 
-### 🎯 معماری Critic-Proof
+### 🎯 معماری استاندارد
 - **Pure DTO Architecture**: جداسازی کامل داده (`model.py`)، اسمبل (`assembly.py`) و حل (`solver.py`)
 - **Centralized Exceptions**: سلسله‌مراتب متمرکز `TrussError` در `exceptions.py`
 - **Fail-Fast Validation**: تشخیص فوری خطاهای هندسی، ماتریس‌های تکین و ناپایداری سینماتیکی
@@ -289,9 +289,9 @@ truss-analysis-2d/
 
 ## 📊 تغییرات نسخه
 
-### نسخه ۲.۰.۸ (۲۰۲۶-۰۸-۰۷) - Production-Ready Release
+### نسخه ۲.۰.۹ (۲۰۲۶-۰۸-۰۷) - پایدار Release
 #### 🎯 تثبیت نهایی
-- همگام‌سازی کامل مستندات با معماری Critic-Proof
+- همگام‌سازی کامل مستندات با معماری استاندارد
 - پوشش کامل تمام دستاوردهای v2.0.5 تا v2.0.7 در مستندات
 
 ### نسخه ۲.۰.۷ (۲۰۲۶-۰۸-۰۷) - Kinematic Stability
@@ -315,11 +315,11 @@ truss-analysis-2d/
 - **تست جدید**: `test_check_energy_pass_with_thermal` برای اثبات درستی فرمول
 
 ### نسخه ۲.۰.۴ (۲۰۲۶-۰۸-۰۷) - Documentation Sync
-- همگام‌سازی README با معماری v2.0.3
+- همگام‌سازی README با معماری v2.0.9
 - اصلاح ساختار JSON مثال (`loads` به صورت flat list)
 - به‌روزرسانی Badgeها و دیاگرام معماری
 
-### نسخه ۲.۰.۳ (۲۰۲۶-۰۸-۰۷) - Critic-Proof Architecture
+### نسخه ۲.۰.۹ (۲۰۲۶-۰۸-۰۷) - استاندارد Architecture
 - یکپارچگی مطلق API (list-based)
 - مدیریت خطای متمرکز (`exceptions.py`)
 - اعتبارسنجی Schema برای `loads`
@@ -354,5 +354,13 @@ truss-analysis-2d/
 - Type hints اضافه کنید
 - Docstring بنویسید
 - تمام ۲۹ تست باید پاس شوند
+
+---
+
+<div align="center">
+
+**اگر این پروژه برای شما مفید بود، لطفاً ⭐ بدهید!**
+
+[![GitHub stars](https://img.shields.io/github/stars/bmhmdyan279-png/truss-analysis-2d.svg?style=social)](https://github.com/bmhmdyan279-png/truss-analysis-2d/stargazers)
 
 </div>
