@@ -15,7 +15,7 @@ def test_pure_mechanical_truss():
     """Test simple truss with pure mechanical loading."""
     nodes = [
         Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
-        Node(id="2", x=1.0, y=0.0, is_support=False),
+        Node(id="2", x=1.0, y=0.0, is_support=True, support_dx=False, support_dy=True),
     ]
     elements = [
         Element(id="1", node_i="1", node_j="2", E=200e9, A=0.001),
@@ -128,6 +128,7 @@ def test_reactions_and_equilibrium():
     elements = [
         Element(id="1", node_i="1", node_j="3", E=210e9, A=0.01),
         Element(id="2", node_i="2", node_j="3", E=210e9, A=0.01),
+        Element(id="3", node_i="1", node_j="2", E=210e9, A=0.01),
     ]
 
     K, F_ext, F_mech, fixed_dofs = assemble_global_matrices(nodes, elements)

@@ -49,14 +49,10 @@ def run(filepath: str, unit_sys: str = "SI") -> AnalysisResult:
             node_j=str(e["node_j"]),
             E=to_si(e["E"], unit_sys, "E"),
             A=to_si(e["A"], unit_sys, "A"),
-            I_sec=to_si(
-                e.get("I_sec", e.get("I", 0.0)), unit_sys, "I_sec"
-            ),
+            I_sec=to_si(e.get("I_sec", e.get("I", 0.0)), unit_sys, "I_sec"),
             alpha=to_si(e.get("alpha", 0.0), unit_sys, "alpha"),
             delta_T=to_si(e.get("delta_T", 0.0), unit_sys, "delta_T"),
-            delta_L_free=to_si(
-                e.get("delta_L_free", 0.0), unit_sys, "L"
-            ),
+            delta_L_free=to_si(e.get("delta_L_free", 0.0), unit_sys, "L"),
             density=to_si(e.get("density", 0.0), unit_sys, "density"),
             effective_length_factor=e.get("effective_length_factor", 1.0),
         )
@@ -64,9 +60,7 @@ def run(filepath: str, unit_sys: str = "SI") -> AnalysisResult:
     ]
     validate_inputs(nodes, elements)
 
-    K, F_ext, F_mechanical, fixed_dofs = assemble_global_matrices(
-        nodes, elements
-    )
+    K, F_ext, F_mechanical, fixed_dofs = assemble_global_matrices(nodes, elements)
 
     # Add self-weight if density is provided
     g = 9.81  # m/s²
@@ -76,7 +70,7 @@ def run(filepath: str, unit_sys: str = "SI") -> AnalysisResult:
             j = next(j for j, n in enumerate(nodes) if n.id == elem.node_j)
             dx = nodes[j].x - nodes[i].x
             dy = nodes[j].y - nodes[i].y
-            L = (dx**2 + dy**2)**0.5
+            L = (dx**2 + dy**2) ** 0.5
             weight = elem.density * elem.A * L * g
             # Distribute weight equally to both nodes (in -Y direction)
             F_ext[2 * i + 1] -= weight / 2
@@ -114,9 +108,7 @@ def run(filepath: str, unit_sys: str = "SI") -> AnalysisResult:
     # Check equilibrium
     equilibrium_errors = check_equilibrium(nodes, reactions, F_ext)
 
-    displacements = {
-        node.id: (U[i * 2], U[i * 2 + 1]) for i, node in enumerate(nodes)
-    }
+    displacements = {node.id: (U[i * 2], U[i * 2 + 1]) for i, node in enumerate(nodes)}
 
     return AnalysisResult(
         displacements=displacements,
@@ -148,9 +140,9 @@ def main() -> int:
 
         print("\n📊 نیروهای اعضا:")
         for r in result.forces:
-            status = "📈 کشش" if r['force'] > 0 else "📉 فشار"
+            status = "📈 کشش" if r["force"] > 0 else "📉 فشار"
             print(f"  المان {r['element']}: {r['force']:.2f} N ({status})")
-            if r['buckling_warning']:
+            if r["buckling_warning"]:
                 print(f"    ⚠️  {r['buckling_warning']}")
 
         print("\n🔧 عکس‌العمل‌های تکیه‌گاهی:")
@@ -166,6 +158,7 @@ def main() -> int:
     except Exception as e:
         print(f"❌ خطا در تحلیل: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 2
 

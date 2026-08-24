@@ -1,9 +1,10 @@
 """Solver: KU=F and energy validation."""
+
 from __future__ import annotations
 
 import numpy as np
 
-from .exceptions import SingularMatrixError, EnergyValidationError
+from .exceptions import EnergyValidationError, SingularMatrixError
 
 
 def solve(

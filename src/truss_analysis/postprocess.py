@@ -1,9 +1,9 @@
 """Post-processing: forces, energy, reactions, equilibrium."""
+
 from __future__ import annotations
 
 import numpy as np
 
-from .exceptions import EnergyValidationError
 from .model import Element, Node
 
 
@@ -39,8 +39,8 @@ def calculate_element_forces(
         s = dy / L
 
         # Displacements
-        u_i = U[2 * i:2 * i + 2]
-        u_j = U[2 * j:2 * j + 2]
+        u_i = U[2 * i : 2 * i + 2]
+        u_j = U[2 * j : 2 * j + 2]
 
         # Axial deformation
         delta_L = (u_j[0] - u_i[0]) * c + (u_j[1] - u_i[1]) * s
@@ -72,7 +72,9 @@ def calculate_element_forces(
         buckling_warning = None
         if elem.I_sec > 0:
             # Critical buckling load (Euler)
-            P_cr = np.pi**2 * elem.E * elem.I_sec / (elem.effective_length_factor * L)**2
+            P_cr = (
+                np.pi**2 * elem.E * elem.I_sec / (elem.effective_length_factor * L) ** 2
+            )
             slenderness_ratio = L / np.sqrt(elem.I_sec / elem.A)
 
             if abs(force) > 0 and force < 0:  # Compression
@@ -82,15 +84,17 @@ def calculate_element_forces(
                 elif safety_factor < 2.0:
                     buckling_warning = f"Warning: SF={safety_factor:.2f} < 2"
 
-        results.append({
-            "element": elem.id,
-            "force": force,
-            "stress": force / elem.A,
-            "strain": delta_L_mech / L,
-            "length": L,
-            "slenderness_ratio": slenderness_ratio,
-            "buckling_warning": buckling_warning,
-        })
+        results.append(
+            {
+                "element": elem.id,
+                "force": force,
+                "stress": force / elem.A,
+                "strain": delta_L_mech / L,
+                "length": L,
+                "slenderness_ratio": slenderness_ratio,
+                "buckling_warning": buckling_warning,
+            }
+        )
 
     return results, strain_energy, prestress_work
 
@@ -177,7 +181,7 @@ def check_equilibrium(
     # Check if within tolerance
     max_error = max(abs(delta_Fx), abs(delta_Fy), abs(delta_M))
     if max_error > tol * max(1.0, abs(Fx_ext), abs(Fy_ext)):
-        print(f"⚠️  Equilibrium check failed:")
+        print("⚠️  Equilibrium check failed:")
         print(f"   ΣFx error: {delta_Fx:.6e}")
         print(f"   ΣFy error: {delta_Fy:.6e}")
         print(f"   ΣM error: {delta_M:.6e}")

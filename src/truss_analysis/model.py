@@ -1,8 +1,8 @@
 """Pure DTOs for Truss Analysis."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from .exceptions import InputValidationError
 
@@ -22,7 +22,7 @@ class Node:
         if not isinstance(self.id, str):
             raise InputValidationError(f"Node ID must be string, got {type(self.id)}")
         if not all(isinstance(v, (int, float)) for v in [self.x, self.y]):
-            raise InputValidationError(f"Node coordinates must be numeric")
+            raise InputValidationError("Node coordinates must be numeric")
 
 
 @dataclass
@@ -43,13 +43,21 @@ class Element:
 
     def __post_init__(self):
         if not isinstance(self.id, str):
-            raise InputValidationError(f"Element ID must be string, got {type(self.id)}")
+            raise InputValidationError(
+                f"Element ID must be string, got {type(self.id)}"
+            )
         if self.E <= 0:
-            raise InputValidationError(f"Element {self.id}: E must be positive, got {self.E}")
+            raise InputValidationError(
+                f"Element {self.id}: E must be positive, got {self.E}"
+            )
         if self.A <= 0:
-            raise InputValidationError(f"Element {self.id}: A must be positive, got {self.A}")
+            raise InputValidationError(
+                f"Element {self.id}: A must be positive, got {self.A}"
+            )
         if self.node_i == self.node_j:
-            raise InputValidationError(f"Element {self.id}: node_i and node_j cannot be the same")
+            raise InputValidationError(
+                f"Element {self.id}: node_i and node_j cannot be the same"
+            )
 
 
 def validate_inputs(nodes: list[Node], elements: list[Element]) -> None:

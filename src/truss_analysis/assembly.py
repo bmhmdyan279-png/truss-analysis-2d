@@ -1,4 +1,5 @@
 """Assembly: global stiffness matrix and force vectors."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -31,9 +32,7 @@ def assemble_global_matrices(
     # Assemble element contributions
     for elem in elements:
         if elem.node_i not in node_map or elem.node_j not in node_map:
-            raise AssemblyError(
-                f"Element {elem.id} references non-existent nodes"
-            )
+            raise AssemblyError(f"Element {elem.id} references non-existent nodes")
 
         i = node_map[elem.node_i]
         j = node_map[elem.node_j]
@@ -51,15 +50,17 @@ def assemble_global_matrices(
 
         # Element stiffness matrix (local to global transformation)
         k = elem.E * elem.A / L
-        ke = k * np.array([
-            [c**2, c*s, -c**2, -c*s],
-            [c*s, s**2, -c*s, -s**2],
-            [-c**2, -c*s, c**2, c*s],
-            [-c*s, -s**2, c*s, s**2],
-        ])
+        ke = k * np.array(
+            [
+                [c**2, c * s, -(c**2), -c * s],
+                [c * s, s**2, -c * s, -(s**2)],
+                [-(c**2), -c * s, c**2, c * s],
+                [-c * s, -(s**2), c * s, s**2],
+            ]
+        )
 
         # DOF indices
-        dofs = [2*i, 2*i+1, 2*j, 2*j+1]
+        dofs = [2 * i, 2 * i + 1, 2 * j, 2 * j + 1]
 
         # Assemble into global matrix
         for ii in range(4):
@@ -73,10 +74,10 @@ def assemble_global_matrices(
 
             # Equivalent nodal forces (in global coordinates)
             F_thermal = k * delta_L_prestress
-            F_ext[2*i] -= F_thermal * c
-            F_ext[2*i+1] -= F_thermal * s
-            F_ext[2*j] += F_thermal * c
-            F_ext[2*j+1] += F_thermal * s
+            F_ext[2 * i] -= F_thermal * c
+            F_ext[2 * i + 1] -= F_thermal * s
+            F_ext[2 * j] += F_thermal * c
+            F_ext[2 * j + 1] += F_thermal * s
 
             # F_mechanical does NOT include thermal forces
             # (they are internal, not external)
