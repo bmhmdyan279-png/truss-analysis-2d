@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import sys
 import io
+import sys
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
