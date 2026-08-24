@@ -3,11 +3,21 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 name = "truss_analysis"
 version = "2.0.9"
 description = "2D Truss Analysis Tool"
-requires-python = ">=3.9"
-dependencies = ["numpy>=1.20"]
+dependencies = ["numpy>=1.20",
+    "matplotlib", "arabic-reshaper", "python-bidi",
+]
 
 [tool.ruff]
 line-length = 88
@@ -19,3 +29,7 @@ select = ["E", "F", "I", "W"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=truss_analysis --cov-report=term-missing"
+
+
+[tool.setuptools.packages.find]
+where = ["src"]

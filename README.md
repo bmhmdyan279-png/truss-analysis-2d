@@ -1,5 +1,11 @@
 # 🏗️ تحلیل سازه‌های خرپایی دوبعدی (Truss Analysis 2D)
 
+
+![CI Pipeline](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)
+![Coverage](https://img.shields.io/badge/coverage-90%25%2B-success)
+![PyPI Version](https://img.shields.io/pypi/v/truss-analysis-2d)
+
+
 <div align="center">
 
 ![Python Version](https://img.shields.io/badge/python-≥3.9-blue.svg)

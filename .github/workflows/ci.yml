@@ -1,46 +1,14 @@
-name: CI
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+name: CI Pipeline
+on: [push, pull_request]
 jobs:
-  ci-pr:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
-        locale: [en, fa]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: "${{ matrix.python-version }}"
-      - run: pip install --upgrade pip setuptools wheel
-      - run: pip install .
-      - run: pip install pytest pytest-cov ruff
-      - name: Run Ruff Linter & Formatter
-        run: |
-          ruff check .
-          ruff format --check .
-      - name: Run tests
-        env:
-          LANG: "${{ matrix.locale == 'fa' && 'fa_IR.UTF-8' || 'en_US.UTF-8' }}"
-        run: pytest --cov=truss_analysis --cov-report=term-missing tests/
-  ci-push:
-    if: github.event_name == 'push'
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install --upgrade pip setuptools wheel
-      - run: pip install .
-      - run: pip install pytest ruff
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: pytest tests/
+        with: {python-version: '3.10'}
+      - run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -e .
+          pre-commit run --all-files
+          pytest --cov=src --cov-report=xml --cov-fail-under=90

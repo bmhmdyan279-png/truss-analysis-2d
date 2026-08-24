@@ -57,3 +57,7 @@ clean:
 	rm -rf build/ dist/ *.egg-info/ .pytest_cache/ .coverage htmlcov/
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+
+
+test-cov:
+	pytest --cov=src --cov-report=term-missing --cov-fail-under=90
