@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from truss_analysis.exceptions import InputValidationError
 from truss_analysis.fileio import load_json
 
