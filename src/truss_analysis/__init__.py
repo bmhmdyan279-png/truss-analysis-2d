@@ -8,13 +8,18 @@ from .model import Element, Node
 from .postprocess import calculate_element_forces
 from .solver import check_energy, solve
 
-__version__ = "2.1.1"
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = "2.1.6"
+
 solve_truss = solve
 
 __all__ = [
     "AnalysisResult",
     "Element",
     "Node",
+    "__version__",
     "assemble_global_matrices",
     "calculate_element_forces",
     "check_energy",

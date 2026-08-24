@@ -64,3 +64,6 @@ Thumbs.db
 logs/
 *.db
 *.sqlite
+
+# Dynamic version file (auto-generated)
+src/truss_analysis/_version.py

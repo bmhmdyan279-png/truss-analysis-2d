@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "wheel", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "truss_analysis"
-version = "2.1.1"
+dynamic = ["version"]
 description = "2D Truss Analysis Tool - scientifically validated"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,6 +26,10 @@ dev = [
 
 [project.scripts]
 truss-analysis = "truss_analysis.main:main"
+
+[tool.setuptools_scm]
+write_to = "src/truss_analysis/_version.py"
+fallback_version = "2.1.6"
 
 [tool.ruff]
 line-length = 88
