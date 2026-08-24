@@ -2,9 +2,14 @@ name: Publish to PyPI
 on:
   push:
     tags: ['v*']
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: pypi
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
