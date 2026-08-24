@@ -1,254 +1,162 @@
-"""Post-processing: forces, energy, reactions, equilibrium."""
+"""Post-processing: element forces, reactions, equilibrium, buckling."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from .model import Element, Node
 
+def calculate_element_forces(nodes, elements, U):
+    """Calculate axial forces, strain energy, and prestress work.
 
-def calculate_element_forces(
-    nodes: list[Node],
-    elements: list[Element],
-    U: np.ndarray,
-) -> tuple[list[dict], float, float]:
-    """Calculate element forces, strain energy, and prestress work.
-
-    Returns:
-        results: List of dicts with element forces
-        strain_energy: Total strain energy (mechanical)
-        prestress_work: Work done by prestress (thermal/fabrication)
+    Physical model:
+    - delta_L_total: total elongation from nodal displacements
+    - delta_L_thermal: thermal elongation = alpha * delta_T * L
+    - delta_L_prestress: total prestress elongation (thermal + fabrication)
+    - delta_L_mech: mechanical elongation = delta_L_total - delta_L_prestress
+    - N: axial force from mechanical elongation only
     """
     results = []
     strain_energy = 0.0
     prestress_work = 0.0
+    node_map = {node.id: i for i, node in enumerate(nodes)}
 
     for elem in elements:
-        i = next(j for j, n in enumerate(nodes) if n.id == elem.node_i)
-        j = next(j for j, n in enumerate(nodes) if n.id == elem.node_j)
-
-        # Element geometry
+        i = node_map[elem.node_i]
+        j = node_map[elem.node_j]
         dx = nodes[j].x - nodes[i].x
         dy = nodes[j].y - nodes[i].y
         L = np.sqrt(dx**2 + dy**2)
 
         if L < 1e-12:
-            raise ValueError(f"Element {elem.id} has zero length")
+            results.append({"id": elem.id, "N": 0.0, "status": "ZERO_LENGTH"})
+            continue
 
         c = dx / L
         s = dy / L
 
-        # Displacements
-        u_i = U[2 * i : 2 * i + 2]
-        u_j = U[2 * j : 2 * j + 2]
+        # Nodal displacements
+        ui, vi = U[2 * i], U[2 * i + 1]
+        uj, vj = U[2 * j], U[2 * j + 1]
 
-        # Axial deformation
-        delta_L = (u_j[0] - u_i[0]) * c + (u_j[1] - u_i[1]) * s
+        # Total elongation from nodal displacements
+        delta_L_total = (uj - ui) * c + (vj - vi) * s
 
-        # Thermal/fabrication effects
+        # Thermal/fabrication elongation
         delta_L_thermal = elem.alpha * elem.delta_T * L
-        delta_L_free = elem.delta_L_free
-        delta_L_prestress = delta_L_thermal + delta_L_free
+        delta_L_prestress = delta_L_thermal + elem.delta_L_free
 
-        # Mechanical deformation
-        delta_L_mech = delta_L - delta_L_prestress
+        # Mechanical elongation (what causes stress)
+        delta_L_mech = delta_L_total - delta_L_prestress
 
         # Axial stiffness
         k = elem.E * elem.A / L
 
         # Axial force (positive = tension)
-        force = k * delta_L_mech
+        N = k * delta_L_mech
 
         # Strain energy (mechanical only)
-        U_elem = 0.5 * k * delta_L_mech**2
-        strain_energy += U_elem
+        strain_energy += 0.5 * k * delta_L_mech**2
 
         # Prestress work
-        W_prestress_elem = k * delta_L_prestress * delta_L_mech
-        prestress_work += W_prestress_elem
+        prestress_work += k * delta_L_prestress * delta_L_mech
 
-        # Buckling check (Euler)
-        slenderness_ratio = None
-        buckling_warning = None
-        if elem.I_sec > 0:
-            # Critical buckling load (Euler)
-            P_cr = (
-                np.pi**2 * elem.E * elem.I_sec / (elem.effective_length_factor * L) ** 2
-            )
-            slenderness_ratio = L / np.sqrt(elem.I_sec / elem.A)
-
-            if abs(force) > 0 and force < 0:  # Compression
-                safety_factor = abs(P_cr / force)
-                if safety_factor < 1.0:
-                    buckling_warning = f"BUCKLING! SF={safety_factor:.2f} < 1"
-                elif safety_factor < 2.0:
-                    buckling_warning = f"Warning: SF={safety_factor:.2f} < 2"
-
+        status = "Tension" if N > 1e-9 else ("Compression" if N < -1e-9 else "Zero")
         results.append(
             {
-                "element": elem.id,
-                "force": force,
-                "stress": force / elem.A,
-                "strain": delta_L_mech / L,
-                "length": L,
-                "slenderness_ratio": slenderness_ratio,
-                "buckling_warning": buckling_warning,
+                "id": elem.id,
+                "N": float(N),
+                "delta_L_mech": float(delta_L_mech),
+                "delta_L_prestress": float(delta_L_prestress),
+                "status": status,
             }
         )
 
-    return results, strain_energy, prestress_work
+    return results, float(strain_energy), float(prestress_work)
 
 
-def calculate_reactions(
-    nodes: list[Node],
-    elements: list[Element],
-    U: np.ndarray,
-    F_ext: np.ndarray,
-) -> dict[str, dict[str, float]]:
-    """Calculate support reactions using R = KU - F_ext.
-
-    Returns:
-        Dictionary mapping node IDs to reaction forces {Fx, Fy}
-    """
-    from .assembly import assemble_global_matrices
-
-    K, _, _, _ = assemble_global_matrices(nodes, elements)
-
-    # Full force vector: R = KU - F_ext
-    F_total = K @ U
-    R = F_total - F_ext
-
+def calculate_reactions(nodes, K, U, F_ext, fixed_dofs):
+    """Support reactions: R = K*U - F_ext at constrained DOFs."""
+    R = K @ U - F_ext
+    fixed = set(fixed_dofs)
     reactions = {}
     for i, node in enumerate(nodes):
-        if node.is_support:
+        dx_fixed = 2 * i in fixed
+        dy_fixed = 2 * i + 1 in fixed
+        if dx_fixed or dy_fixed:
             reactions[node.id] = {
-                "Rx": R[2 * i],
-                "Ry": R[2 * i + 1],
+                "Fx": float(R[2 * i]) if dx_fixed else 0.0,
+                "Fy": float(R[2 * i + 1]) if dy_fixed else 0.0,
             }
-
     return reactions
 
 
-def check_equilibrium(
-    nodes: list[Node],
-    reactions: dict[str, dict[str, float]],
-    F_ext: np.ndarray,
-    tol: float = 1e-6,
-) -> dict[str, float]:
-    """Check static equilibrium: ΣFx=0, ΣFy=0, ΣM=0.
+def check_equilibrium(nodes, reactions, applied_loads, tol=1e-6):
+    """Global static equilibrium: sum(Fx)=0, sum(Fy)=0, sum(M)=0."""
+    coords = {node.id: (node.x, node.y) for node in nodes}
+    sum_fx = sum_fy = sum_m = 0.0
 
-    Returns:
-        Dictionary with equilibrium errors
-    """
-    # Sum of external forces
-    Fx_ext = sum(F_ext[2 * i] for i in range(len(nodes)))
-    Fy_ext = sum(F_ext[2 * i + 1] for i in range(len(nodes)))
+    # Sum reactions
+    for nid, rec in reactions.items():
+        x, y = coords[nid]
+        sum_fx += rec["Fx"]
+        sum_fy += rec["Fy"]
+        sum_m += x * rec["Fy"] - y * rec["Fx"]
 
-    # Sum of reactions
-    Rx_sum = sum(r["Rx"] for r in reactions.values())
-    Ry_sum = sum(r["Ry"] for r in reactions.values())
+    # Sum applied loads
+    for lf in applied_loads:
+        x, y = coords[str(lf["node_id"])]
+        sum_fx += lf["Fx"]
+        sum_fy += lf["Fy"]
+        sum_m += x * lf["Fy"] - y * lf["Fx"]
 
-    # Equilibrium check
-    delta_Fx = Fx_ext + Rx_sum
-    delta_Fy = Fy_ext + Ry_sum
+    # Tolerance scaling
+    ref = 0.0
+    for lf in applied_loads:
+        ref += abs(lf["Fx"]) + abs(lf["Fy"])
+    for rec in reactions.values():
+        ref += abs(rec["Fx"]) + abs(rec["Fy"])
+    limit = tol * max(1.0, ref)
 
-    # Moment about first support node
-    support_nodes = [(n, reactions[n.id]) for n in nodes if n.id in reactions]
-    if support_nodes:
-        ref_node = support_nodes[0][0]
-        M_ext = 0.0
-        for i, node in enumerate(nodes):
-            dx = node.x - ref_node.x
-            dy = node.y - ref_node.y
-            M_ext += dx * F_ext[2 * i + 1] - dy * F_ext[2 * i]
-
-        M_react = 0.0
-        for node, react in support_nodes:
-            dx = node.x - ref_node.x
-            dy = node.y - ref_node.y
-            M_react += dx * react["Ry"] - dy * react["Rx"]
-
-        delta_M = M_ext + M_react
-    else:
-        delta_M = 0.0
-
-    errors = {
-        "delta_Fx": delta_Fx,
-        "delta_Fy": delta_Fy,
-        "delta_M": delta_M,
+    return {
+        "sum_fx": float(sum_fx),
+        "sum_fy": float(sum_fy),
+        "sum_m": float(sum_m),
+        "is_valid": bool(
+            abs(sum_fx) <= limit
+            and abs(sum_fy) <= limit
+            and abs(sum_m) <= limit * max(1.0, ref)
+        ),
     }
 
-    # Check if within tolerance
-    max_error = max(abs(delta_Fx), abs(delta_Fy), abs(delta_M))
-    if max_error > tol * max(1.0, abs(Fx_ext), abs(Fy_ext)):
-        print("⚠️  Equilibrium check failed:")
-        print(f"   ΣFx error: {delta_Fx:.6e}")
-        print(f"   ΣFy error: {delta_Fy:.6e}")
-        print(f"   ΣM error: {delta_M:.6e}")
 
-    return errors
+def calculate_buckling(nodes, elements, results, tol=1e-12):
+    """Euler buckling: P_cr = pi^2*E*I/L^2 for compressed members."""
+    coords = {node.id: node for node in nodes}
+    forces = {str(r.get("id")): float(r.get("N", 0.0)) for r in results}
+    report = []
 
+    for e in elements:
+        ni, nj = coords[e.node_i], coords[e.node_j]
+        L = float(np.hypot(nj.x - ni.x, nj.y - ni.y))
+        N = forces.get(str(e.id), 0.0)
+        entry = {
+            "id": e.id,
+            "N": N,
+            "length": L,
+            "P_cr": None,
+            "ratio": 0.0,
+            "slenderness": None,
+            "safe": True,
+        }
 
-def calculate_displacement_scale_factor(
-    nodes: list[Node],
-    U: np.ndarray,
-    max_scale: float = 1000.0,
-) -> float:
-    """Calculate optimal scale factor for deformation visualization.
+        if N < -tol and L > tol and e.I_sec > tol:
+            p_cr = float(np.pi**2 * e.E * e.I_sec / L**2)
+            r_gyr = float(np.sqrt(e.I_sec / e.A)) if e.A > tol else 0.0
+            entry["P_cr"] = p_cr
+            entry["ratio"] = -N / p_cr
+            entry["slenderness"] = L / r_gyr if r_gyr > tol else None
+            entry["safe"] = bool(entry["ratio"] < 1.0)
 
-    The scale factor is chosen so that the maximum displacement
-    is visible but not exaggerated beyond max_scale.
+        report.append(entry)
 
-    Args:
-        nodes: List of nodes
-        U: Displacement vector
-        max_scale: Maximum allowed scale factor
-
-    Returns:
-        Optimal scale factor
-    """
-    max_disp = 0.0
-    for i in range(len(nodes)):
-        ux = U[2 * i]
-        uy = U[2 * i + 1]
-        disp = np.sqrt(ux**2 + uy**2)
-        max_disp = max(max_disp, disp)
-
-    if max_disp < 1e-12:
-        return 1.0
-
-    # Scale so max displacement is about 5% of structure size
-    max_x = max(n.x for n in nodes) - min(n.x for n in nodes)
-    max_y = max(n.y for n in nodes) - min(n.y for n in nodes)
-    structure_size = max(max_x, max_y, 1.0)
-
-    target_disp = 0.05 * structure_size
-    scale = target_disp / max_disp
-
-    return min(scale, max_scale)
-
-
-def calculate_percentages(
-    results: list[dict],
-    total_energy: float | None = None,
-) -> list[dict]:
-    """Calculate percentage contribution of each element's energy.
-
-    Args:
-        results: List of element result dicts (must have 'energy' key)
-        total_energy: Total strain energy (computed if None)
-
-    Returns:
-        Results list with added 'pct_U' field
-    """
-    if total_energy is None:
-        total_energy = sum(r.get("energy", 0.0) for r in results)
-
-    for r in results:
-        energy = r.get("energy", 0.0)
-        if total_energy > 0:
-            r["pct_U"] = (energy / total_energy) * 100.0
-        else:
-            r["pct_U"] = 0.0
-
-    return results
+    return report

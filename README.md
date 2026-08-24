@@ -1,3 +1,5 @@
+[![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions) [![PyPI](https://img.shields.io/pypi/v/truss_analysis)](https://pypi.org/project/truss-analysis/) [![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)]()
+
 # 🏗️ تحلیل سازه‌های خرپایی دوبعدی (Truss Analysis 2D)
 
 

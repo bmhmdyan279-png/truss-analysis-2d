@@ -56,12 +56,12 @@ def test_golden_pratt_truss():
         result = run(temp_path, "SI")
 
         # Check reactions
-        assert abs(result.reactions["A"]["Ry"] - 5.0) < 1e-6
-        assert abs(result.reactions["C"]["Ry"] - 5.0) < 1e-6
-        assert abs(result.reactions["A"]["Rx"]) < 1e-6
+        assert abs(result.reactions["A"]["Fy"] - 5.0) < 1e-6
+        assert abs(result.reactions["C"]["Fy"] - 5.0) < 1e-6
+        assert abs(result.reactions["A"]["Fx"]) < 1e-6
 
         # Check member forces
-        force_dict = {f["element"]: f["force"] for f in result.forces}
+        force_dict = {f["id"]: f["N"] for f in result.element_forces}
         assert abs(force_dict["AB"] - 5.0) < 1e-6
         assert abs(force_dict["BC"] - 5.0) < 1e-6
         assert abs(force_dict["AD"]) < 1e-6
@@ -113,11 +113,11 @@ def test_golden_warren_truss():
         result = run(temp_path, "SI")
 
         # Check reactions
-        assert abs(result.reactions["A"]["Ry"] - 5.0) < 1e-6
-        assert abs(result.reactions["B"]["Ry"] - 5.0) < 1e-6
+        assert abs(result.reactions["A"]["Fy"] - 5.0) < 1e-6
+        assert abs(result.reactions["B"]["Fy"] - 5.0) < 1e-6
 
         # Check member forces
-        force_dict = {f["element"]: f["force"] for f in result.forces}
+        force_dict = {f["id"]: f["N"] for f in result.element_forces}
         assert abs(force_dict["AB"] - 2.5) < 1e-6
         expected_ac = -10 * 5**0.5 / 4
         assert abs(force_dict["AC"] - expected_ac) < 1e-5
@@ -165,13 +165,13 @@ def test_golden_cantilever_truss():
         result = run(temp_path, "SI")
 
         # Check reactions
-        assert abs(result.reactions["A"]["Rx"] - 10.0) < 1e-6
-        assert abs(result.reactions["A"]["Ry"] - 10.0) < 1e-6
-        assert abs(result.reactions["C"]["Rx"] - (-10.0)) < 1e-6
-        assert abs(result.reactions["C"]["Ry"]) < 1e-6
+        assert abs(result.reactions["A"]["Fx"] - 10.0) < 1e-6
+        assert abs(result.reactions["A"]["Fy"] - 10.0) < 1e-6
+        assert abs(result.reactions["C"]["Fx"] - (-10.0)) < 1e-6
+        assert abs(result.reactions["C"]["Fy"]) < 1e-6
 
         # Check member forces
-        force_dict = {f["element"]: f["force"] for f in result.forces}
+        force_dict = {f["id"]: f["N"] for f in result.element_forces}
         assert abs(force_dict["AB"] - (-10.0)) < 1e-6
         assert abs(force_dict["BC"] - 10 * 2**0.5) < 1e-5
         assert abs(force_dict["AC"] - (-10.0)) < 1e-6

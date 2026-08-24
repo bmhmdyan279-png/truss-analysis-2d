@@ -1,28 +1,82 @@
-import os
-import subprocess
-import sys
+"""End-to-end tests: CLI, exports, examples never crash in CI."""
 
-TEST_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.dirname(TEST_DIR)
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from truss_analysis import run
+from truss_analysis.main import AnalysisResult, main
+
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+
+SIMPLE = {
+    "units": "SI",
+    "nodes": [
+        {
+            "id": "1",
+            "x": 0.0,
+            "y": 0.0,
+            "is_support": True,
+            "support_dx": True,
+            "support_dy": True,
+        },
+        {"id": "2", "x": 2.0, "y": 0.0, "is_support": True, "support_dy": True},
+        {"id": "3", "x": 1.0, "y": 1.5, "is_support": False},
+    ],
+    "elements": [
+        {"id": "e1", "node_i": "1", "node_j": "3", "E": 210e9, "A": 0.01},
+        {"id": "e2", "node_i": "2", "node_j": "3", "E": 210e9, "A": 0.01},
+        {"id": "e3", "node_i": "1", "node_j": "2", "E": 210e9, "A": 0.01},
+    ],
+    "loads": [{"node_id": "3", "Fx": 0.0, "Fy": -10000.0}],
+}
 
 
-def test_cli_runs_successfully():
-    result = subprocess.run(
-        [sys.executable, "-m", "truss_analysis.main", "examples/example1.json", "SI"],
-        capture_output=True,
-        text=True,
-        cwd=ROOT_DIR,
+@pytest.fixture()
+def simple_json(tmp_path):
+    p = tmp_path / "simple.json"
+    p.write_text(json.dumps(SIMPLE), encoding="utf-8")
+    return p
+
+
+def test_run_returns_analysis_result(simple_json):
+    res = run(str(simple_json))
+    assert isinstance(res, AnalysisResult)
+    assert res.status == "SUCCESS"
+    assert res.equilibrium["is_valid"]
+    assert set(res.reactions) == {"1", "2"}
+
+
+def test_run_exports(simple_json, tmp_path):
+    out, csv_p, rep = tmp_path / "o.json", tmp_path / "f.csv", tmp_path / "r.md"
+    run(
+        str(simple_json),
+        output=str(out),
+        csv_path=str(csv_p),
+        report_path=str(rep),
+        check_buckling=True,
     )
-    assert result.returncode == 0, f"CLI crashed with error: {result.stderr}"
-    assert result.returncode == 0 and len(result.stdout) > 10
+    assert json.loads(out.read_text(encoding="utf-8"))["status"] == "SUCCESS"
+    assert "element_id" in csv_p.read_text(encoding="utf-8")
+    assert "Equilibrium" in rep.read_text(encoding="utf-8")
 
 
-def test_example_script_runs_successfully():
-    result = subprocess.run(
-        [sys.executable, "examples/example_analysis.py"],
-        capture_output=True,
-        text=True,
-        cwd=ROOT_DIR,
-    )
-    assert result.returncode == 0, f"Example script crashed with error: {result.stderr}"
-    assert result.returncode == 0 and len(result.stdout) > 10 or result.returncode == 0
+def test_cli_main(capsys, simple_json):
+    rc = main([str(simple_json), "--check-buckling"])
+    assert rc == 0
+    assert "Status: SUCCESS" in capsys.readouterr().out
+
+
+def test_plot_save(simple_json, tmp_path):
+    png = tmp_path / "t.png"
+    run(str(simple_json), plot_path=str(png))
+    assert png.exists() and png.stat().st_size > 0
+
+
+def test_examples_do_not_crash():
+    files = sorted(EXAMPLES.glob("*.json"))
+    assert files
+    for f in files:
+        assert run(str(f)).status == "SUCCESS"
