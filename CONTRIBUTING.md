@@ -1,47 +1,163 @@
 # راهنمای مشارکت
 
-از مشارکت شما استقبال می‌کنیم! لطفاً موارد زیر را رعایت کنید:
+از مشارکت شما در پروژه Truss Analysis 2D استقبال می‌کنیم! این راهنما به شما کمک می‌کند تا به راحتی در توسعه پروژه شرکت کنید.
 
-1. یک Issue برای تغییر مورد نظر ایجاد کنید.
-2. مخزن را fork کنید و یک branch جدید با نام `feature/...` ایجاد کنید.
-3. تغییرات را اعمال کرده و تست‌ها را با `pytest tests/` اجرا کنید.
-4. Pull Request خود را با توضیح کامل ارسال کنید.
+## 🚀 شروع سریع
 
-کد باید با [PEP 8](https://pep8.org/) سازگار باشد.
+1. **Fork** کنید
+2. **Clone** کنید:
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/truss-analysis-2d.git
+   cd truss-analysis-2d
+   ```
+3. **محیط توسعه** را آماده کنید:
+   ```bash
+   pip install -e ".[dev]"
+   pre-commit install
+   ```
 
+## 🧪 تست‌ها
 
-## 🗺️ Future Roadmap
+قبل از ارسال PR، مطمئن شوید:
 
-The following features are planned for future releases:
+```bash
+# همه تست‌ها پاس شوند
+pytest
 
-### Short-term (v2.2.x)
-- **Sparse Matrix Support**: Use `scipy.sparse` for large-scale truss analysis (>1000 nodes)
-- **Load Combinations**: Support for multiple load cases and combinations (LRFD, ASD)
-- **Dynamic Analysis**: Modal analysis and time-history analysis
-- **GUI Interface**: Web-based GUI using Streamlit or FastAPI
+# پوشش کد >= 85%
+pytest --cov=truss_analysis --cov-report=term-missing
 
-### Medium-term (v3.x)
-- **3D Truss Analysis**: Extend to three-dimensional truss structures
-- **Non-linear Analysis**: Material non-linearity (plasticity) and geometric non-linearity (large deformations)
-- **Optimization**: Size and topology optimization for minimum weight
-- **Multi-physics**: Coupled thermal-structural analysis with temperature-dependent material properties
+# Pre-commit hooks پاس شوند
+pre-commit run --all-files
+```
 
-### Long-term (v4.x+)
-- **Machine Learning Integration**: Predictive models for rapid analysis and design optimization
-- **Cloud Computing**: Distributed computing for very large structures
-- **Real-time Monitoring**: Integration with sensor data for structural health monitoring
-- **Code Compliance**: Automated code checking (AISC, Eurocode, etc.)
+## 📝 قوانین کد
 
-## 🤝 How to Contribute
+### استایل کد
+- **Ruff**: برای linting و formatting استفاده می‌شود
+- **Line length**: حداکثر 88 کاراکتر
+- **Type hints**: برای همه توابع عمومی
+- **Docstrings**: به فرمت Google
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+### مثال تابع خوب
 
-Please ensure:
-- All tests pass (`pytest`)
-- Code coverage remains above 90% (`pytest --cov=src --cov-fail-under=90`)
-- Pre-commit hooks pass (`pre-commit run --all-files`)
-- Documentation is updated for new features
+```python
+def calculate_element_forces(
+    nodes: list[Node],
+    elements: list[Element],
+    U: np.ndarray,
+) -> tuple[list[dict], float, float]:
+    """Calculate axial forces, strain energy, and prestress work.
+
+    Args:
+        nodes: List of Node objects
+        elements: List of Element objects
+        U: Displacement vector (numpy array)
+
+    Returns:
+        Tuple of:
+        - results: List of element force dictionaries
+        - strain_energy: Total mechanical strain energy (J)
+        - prestress_work: Total prestress work (J)
+
+    Example:
+        >>> results, U_strain, W_prestress = calculate_element_forces(
+        ...     nodes, elements, U
+        ... )
+    """
+    # Implementation...
+```
+
+## 🔄 فرآیند Pull Request
+
+1. **Branch** بسازید:
+   ```bash
+   git checkout -b feature/amazing-feature
+   ```
+
+2. **تغییرات** را اعمال کنید
+
+3. **تست** کنید:
+   ```bash
+   pytest
+   pre-commit run --all-files
+   ```
+
+4. **Commit** کنید:
+   ```bash
+   git add -A
+   git commit -m "feat: add amazing feature"
+   ```
+
+   **فرمت commit message:**
+   - `feat:` ویژگی جدید
+   - `fix:` رفع باگ
+   - `docs:` تغییرات مستندات
+   - `test:` اضافه کردن تست
+   - `chore:` تغییرات ساختاری
+   - `refactor:` بازنویسی کد
+
+5. **Push** کنید:
+   ```bash
+   git push origin feature/amazing-feature
+   ```
+
+6. **Pull Request** باز کنید
+
+## 🐛 گزارش باگ
+
+لطفاً شامل این موارد باشید:
+
+- **شرح مشکل**: چه اتفاقی افتاد؟
+- **مراحل بازتولید**: چگونه می‌توان باگ را بازتولید کرد؟
+- **خروجی مورد انتظار**: چه باید می‌شد؟
+- **محیط**: نسخه Python، OS
+- **فایل ورودی**: اگر ممکن است
+
+## 💡 پیشنهاد ویژگی
+
+لطفاً شامل این موارد باشید:
+
+- **شرح ویژگی**: چه می‌خواهید اضافه شود؟
+- **مورد استفاده**: چرا این ویژگی مفید است؟
+- **پیاده‌سازی پیشنهادی**: (اختیاری) چگونه می‌توان پیاده کرد؟
+
+## 📚 اضافه کردن تست
+
+برای هر ویژگی جدید، تست بنویسید:
+
+```python
+def test_amazing_feature():
+    """Test that amazing feature works correctly."""
+    # Arrange
+    nodes = [Node(id="1", x=0.0, y=0.0)]
+
+    # Act
+    result = amazing_function(nodes)
+
+    # Assert
+    assert result == expected_value
+```
+
+## 🔢 Versioning
+
+ما از [Semantic Versioning](https://semver.org/) استفاده می‌کنیم:
+
+- **MAJOR.MINOR.PATCH**
+- `2.1.0` -> `2.2.0`: ویژگی جدید backward-compatible
+- `2.1.0` -> `2.1.1`: رفع باگ
+- `2.1.0` -> `3.0.0`: تغییر breaking
+
+## ❓ سوالات؟
+
+- **GitHub Discussions**: برای سوالات عمومی
+- **GitHub Issues**: برای باگ‌ها و پیشنهادات
+- **Email**: برای موارد خصوصی
+
+## 🙏 تشکر
+
+از همه مشارکت‌کنندگان متشکریم! 🎉
+
+---
+
+این راهنما بر اساس [Contributing Guide Template](https://github.com/nayafia/contributing-template) است.
