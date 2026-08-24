@@ -19,7 +19,7 @@
       "x": 0.0,
       "y": 4.0,
       "is_support": true,
-      "support_dx": false,
+      "support_dx": true,
       "support_dy": true
     }
   ],

@@ -354,7 +354,46 @@ truss-analysis-2d/
 4. Push کنید
 5. Pull Request باز کنید
 
-### دستورالعمل‌ها
+#
+## 💻 Advanced CLI Usage
+
+```bash
+# Basic analysis
+python main.py examples/simple_truss.json
+
+# Show interactive plots
+python main.py examples/simple_truss.json --plot
+
+# Save plots and all output formats
+python main.py examples/simple_truss.json --save-plots --output results --format all
+
+# Custom deformation scale
+python main.py examples/simple_truss.json --plot --scale 50
+
+# Check buckling warnings
+python main.py examples/simple_truss.json --check-buckling
+
+# Imperial units
+python main.py examples/simple_truss.json Imperial
+```
+
+## 📊 Output Formats
+
+The tool generates structured outputs in multiple formats:
+
+- **JSON**: Complete results with displacements, forces, and reactions
+- **CSV**: Separate files for nodes, members, and reactions (Excel-friendly)
+- **Markdown**: Human-readable report with Persian support
+- **PNG**: Deformed truss and axial force diagrams with color-coded tension/compression
+
+## 🎨 Visualization Features
+
+- **Original vs Deformed**: Side-by-side comparison with adjustable scale factor
+- **Axial Force Diagram**: Blue for tension, red for compression
+- **Persian Labels**: Full RTL support with Vazirmatn font
+- **Support Indicators**: Visual representation of pin and roller supports
+
+## دستورالعمل‌ها
 - از `ruff` برای linting استفاده کنید
 - تست بنویسید (`pytest`)
 - Type hints اضافه کنید

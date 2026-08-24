@@ -1,8 +1,6 @@
 """Analytical tests for scientific correctness."""
-import numpy as np
-import pytest
 
-from truss_analysis import Node, Element, solve
+from truss_analysis import Element, Node, solve
 from truss_analysis.assembly import assemble_global_matrices
 from truss_analysis.postprocess import (
     calculate_element_forces,

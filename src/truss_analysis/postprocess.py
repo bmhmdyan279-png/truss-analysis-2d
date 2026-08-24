@@ -187,3 +187,68 @@ def check_equilibrium(
         print(f"   ΣM error: {delta_M:.6e}")
 
     return errors
+
+
+def calculate_displacement_scale_factor(
+    nodes: list[Node],
+    U: np.ndarray,
+    max_scale: float = 1000.0,
+) -> float:
+    """Calculate optimal scale factor for deformation visualization.
+
+    The scale factor is chosen so that the maximum displacement
+    is visible but not exaggerated beyond max_scale.
+
+    Args:
+        nodes: List of nodes
+        U: Displacement vector
+        max_scale: Maximum allowed scale factor
+
+    Returns:
+        Optimal scale factor
+    """
+    max_disp = 0.0
+    for i in range(len(nodes)):
+        ux = U[2 * i]
+        uy = U[2 * i + 1]
+        disp = np.sqrt(ux**2 + uy**2)
+        max_disp = max(max_disp, disp)
+
+    if max_disp < 1e-12:
+        return 1.0
+
+    # Scale so max displacement is about 5% of structure size
+    max_x = max(n.x for n in nodes) - min(n.x for n in nodes)
+    max_y = max(n.y for n in nodes) - min(n.y for n in nodes)
+    structure_size = max(max_x, max_y, 1.0)
+
+    target_disp = 0.05 * structure_size
+    scale = target_disp / max_disp
+
+    return min(scale, max_scale)
+
+
+def calculate_percentages(
+    results: list[dict],
+    total_energy: float | None = None,
+) -> list[dict]:
+    """Calculate percentage contribution of each element's energy.
+
+    Args:
+        results: List of element result dicts (must have 'energy' key)
+        total_energy: Total strain energy (computed if None)
+
+    Returns:
+        Results list with added 'pct_U' field
+    """
+    if total_energy is None:
+        total_energy = sum(r.get("energy", 0.0) for r in results)
+
+    for r in results:
+        energy = r.get("energy", 0.0)
+        if total_energy > 0:
+            r["pct_U"] = (energy / total_energy) * 100.0
+        else:
+            r["pct_U"] = 0.0
+
+    return results

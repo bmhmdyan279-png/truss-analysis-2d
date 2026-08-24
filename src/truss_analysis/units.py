@@ -19,6 +19,7 @@ _CONVERSION_FACTORS = {
         "F": 1.0,
         "delta_T": 1.0,
         "alpha": 1.0,
+        "density": 1.0,
     },
     UnitSystem.IMPERIAL: {
         "L": 0.3048,
@@ -30,6 +31,7 @@ _CONVERSION_FACTORS = {
         "F": 4.44822,
         "delta_T": 5.0 / 9.0,
         "alpha": 1.8,
+        "density": 515.379,
     },
 }
 

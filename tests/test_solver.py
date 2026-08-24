@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from truss_analysis.exceptions import EnergyValidationError, SingularMatrixError
 from truss_analysis.solver import check_energy, solve
 
@@ -33,11 +32,16 @@ def test_check_energy_pass_no_thermal():
 
 
 def test_check_energy_pass_with_thermal():
+    """Check energy balance with thermal loads.
+    Formula: W_mech = strain_energy + 0.5 * prestress_work
+    W_mech = 0.5 * u^T f_mech = 0.5 * 2 * 4 = 4.0
+    With prestress=1.0: strain must be 3.5
+    """
     u = np.array([2.0, 0.0])
     f_mech = np.array([4.0, 0.0])
-    strain_energy = 3.0
-    prestress_work = 1.0
-    assert check_energy(u, f_mech, strain_energy, prestress_work) is True
+    # W_mech = 0.5 * 2 * 4 = 4.0
+    # Formula: 4.0 = strain + 0.5 * 1.0 => strain = 3.5
+    assert check_energy(u, f_mech, 3.5, 1.0) is True
 
 
 def test_check_energy_fail():

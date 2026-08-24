@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from truss_analysis.exceptions import InputValidationError
 from truss_analysis.model import Element, Node, validate_inputs
 
@@ -20,10 +19,10 @@ def test_element_creation():
 
 
 def test_validate_inputs_rejects_negative_area():
-    nodes = [Node("1", 0, 0), Node("2", 1, 0)]
-    elements = [Element("e1", "1", "2", E=200e9, A=-0.01)]
-    with pytest.raises(InputValidationError):
-        validate_inputs(nodes, elements)
+    nodes = [Node("1", 0.0, 0.0), Node("2", 1.0, 0.0)]
+    # Element __post_init__ raises the error, so Element() must be inside the with block
+    with pytest.raises(InputValidationError, match="A must be positive"):
+        Element("e1", "1", "2", E=200e9, A=-0.01)
 
 
 def test_validate_inputs_rejects_nan_coords():

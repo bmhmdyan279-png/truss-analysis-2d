@@ -43,7 +43,7 @@ def assemble_global_matrices(
         L = np.sqrt(dx**2 + dy**2)
 
         if L < 1e-12:
-            raise AssemblyError(f"Element {elem.id} has zero length")
+            raise AssemblyError(f"Element {elem.id} has zero or negative length")
 
         c = dx / L
         s = dy / L

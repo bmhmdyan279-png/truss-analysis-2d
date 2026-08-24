@@ -1,3 +1,12 @@
+import io
+import sys
+
+try:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+except AttributeError:
+    pass
+
 from truss_analysis import Element, Node, solve
 from truss_analysis.assembly import assemble_global_matrices
 from truss_analysis.postprocess import calculate_element_forces
