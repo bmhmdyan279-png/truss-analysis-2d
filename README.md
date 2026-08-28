@@ -3,9 +3,26 @@
 > **A scientific 2D truss analysis tool with thermodynamic validation.**
 
 [![CI Pipeline](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)](https://github.com/bmhmdyan279-png/truss-analysis-2d)
+[![Coverage](https://img.shields.io/badge/coverage-90.5%25-brightgreen)](https://github.com/bmhmdyan279-png/truss-analysis-2d)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
+
+---
+
+## 📚 Table of Contents
+
+- [📦 Installation](#-installation)
+- [🚀 Quick Start](#-quick-start)
+- [🖼️ Visual Output Example](#️-visual-output-example)
+- [📖 Input JSON Format](#-input-json-format)
+- [📤 Output Format](#-output-format)
+- [🎯 Key Features](#-key-features)
+- [🧪 Testing](#-testing)
+- [📁 Project Structure](#-project-structure)
+- [🤝 Contributing](#-contributing)
+- [📚 Citation](#-citation)
+- [📄 License](#-license)
+- [🙏 Acknowledgments](#-acknowledgments)
 
 ---
 
@@ -17,6 +34,16 @@
 git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
 cd truss-analysis-2d
 pip install -e ".[dev]"
+```
+
+### Using requirements.txt
+
+```bash
+# For runtime only
+pip install -r requirements.txt
+
+# For development (includes testing & linting tools)
+pip install -r requirements-dev.txt
 ```
 
 ### Quick Verification
@@ -72,6 +99,8 @@ Below is a sample visualization generated using the `--plot` flag. The dashed li
 
 *Deformed vs. original shape for `examples/example1.json`*
 
+---
+
 ## 📖 Input JSON Format
 
 ```json
@@ -93,9 +122,22 @@ Below is a sample visualization generated using the `--plot` flag. The dashed li
 }
 ```
 
+### Optional Element Parameters
+
+| Parameter | Description | Unit |
+|-----------|-------------|------|
+| `alpha` | Thermal expansion coefficient | 1/°C |
+| `delta_T` | Temperature change | °C |
+| `delta_L_free` | Free length change | m |
+| `I_sec` | Moment of inertia (for buckling) | m⁴ |
+| `rho` | Density (for self-weight) | kg/m³ |
+
+---
+
 ## 📤 Output Format
 
 ### JSON Output Structure
+
 ```json
 {
   "status": "converged",
@@ -123,40 +165,35 @@ Below is a sample visualization generated using the `--plot` flag. The dashed li
 ```
 
 ### Units
+
 All outputs are in SI units:
+
 | Quantity | Unit |
 |----------|------|
 | Displacement | m |
 | Force | N |
 | Stress | Pa |
 
-### Optional Element Parameters
-
-| Parameter | Description | Unit |
-|-----------|-------------|------|
-| `alpha` | Thermal expansion coefficient | 1/°C |
-| `delta_T` | Temperature change | °C |
-| `delta_L_free` | Free length change | m |
-| `I_sec` | Moment of inertia (for buckling) | m⁴ |
-| `rho` | Density (for self-weight) | kg/m³ |
-
 ---
 
 ## 🎯 Key Features
 
 ### 1. Scientific Accuracy
+
 - **Generalized Clapeyron theorem:** `W_mech = U_strain + 0.5 * W_prestress`
 - **Effect separation:** `δL_mech = δL_total - δL_prestress`
 - **Static equilibrium:** ΣFx=0, ΣFy=0, ΣM=0
 - **Mechanism detection:** Singular matrix error
 
 ### 2. Engineering Capabilities
+
 - **Euler buckling:** `P_cr = π²EI/L²` for compression members
 - **Slenderness ratio:** `λ = L/r` with `r = √(I/A)`
 - **Self-weight:** From element density
 - **SI/Imperial units:** Automatic conversion
 
 ### 3. Output Formats
+
 - **JSON:** Complete structured results
 - **CSV:** Element forces
 - **Markdown:** Human-readable report
@@ -166,6 +203,8 @@ All outputs are in SI units:
 
 ## 🧪 Testing
 
+### Running Tests
+
 ```bash
 # Run all tests
 pytest
@@ -173,7 +212,78 @@ pytest
 # With coverage report
 pytest --cov=src/truss_analysis --cov-report=term-missing
 
-# Current status: 39 tests, 90.5% coverage
+# With coverage threshold enforcement (as in CI)
+pytest --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=90
+```
+
+**Current status:** 39 tests passing, 90.5% coverage (threshold: 90%)
+
+### Linting & Type Checking
+
+```bash
+# Run ruff (linter + formatter)
+ruff check .
+ruff format --check .
+
+# Run mypy
+mypy src/
+```
+
+---
+
+## 📁 Project Structure
+
+```
+truss-analysis-2d/
+├── src/
+│   └── truss_analysis/
+│       ├── __init__.py
+│       ├── _version.py
+│       ├── assembly.py
+│       ├── exceptions.py
+│       ├── fileio.py
+│       ├── main.py
+│       ├── model.py
+│       ├── postprocess.py
+│       ├── solver.py
+│       ├── units.py
+│       └── visualization.py
+├── tests/
+│   ├── test_analytical.py
+│   ├── test_assembly.py
+│   ├── test_dof_mapping.py
+│   ├── test_e2e_cli.py
+│   ├── test_exceptions.py
+│   ├── test_fileio.py
+│   ├── test_golden.py
+│   ├── test_golden_phase3.py
+│   ├── test_model.py
+│   ├── test_phase2_cli_coverage.py
+│   ├── test_solver.py
+│   └── test_units.py
+├── docs/
+│   ├── theory.md
+│   ├── error_codes.md
+│   └── images/
+│       └── example_output.png
+├── examples/
+│   ├── example1.json
+│   ├── example2.json
+│   ├── reference_problem.json
+│   └── example_analysis.py
+├── .github/
+│   └── workflows/
+│       ├── ci.yml
+│       ├── publish.yml
+│       └── release.yml
+├── pyproject.toml
+├── requirements.txt
+├── requirements-dev.txt
+├── .pre-commit-config.yaml
+├── CONTRIBUTING.md
+├── CONTRIBUTING.fa.md
+├── LICENSE
+└── README.md
 ```
 
 ---
@@ -182,8 +292,9 @@ pytest --cov=src/truss_analysis --cov-report=term-missing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
+### Development Setup
+
 ```bash
-# Development setup
 git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
 cd truss-analysis-2d
 pip install -e ".[dev]"
@@ -194,6 +305,7 @@ pytest
 ---
 
 ## 📚 Citation
+
 If you use this software in your research, please cite:
 
 ```bibtex
@@ -222,3 +334,4 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 - **Pytest** for testing framework
 - **Ruff** for linting and formatting
 - **setuptools_scm** for automatic versioning
+- **arabic-reshaper** and **python-bidi** for Persian text rendering support
