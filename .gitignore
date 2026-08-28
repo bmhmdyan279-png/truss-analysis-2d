@@ -67,3 +67,11 @@ logs/
 
 # Dynamic version file (auto-generated)
 src/truss_analysis/_version.py
+
+# =====================================================
+# 🔒 PROJECT DOCUMENTATION - DO NOT COMMIT (Privacy)
+# این پوشه حاوی یادداشت‌های پژوهشی شخصی است
+# =====================================================
+PROJECT_DOCUMENTATION/
+PROJECT_DOCUMENTATION/**
+!PROJECT_DOCUMENTATION/.keep

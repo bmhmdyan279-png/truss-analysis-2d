@@ -36,6 +36,17 @@ def _pure(obj):
     return obj
 
 
+def _normalize_dict(d: dict) -> dict:
+    """Strip trailing/leading spaces from keys (backward-compat for old JSON)."""
+    return {k.strip(): v for k, v in d.items()}
+
+
+def _get(d: dict, key: str, default=None):
+    """Get value from dict, tolerating keys with trailing spaces."""
+    nd = _normalize_dict(d)
+    return nd.get(key, default)
+
+
 @dataclass
 class AnalysisResult:
     """Structured container for all analysis outputs."""
@@ -122,29 +133,35 @@ def run(
     plot_path=None,
 ):
     """Run the full analysis pipeline and return an AnalysisResult."""
-    data = load_json(filepath)
+    raw_data = load_json(filepath)
+    # Normalize top-level keys (handle old JSON with trailing spaces)
+    data = _normalize_dict(raw_data)
+    unit_sys = data.get("units", unit_sys)
+
     nodes = [
         Node(
-            id=str(n["id"]),
-            x=to_si(n["x"], unit_sys, "L"),
-            y=to_si(n["y"], unit_sys, "L"),
-            is_support=n.get("is_support", False),
-            support_dx=n.get("support_dx", False),
-            support_dy=n.get("support_dy", False),
+            id=str(_get(n, "id")),
+            x=to_si(_get(n, "x"), unit_sys, "L"),
+            y=to_si(_get(n, "y"), unit_sys, "L"),
+            is_support=bool(_get(n, "is_support", False)),
+            support_dx=bool(_get(n, "support_dx", False)),
+            support_dy=bool(_get(n, "support_dy", False)),
         )
         for n in data["nodes"]
     ]
     elements = [
         Element(
-            id=str(e["id"]),
-            node_i=str(e["node_i"]),
-            node_j=str(e["node_j"]),
-            E=to_si(e["E"], unit_sys, "E"),
-            A=to_si(e["A"], unit_sys, "A"),
-            I_sec=to_si(e.get("I_sec", e.get("I", 0.0)), unit_sys, "I_sec"),
-            alpha=to_si(e.get("alpha", 0.0), unit_sys, "alpha"),
-            delta_T=to_si(e.get("delta_T", 0.0), unit_sys, "delta_T"),
-            delta_L_free=to_si(e.get("delta_L_free", 0.0), unit_sys, "L"),
+            id=str(_get(e, "id")),
+            node_i=str(_get(e, "node_i")),
+            node_j=str(_get(e, "node_j")),
+            E=to_si(_get(e, "E"), unit_sys, "E"),
+            A=to_si(_get(e, "A"), unit_sys, "A"),
+            I_sec=to_si(_get(e, "I_sec", _get(e, "I", 0.0)), unit_sys, "I_sec"),
+            alpha=to_si(_get(e, "alpha", 0.0), unit_sys, "alpha"),
+            delta_T=to_si(_get(e, "delta_T", 0.0), unit_sys, "delta_T"),
+            delta_L_free=to_si(
+                _get(e, "delta_L_free", _get(e, "delta_L0", 0.0)), unit_sys, "L"
+            ),
         )
         for e in data["elements"]
     ]
@@ -155,12 +172,12 @@ def run(
     applied_loads = []
 
     for lf in data.get("loads", []):
-        nid = str(lf.get("node_id", lf.get("id")))
+        nid = str(_get(lf, "node_id", _get(lf, "id")))
         if nid not in node_map:
             continue
         idx = node_map[nid]
-        fx = to_si(lf.get("Fx", 0.0), unit_sys, "F")
-        fy = to_si(lf.get("Fy", 0.0), unit_sys, "F")
+        fx = to_si(_get(lf, "Fx", 0.0), unit_sys, "F")
+        fy = to_si(_get(lf, "Fy", 0.0), unit_sys, "F")
         F_ext[2 * idx] += fx
         F_ext[2 * idx + 1] += fy
         F_mechanical[2 * idx] += fx
@@ -168,10 +185,10 @@ def run(
         applied_loads.append({"node_id": nid, "Fx": fx, "Fy": fy})
 
     # Optional self-weight via per-element density rho [kg/m^3]
-    raw_elems = {str(e["id"]): e for e in data["elements"]}
+    raw_elems = {str(_get(e, "id")): e for e in data["elements"]}
     weight_per_node = {}
     for elem in elements:
-        rho = float(raw_elems.get(elem.id, {}).get("rho", 0.0) or 0.0)
+        rho = float(_get(raw_elems.get(elem.id, {}), "rho", 0.0) or 0.0)
         if rho <= 0.0:
             continue
         i, j = node_map[elem.node_i], node_map[elem.node_j]

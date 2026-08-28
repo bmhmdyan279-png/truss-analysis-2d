@@ -9,10 +9,11 @@ description = "2D Truss Analysis Tool - scientifically validated"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "numpy>=1.20",
+    "numpy>=1.21.0",
     "matplotlib>=3.5.0",
     "arabic-reshaper>=3.0.0",
     "python-bidi>=0.4.2",
+    "scipy>=1.9.0",
 ]
 
 [project.optional-dependencies]
@@ -27,6 +28,12 @@ dev = [
 [project.scripts]
 truss-analysis = "truss_analysis.main:main"
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.setuptools_scm]
 write_to = "src/truss_analysis/_version.py"
 fallback_version = "2.1.6"
@@ -40,4 +47,4 @@ select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --cov=truss_analysis --cov-report=term-missing --cov-fail-under=85"
+addopts = "-v --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=85"
