@@ -98,6 +98,43 @@ print(f"Equilibrium valid: {result.equilibrium['is_valid']}")
 }
 ```
 
+## 📤 Output Format
+
+### JSON Output Structure
+```json
+{
+  "status": "converged",
+  "displacements": {
+    "2": {"dx": 0.00234, "dy": -0.00567}
+  },
+  "element_forces": [
+    {
+      "id": "1",
+      "N": 15234.5,
+      "status": "tension",
+      "sigma": 15.23e6,
+      "strain": 7.6e-5
+    }
+  ],
+  "reactions": {
+    "1": {"Fx": -8000.0, "Fy": 3500.0}
+  },
+  "equilibrium": {
+    "sum_fx": 1.2e-10,
+    "sum_fy": 3.4e-11,
+    "is_valid": true
+  }
+}
+```
+
+### Units
+All outputs are in SI units:
+| Quantity | Unit |
+|----------|------|
+| Displacement | m |
+| Force | N |
+| Stress | Pa |
+```
 ### Optional Element Parameters
 
 | Parameter | Description | Unit |
@@ -180,6 +217,20 @@ pytest
 ```
 
 ---
+
+## 📚 Citation
+If you use this software in your research, please cite:
+
+```bibtex
+@software{truss_analysis_2d,
+  author = {bmhmdyan279-png},
+  title = {Truss Analysis 2D: Scientific Truss Solver},
+  year = {2026},
+  url = {https://github.com/bmhmdyan279-png/truss-analysis-2d},
+  version = {2.4.0}
+}
+---
+
 
 ## 📄 License
 

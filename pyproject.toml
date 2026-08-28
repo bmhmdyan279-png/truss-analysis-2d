@@ -7,7 +7,7 @@ name = "truss_analysis"
 dynamic = ["version"]
 description = "2D Truss Analysis Tool - scientifically validated"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.21.0",
     "matplotlib>=3.5.0",
