@@ -77,6 +77,14 @@ print(f"Equilibrium valid: {result.equilibrium['is_valid']}")
 
 ---
 
+## 🖼️ Visual Output Example
+
+Below is a sample visualization generated using the `--plot` flag. The dashed lines represent the deformed shape, while the solid lines show the original truss geometry. Colors indicate element stress states (tension in blue, compression in red).
+
+![Truss Analysis Result](docs/images/example_output.png)
+
+*Deformed vs. original shape for `examples/example1.json`*
+
 ## 📖 Input JSON Format
 
 ```json
