@@ -6,6 +6,8 @@
 [![Coverage](https://img.shields.io/badge/coverage-90.5%25-brightgreen)](https://github.com/bmhmdyan279-png/truss-analysis-2d)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
+[![PyPI version](https://img.shields.io/pypi/v/truss-analysis.svg)](https://pypi.org/project/truss-analysis/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/truss-analysis)](https://pypi.org/project/truss-analysis/)
 
 ---
 
@@ -28,7 +30,15 @@
 
 ## 📦 Installation
 
-### From Source (Recommended)
+### From PyPI (Recommended)
+
+```bash
+pip install truss-analysis
+```
+
+> **Note:** The package name on PyPI is `truss-analysis` (without `-2d`). The repository name is `truss-analysis-2d`.
+
+### From Source (for development or latest changes)
 
 ```bash
 git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
