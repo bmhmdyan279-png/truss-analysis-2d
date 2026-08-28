@@ -1,56 +1,73 @@
 # 🏗️ Truss Analysis 2D
 
-[![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/publish.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions)
-[![PyPI](https://img.shields.io/pypi/v/truss_analysis)](https://pypi.org/project/truss_analysis/)
-[![Python](https://img.shields.io/pypi/pyversions/truss_analysis)](https://pypi.org/project/truss_analysis/)
-[![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+> **A scientific 2D truss analysis tool with thermodynamic validation, currently being extended with automated structural risk assessment capabilities.**
 
-یک ابزار تحلیل خرپای دوبعدی مهندسی و علمی با:
-- ✅ اعتبارسنجی ترمودینامیکی (قضیه کلپیرون تعمیم‌یافته)
-- ✅ کنترل تعادل استاتیکی
-- ✅ هشدار کمانش اویلر
-- ✅ پشتیبانی از بار حرارتی و پیش‌تنیدگی
-- ✅ خروجی JSON/CSV/Markdown و مصورسازی
+[![CI Pipeline](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)](https://github.com/bmhmdyan279-png/truss-analysis-2d)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
 
-## 📦 نصب
+---
 
-```bash
-pip install truss_analysis
-```
+## 📌 Current Status
 
-یا از سورس:
+| Item | Status |
+|------|--------|
+| **Research Phase** | Phase 0 Complete → Phase 1 Starting |
+| **Test Coverage** | 90.5% (39 tests passing) |
+| **CI/CD** | ✅ Green |
+| **Research Target** | *Automation in Construction* |
+
+> ⚠️ **Note:** This project is under active research development. The research documentation (`PROJECT_DOCUMENTATION/`) is kept locally and is not published in this repository.
+
+---
+
+## 📦 Installation
+
+### From Source (Recommended)
 
 ```bash
 git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
 cd truss-analysis-2d
-pip install .
+pip install -e ".[dev]"
 ```
 
-## 🚀 استفاده سریع
-
-### CLI (خط فرمان)
+### Quick Verification
 
 ```bash
-# تحلیل ساده
+# Run all tests
+pytest
+
+# Run a quick example
+truss-analysis examples/example1.json
+```
+
+---
+
+## 🚀 Quick Start
+
+### CLI Usage
+
+```bash
+# Basic analysis
 truss-analysis input.json
 
-# با خروجی‌های مختلف
+# With multiple outputs
 truss-analysis input.json --output result.json --csv forces.csv --report report.md
 
-# با مصورسازی و بررسی کمانش
+# With visualization and buckling check
 truss-analysis input.json --plot --check-buckling --plot-path diagram.png
 ```
 
 ### Python API
 
 ```python
-from truss_analysis import run
+from truss_analysis.main import run
 
-# تحلیل خرپا
+# Run analysis
 result = run("input.json", check_buckling=True)
 
-# دسترسی به نتایج
+# Access results
 print(result.summary())
 print(f"Displacements: {result.displacements}")
 print(f"Element forces: {result.element_forces}")
@@ -58,157 +75,103 @@ print(f"Reactions: {result.reactions}")
 print(f"Equilibrium valid: {result.equilibrium['is_valid']}")
 ```
 
-## 📖 قالب ورودی JSON
+---
+
+## 📖 Input JSON Format
 
 ```json
 {
+  "units": "SI",
   "nodes": [
-    {"id": "1", "x": 0.0, "y": 0.0, "is_support": true, "support_dx": true, "support_dy": true},
-    {"id": "2", "x": 3.0, "y": 0.0, "is_support": true, "support_dy": true},
-    {"id": "3", "x": 1.5, "y": 2.0, "is_support": false}
+    {"id": 1, "x": 0.0, "y": 0.0, "is_support": true, "support_dx": true, "support_dy": true},
+    {"id": 2, "x": 3.0, "y": 0.0, "is_support": false},
+    {"id": 3, "x": 0.0, "y": 4.0, "is_support": true, "support_dx": true, "support_dy": true}
   ],
   "elements": [
-    {"id": "1", "node_i": "1", "node_j": "3", "E": 200e9, "A": 0.001},
-    {"id": "2", "node_i": "2", "node_j": "3", "E": 200e9, "A": 0.001},
-    {"id": "3", "node_i": "1", "node_j": "2", "E": 200e9, "A": 0.001}
+    {"id": 1, "node_i": 1, "node_j": 2, "E": 200e9, "A": 0.001},
+    {"id": 2, "node_i": 2, "node_j": 3, "E": 200e9, "A": 0.002},
+    {"id": 3, "node_i": 1, "node_j": 3, "E": 200e9, "A": 0.0015}
   ],
   "loads": [
-    {"node_id": "3", "Fx": 0, "Fy": -10000}
+    {"node_id": 2, "Fx": 10000.0, "Fy": -5000.0}
   ]
 }
 ```
 
-### پارامترهای اختیاری المان
+### Optional Element Parameters
 
-- `alpha`: ضریب انبساط حرارتی (1/°C)
-- `delta_T`: تغییر دما (°C)
-- `delta_L_free`: تغییر طول اولیه (m)
-- `I_sec`: ممان اینرسی برای بررسی کمانش (m⁴)
-- `density`: چگالی برای وزن خودی (kg/m³)
+| Parameter | Description | Unit |
+|-----------|-------------|------|
+| `alpha` | Thermal expansion coefficient | 1/°C |
+| `delta_T` | Temperature change | °C |
+| `delta_L_free` | Free length change | m |
+| `I_sec` | Moment of inertia (for buckling) | m⁴ |
+| `rho` | Density (for self-weight) | kg/m³ |
 
-## 🎯 ویژگی‌های کلیدی
+---
 
-### 1. صحت علمی
-- **قضیه کلپیرون تعمیم‌یافته**: `W_mech = U_strain + 0.5 * W_prestress`
-- **جداسازی اثرات**: `δL_mech = δL_total - δL_prestress`
-- **کنترل تعادل**: ΣFx=0, ΣFy=0, ΣM=0
-- **تشخیص مکانیزم**: خطای ماتریس منفرد
+## 🎯 Key Features
 
-### 2. امکانات مهندسی
-- **کمانش اویلر**: `P_cr = π²EI/L²` برای المان‌های تحت فشار
-- **نسبت لاغری**: `λ = L/r` با `r = √(I/A)`
-- **وزن خودی**: از چگالی و حجم المان
-- **واحدهای SI و Imperial**: تبدیل خودکار
+### 1. Scientific Accuracy
+- **Generalized Clapeyron theorem:** `W_mech = U_strain + 0.5 * W_prestress`
+- **Effect separation:** `δL_mech = δL_total - δL_prestress`
+- **Static equilibrium:** ΣFx=0, ΣFy=0, ΣM=0
+- **Mechanism detection:** Singular matrix error
 
-### 3. خروجی‌ها
-- **JSON**: نتایج کامل ساختاریافته
-- **CSV**: نیروهای المان‌ها
-- **Markdown**: گزارش خوانا
-- **Plot**: خرپای اولیه و تغییرشکل‌یافته
+### 2. Engineering Capabilities
+- **Euler buckling:** `P_cr = π²EI/L²` for compression members
+- **Slenderness ratio:** `λ = L/r` with `r = √(I/A)`
+- **Self-weight:** From element density
+- **SI/Imperial units:** Automatic conversion
 
-## 🧪 مثال‌ها
+### 3. Output Formats
+- **JSON:** Complete structured results
+- **CSV:** Element forces
+- **Markdown:** Human-readable report
+- **Plot:** Original and deformed truss
 
-مثال‌های کامل در پوشه `examples/`:
+---
 
-```bash
-# اجرای مثال
-truss-analysis examples/example1.json
-
-# یا با Python
-python examples/example_analysis.py
-```
-
-## 🔧 API Reference
-
-### توابع اصلی
-
-#### `run(filepath, unit_sys="SI", plot=False, check_buckling=False, output=None, csv_path=None, report_path=None, plot_path=None)`
-
-تحلیل کامل خرپا و برگرداندن `AnalysisResult`.
-
-**پارامترها:**
-- `filepath` (str): مسیر فایل JSON ورودی
-- `unit_sys` (str): سیستم واحد ("SI" یا "Imperial")
-- `plot` (bool): نمایش نمودار
-- `check_buckling` (bool): بررسی کمانش
-- `output` (str): مسیر خروجی JSON
-- `csv_path` (str): مسیر خروجی CSV
-- `report_path` (str): مسیر خروجی Markdown
-- `plot_path` (str): مسیر ذخیره نمودار
-
-**برگشتی:** `AnalysisResult` با فیلدهای:
-- `status` (str): "SUCCESS" یا خطا
-- `displacements` (dict): جابه‌جایی گره‌ها
-- `element_forces` (list): نیروهای المان‌ها
-- `reactions` (dict): عکس‌العمل‌های تکیه‌گاهی
-- `equilibrium` (dict): کنترل تعادل
-- `buckling` (list): نتایج کمانش
-
-#### `AnalysisResult.summary()`
-
-تولید خلاصه متنی از نتایج.
-
-### توابع سطح پایین
-
-#### `assemble_global_matrices(nodes, elements)`
-
-مونتاژ ماتریس سختی و بردارهای نیرو.
-
-**برگشتی:** `(K, F_ext, F_mechanical, fixed_dofs)`
-
-#### `solve(K, F_ext, fixed_dofs)`
-
-حل دستگاه `KU = F` با شرایط مرزی.
-
-**برگشتی:** `U` (numpy array)
-
-#### `calculate_element_forces(nodes, elements, U)`
-
-محاسبه نیروهای المان، انرژی کرنشی و کار پیش‌تنیدگی.
-
-**برگشتی:** `(results, strain_energy, prestress_work)`
-
-#### `calculate_reactions(nodes, K, U, F_ext, fixed_dofs)`
-
-محاسبه عکس‌العمل‌های تکیه‌گاهی: `R = KU - F_ext`
-
-#### `check_equilibrium(nodes, reactions, applied_loads, tol=1e-6)`
-
-کنترل تعادل استاتیکی.
-
-**برگشتی:** `{"sum_fx": float, "sum_fy": float, "sum_m": float, "is_valid": bool}`
-
-#### `calculate_buckling(nodes, elements, results, tol=1e-12)`
-
-بررسی کمانش اویلر برای المان‌های تحت فشار.
-
-**برگشتی:** لیست دیکشنری با `{"id", "N", "P_cr", "ratio", "slenderness", "safe"}`
-
-## 🧪 تست‌ها
+## 🧪 Testing
 
 ```bash
-# اجرای همه تست‌ها
+# Run all tests
 pytest
 
-# با پوشش کد
-pytest --cov=truss_analysis --cov-report=term-missing
+# With coverage report
+pytest --cov=src/truss_analysis --cov-report=term-missing
+
+# Current status: 39 tests, 90.5% coverage
 ```
 
-**پوشش فعلی:** 90% (37 تست)
+---
 
-## 🤝 مشارکت
+## 🔬 Research Roadmap
 
-مشارکت‌ها خوش‌آمد هستند! لطفاً:
+This project is being extended with the following research phases:
 
-1. Fork کنید
-2. Branch بسازید: `git checkout -b feature/amazing-feature`
-3. Commit کنید: `git commit -m 'Add amazing feature'`
-4. Push کنید: `git push origin feature/amazing-feature`
-5. Pull Request باز کنید
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 0 | Infrastructure & Repair | ✅ Complete |
+| 1 | Random Variable Layer | 🔄 Starting |
+| 2 | Monte Carlo + MVFOSM | ⏳ Pending |
+| 3 | Baseline Validation (Gate) | ⏳ Pending |
+| 4 | α-Degradation Operator | ⏳ Pending |
+| 5 | Independent SCF Validation (Gate) | ⏳ Pending |
+| 6 | SRC Index + Heterogeneity | ⏳ Pending |
+| 7-9 | Case Studies & Robustness | ⏳ Pending |
+| 10-14 | Publication & Submission | ⏳ Pending |
 
-### توسعه محلی
+> 📝 **Research Goal:** Automated extraction of Structural Consequence Factors (SCF) for 2D truss members, testing the hypothesis that uniform member reliability does not imply uniform system-risk-contribution.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
+# Development setup
 git clone https://github.com/bmhmdyan279-png/truss-analysis-2d.git
 cd truss-analysis-2d
 pip install -e ".[dev]"
@@ -216,23 +179,19 @@ pre-commit install
 pytest
 ```
 
-## 📝 تاریخچه تغییرات
+---
 
-برای تاریخچه کامل، [CHANGELOG.md](CHANGELOG.md) را ببینید.
+## 📄 License
 
-## 📄 مجوز
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
 
-این پروژه تحت مجوز MIT منتشر شده است. برای جزئیات، [LICENSE](LICENSE) را ببینید.
+---
 
-## 🙏 تشکر
+## 🙏 Acknowledgments
 
-- **NumPy** برای محاسبات ماتریسی
-- **Matplotlib** برای مصورسازی
-- **Pytest** برای فریمورک تست
-- **Ruff** برای linting و formatting
-- **setuptools_scm** برای versioning خودکار
-
-## 📞 پشتیبانی
-
-- **Issues**: [GitHub Issues](https://github.com/bmhmdyan279-png/truss-analysis-2d/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/bmhmdyan279-png/truss-analysis-2d/discussions)
+- **NumPy** for matrix computations
+- **Matplotlib** for visualization
+- **SciPy** for sparse matrix operations
+- **Pytest** for testing framework
+- **Ruff** for linting and formatting
+- **setuptools_scm** for automatic versioning
