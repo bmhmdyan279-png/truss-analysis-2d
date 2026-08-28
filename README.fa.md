@@ -345,4 +345,3 @@ pytest
 - **Ruff** برای لینت و فرمت‌دهی
 - **setuptools_scm** برای نسخه‌بندی خودکار
 - **arabic-reshaper** و **python-bidi** برای پشتیبانی از رندر متن فارسی
-```
