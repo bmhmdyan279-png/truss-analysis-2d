@@ -300,7 +300,7 @@ truss-analysis-2d/
 
 ## 🤝 مشارکت
 
-مشارکت‌ها خوش‌آمدند! لطفاً برای راهنمایی به [CONTRIBUTING.md](CONTRIBUTING.md) مراجعه کنید.
+مشارکت‌ها خوش‌آمدند! لطفاً برای راهنمایی به [CONTRIBUTING.md](CONTRIBUTING.fa.md) مراجعه کنید.
 
 ### راه‌اندازی توسعه
 
