@@ -1,24 +1,11 @@
 # 🏗️ Truss Analysis 2D
 
-> **A scientific 2D truss analysis tool with thermodynamic validation, currently being extended with automated structural risk assessment capabilities.**
+> **A scientific 2D truss analysis tool with thermodynamic validation.**
 
 [![CI Pipeline](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen)](https://github.com/bmhmdyan279-png/truss-analysis-2d)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
-
----
-
-## 📌 Current Status
-
-| Item | Status |
-|------|--------|
-| **Research Phase** | Phase 0 Complete → Phase 1 Starting |
-| **Test Coverage** | 90.5% (39 tests passing) |
-| **CI/CD** | ✅ Green |
-| **Research Target** | *Automation in Construction* |
-
-> ⚠️ **Note:** This project is under active research development. The research documentation (`PROJECT_DOCUMENTATION/`) is kept locally and is not published in this repository.
 
 ---
 
@@ -142,7 +129,7 @@ All outputs are in SI units:
 | Displacement | m |
 | Force | N |
 | Stress | Pa |
-```
+
 ### Optional Element Parameters
 
 | Parameter | Description | Unit |
@@ -191,26 +178,6 @@ pytest --cov=src/truss_analysis --cov-report=term-missing
 
 ---
 
-## 🔬 Research Roadmap
-
-This project is being extended with the following research phases:
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Infrastructure & Repair | ✅ Complete |
-| 1 | Random Variable Layer | 🔄 Starting |
-| 2 | Monte Carlo + MVFOSM | ⏳ Pending |
-| 3 | Baseline Validation (Gate) | ⏳ Pending |
-| 4 | α-Degradation Operator | ⏳ Pending |
-| 5 | Independent SCF Validation (Gate) | ⏳ Pending |
-| 6 | SRC Index + Heterogeneity | ⏳ Pending |
-| 7-9 | Case Studies & Robustness | ⏳ Pending |
-| 10-14 | Publication & Submission | ⏳ Pending |
-
-> 📝 **Research Goal:** Automated extraction of Structural Consequence Factors (SCF) for 2D truss members, testing the hypothesis that uniform member reliability does not imply uniform system-risk-contribution.
-
----
-
 ## 🤝 Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
@@ -237,8 +204,9 @@ If you use this software in your research, please cite:
   url = {https://github.com/bmhmdyan279-png/truss-analysis-2d},
   version = {2.4.0}
 }
----
+```
 
+---
 
 ## 📄 License
 
