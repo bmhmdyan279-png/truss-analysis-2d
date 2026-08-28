@@ -40,11 +40,11 @@ fallback_version = "2.1.6"
 
 [tool.ruff]
 line-length = 88
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=85"
+addopts = "-v --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=90"
