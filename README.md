@@ -1,5 +1,7 @@
 # 🏗️ Truss Analysis 2D
 
+**Read this in:** [English](README.md) | [فارسی](README.fa.md)
+
 > **A scientific 2D truss analysis tool with thermodynamic validation.**
 
 [![CI Pipeline](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
