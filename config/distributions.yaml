@@ -1,0 +1,35 @@
+# config/distributions.yaml
+# Configuration for random variables in Phase 1
+# CoV is used for parameters with non-zero mean.
+# std is used for parameters where mean can be zero (e.g., delta_L0, delta_T).
+
+parameters:
+  E:
+    type: lognormal
+    mean: 200.0e9
+    cov: 0.05
+    description: "Modulus of Elasticity (Pa)"
+
+  A:
+    type: normal
+    mean: 0.001
+    cov: 0.02
+    description: "Cross-sectional Area (m^2)"
+
+  F:
+    type: gumbel
+    mean: 10000.0
+    cov: 0.15
+    description: "Nodal Loads (N)"
+
+  delta_T:
+    type: normal
+    mean: 0.0
+    std: 5.0
+    description: "Temperature Change (C)"
+
+  delta_L0:
+    type: normal
+    mean: 0.0
+    std: 0.001
+    description: "Free Length Change / Fabrication Tolerance (m)"
