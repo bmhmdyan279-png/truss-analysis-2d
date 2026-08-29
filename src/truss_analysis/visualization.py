@@ -9,8 +9,8 @@ import numpy as np
 def _persian(text: str) -> str:
     """Convert text to Persian bidirectional format."""
     try:
-        import arabic_reshaper
-        from bidi.algorithm import get_display
+        import arabic_reshaper  # type: ignore[import-untyped]
+        from bidi.algorithm import get_display  # type: ignore[import-untyped]
 
         return get_display(arabic_reshaper.reshape(text))
     except Exception:
