@@ -52,24 +52,29 @@ def compute_heterogeneity(
         gc = margins[mid]
         valid_gc = gc[~np.isnan(gc)]
 
+        # Fix: Handle completely missing data separately from instability
         if len(valid_gc) == 0:
-            mu_g = 0.0
+            mu_g = float("nan")
             beta = float("nan")
             warnings_list.append(
                 f"Member {mid}: No valid safety margin samples (all missing)."
             )
+            mu_g_dict[mid] = mu_g
+            beta_hat_dict[mid] = beta
+            src_matrix[:, idx] = np.nan
+            continue
+
+        mu_g = float(np.mean(valid_gc))
+        std_g = float(np.std(valid_gc, ddof=1)) if len(valid_gc) > 1 else 0.0
+        if std_g > 1e-12:
+            beta = float(mu_g / std_g)
         else:
-            mu_g = float(np.mean(valid_gc))
-            std_g = float(np.std(valid_gc, ddof=1)) if len(valid_gc) > 1 else 0.0
-            if std_g > 1e-12:
-                beta = float(mu_g / std_g)
+            if mu_g > 0:
+                beta = float("inf")
+            elif mu_g < 0:
+                beta = float("-inf")
             else:
-                if mu_g > 0:
-                    beta = float("inf")
-                elif mu_g < 0:
-                    beta = float("-inf")
-                else:
-                    beta = float("nan")
+                beta = float("nan")
 
         mu_g_dict[mid] = mu_g
         beta_hat_dict[mid] = beta
