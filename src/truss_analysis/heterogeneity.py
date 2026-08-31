@@ -28,6 +28,51 @@ class HeterogeneityResult:
     warnings: list[str]
 
 
+def compute_bounded_metrics(values: npt.ArrayLike) -> dict[str, float]:
+    """
+    Computes bounded heterogeneity metrics (Gini and Log-Ratio).
+
+    Replaces the unstable U = max/min and handles singularities honestly (D-021).
+    Uses absolute values for Gini (D-014).
+    """
+    arr = np.asarray(values)
+
+    # Filter out NaNs and Infs resulting from physical singularities (e.g., beta -> 0)
+    arr = arr[~np.isnan(arr) & ~np.isinf(arr)]
+
+    if len(arr) < 2:
+        return {"gini": 0.0, "log_ratio": 0.0, "u_raw": np.nan}
+
+    # 1. Gini Coefficient (requires non-negative values, use absolute)
+    arr_abs = np.abs(arr)
+    arr_sorted = np.sort(arr_abs)
+    n = len(arr_sorted)
+    sum_sorted = np.sum(arr_sorted)
+    if sum_sorted == 0:
+        gini = 0.0
+    else:
+        index = np.arange(1, n + 1)
+        gini = np.sum((2 * index - n - 1) * arr_sorted) / (n * sum_sorted)
+
+    # 2. Log-Ratio: ln(max) - ln(min)
+    valid_arr = arr_abs[arr_abs > 1e-12]
+    if len(valid_arr) < 2:
+        log_ratio = 0.0
+    else:
+        log_ratio = np.log(np.max(valid_arr)) - np.log(np.min(valid_arr))
+
+    # 3. Raw U (retained for historical logging, NO CLAMPING)
+    min_val = np.min(arr_abs)
+    max_val = np.max(arr_abs)
+    u_raw = max_val / min_val if min_val > 1e-12 else np.inf
+
+    return {
+        "gini": float(gini),
+        "log_ratio": float(log_ratio),
+        "u_raw": float(u_raw),
+    }
+
+
 def compute_heterogeneity(
     margins: Mapping[str, npt.NDArray[np.float64]],
     scf_values: Mapping[str, float],
@@ -52,7 +97,6 @@ def compute_heterogeneity(
         gc = margins[mid]
         valid_gc = gc[~np.isnan(gc)]
 
-        # Fix: Handle completely missing data separately from instability
         if len(valid_gc) == 0:
             mu_g = float("nan")
             beta = float("nan")
@@ -93,7 +137,6 @@ def compute_heterogeneity(
             num = mu_g
             den = gc
 
-        den = np.where(np.abs(den) < 1e-12, 1e-12, den)
         src_k = scf * (num / den)
         src_matrix[:, idx] = src_k
 
@@ -104,32 +147,34 @@ def compute_heterogeneity(
     for k in range(n_samples):
         src_k = src_matrix[k, :]
         valid_src = src_k[~np.isnan(src_k)]
-        if len(valid_src) == 0 or np.min(np.abs(valid_src)) < 1e-12:
+
+        if len(valid_src) == 0:
             u_arr[k] = np.nan
             cov_arr[k] = np.nan
             gini_arr[k] = np.nan
             continue
 
-        u_arr[k] = float(np.max(valid_src) / np.min(valid_src))
+        # No clamping: let division by zero produce inf, filter later
+        max_val = np.max(valid_src)
+        min_val = np.min(valid_src)
+        u_arr[k] = max_val / min_val  # may be inf if min_val == 0
 
         mean_src = np.mean(valid_src)
         if mean_src != 0:
             cov_arr[k] = float(np.std(valid_src, ddof=1) / mean_src)
         else:
-            cov_arr[k] = float("nan")
+            cov_arr[k] = np.inf
 
-        sorted_src = np.sort(valid_src)
-        n = len(sorted_src)
-        index = np.arange(1, n + 1)
-        sum_src = np.sum(sorted_src)
-        if sum_src != 0:
-            gini_arr[k] = float(
-                np.sum((2 * index - n - 1) * sorted_src) / (n * sum_src)
-            )
-        else:
-            gini_arr[k] = float("nan")
+        # Use bounded metrics for Gini (based on absolute values)
+        metrics = compute_bounded_metrics(valid_src)
+        gini_arr[k] = metrics["gini"]
 
-    valid_u = u_arr[~np.isnan(u_arr)]
+    # Filter out inf and nan from U, CoV, Gini
+    valid_u = u_arr[~np.isnan(u_arr) & ~np.isinf(u_arr)]
+    valid_cov = cov_arr[~np.isnan(cov_arr) & ~np.isinf(cov_arr)]
+    valid_gini = gini_arr[~np.isnan(gini_arr) & ~np.isinf(gini_arr)]
+
+    # Bootstrap for H1 test on U
     if len(valid_u) > 0:
         rng_boot = np.random.default_rng(bootstrap_seed)
         boot_means = np.zeros(n_bootstrap)
@@ -142,14 +187,14 @@ def compute_heterogeneity(
         ci_lower = float("nan")
         h1_accepted = False
 
-    valid_cov = cov_arr[~np.isnan(cov_arr)]
-    valid_gini = gini_arr[~np.isnan(gini_arr)]
-
+    # Quantiles of U (raw)
     quantiles = {
         "2.5%": float(np.percentile(valid_u, 2.5))
         if len(valid_u) > 0
         else float("nan"),
-        "50%": float(np.percentile(valid_u, 50)) if len(valid_u) > 0 else float("nan"),
+        "50%": (
+            float(np.percentile(valid_u, 50)) if len(valid_u) > 0 else float("nan")
+        ),
         "97.5%": float(np.percentile(valid_u, 97.5))
         if len(valid_u) > 0
         else float("nan"),

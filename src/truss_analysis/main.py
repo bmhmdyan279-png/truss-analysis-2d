@@ -131,6 +131,7 @@ def run(
     csv_path=None,
     report_path=None,
     plot_path=None,
+    quiet: bool = False,  # <-- پارامتر جدید
 ):
     """Run the full analysis pipeline and return an AnalysisResult."""
     raw_data = load_json(filepath)
@@ -186,7 +187,7 @@ def run(
 
     # Optional self-weight via per-element density rho [kg/m^3]
     raw_elems = {str(_get(e, "id")): e for e in data["elements"]}
-    weight_per_node = {}
+    weight_per_node: dict = {}
     for elem in elements:
         rho = float(_get(raw_elems.get(elem.id, {}), "rho", 0.0) or 0.0)
         if rho <= 0.0:
@@ -242,7 +243,10 @@ def run(
         from .visualization import plot_truss
 
         plot_truss(nodes, elements, U=U, results=element_forces, save_path=plot_path)
-    print(result.summary())
+
+    # چاپ خروجی فقط در صورتی که quiet=False باشد
+    if not quiet:
+        print(result.summary())
     return result
 
 
@@ -259,6 +263,7 @@ def main(argv=None):
     parser.add_argument("--plot", action="store_true", help="Show plot")
     parser.add_argument("--plot-path", help="Save plot PNG")
     parser.add_argument("--check-buckling", action="store_true")
+    # در صورت تمایل می‌توانید آرگومان --quiet را نیز اضافه کنید، اما فعلاً نیازی نیست
     args = parser.parse_args(argv)
     run(
         args.input,
@@ -269,6 +274,7 @@ def main(argv=None):
         csv_path=args.csv_path,
         report_path=args.report_path,
         plot_path=args.plot_path,
+        quiet=False,  # در حال حاضر مقدار پیش‌فرض False است
     )
     return 0
 

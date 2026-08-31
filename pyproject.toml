@@ -9,6 +9,8 @@ description = "2D Truss Analysis Tool - scientifically validated"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "arabic_reshaper",
+    "python-bidi",
     "numpy>=1.24.0",
     "matplotlib>=3.7.0",
     "PyYAML>=6.0",
