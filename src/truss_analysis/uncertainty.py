@@ -29,7 +29,7 @@ class RandomVariable:
             self.cov = std / mean if mean != 0 else float("inf")
         elif cov is not None:
             self.cov = cov
-            self.std = mean * cov
+            self.std = abs(mean) * cov
         else:
             raise ValueError("Either 'std' or 'cov' must be provided.")
 

@@ -1,0 +1,8 @@
+phase: 06.5_uniform_beta_redesign
+status: starting
+last_updated: "2026-08-31"
+blocking_issues: []
+next_phase: 07_deterministic_control
+gate_status: phase_06_artifact_flagged_h1_revoked
+H1_Accepted: false
+artifact_flag: "U=3689 revoked due to I_sec physics bug and denominator clamping (D-016, D-021)"

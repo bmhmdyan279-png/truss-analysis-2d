@@ -601,7 +601,7 @@ def write_report(
 
     if "book_example" in cases:
         lines.append(
-            "- [x] Executed Phase 2 engine on the supplied book/example " "problem."
+            "- [x] Executed Phase 2 engine on the supplied book/example problem."
         )
     else:
         lines.append(
@@ -611,7 +611,7 @@ def write_report(
 
     if comparison is not None:
         lines.append(
-            "- [x] Compared computed beta values with supplied reference " "beta JSON."
+            "- [x] Compared computed beta values with supplied reference beta JSON."
         )
     else:
         lines.append(
@@ -639,7 +639,7 @@ def write_report(
             "## Verification (real, run by script)",
             f"- Command run: `{' '.join(sys.argv)}`",
             f"- Execution date: {execution_date}",
-            "- Result: script completed and wrote raw JSON + validation " "fragment.",
+            "- Result: script completed and wrote raw JSON + validation fragment.",
             "",
             "## Assumptions",
             f"- Sample sizes: {', '.join(str(s) for s in sample_sizes)}",
@@ -678,9 +678,9 @@ def write_report(
         )
         lines.append(f"Yield source: `{case.get('yield_source', 'none')}`")
         lines.append(
-            "Variable source: " f"`{case.get('random_variable_source', 'unknown')}`"
+            f"Variable source: `{case.get('random_variable_source', 'unknown')}`"
         )
-        lines.append("Random variables: " f"{case.get('random_variable_count', 0)}")
+        lines.append(f"Random variables: {case.get('random_variable_count', 0)}")
         lines.append("")
 
         for result in case.get("results", []):
@@ -713,7 +713,7 @@ def write_report(
             "`PROJECT_DOCUMENTATION/phase3_validation_log_fragment.md`.",
             "",
             "## Stability check",
-            "- [ ] Clean checkout + install + run reproduces this phase's " "output.",
+            "- [ ] Clean checkout + install + run reproduces this phase's output.",
             "",
             "## Handoff",
             "- Blocking items: none created by this script; scientific "
