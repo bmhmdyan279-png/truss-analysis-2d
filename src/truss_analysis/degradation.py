@@ -101,7 +101,14 @@ class DamageOperator:
         if not free_dofs:
             return False
         K_ff = K[np.ix_(free_dofs, free_dofs)]
-        rank = np.linalg.matrix_rank(K_ff, tol=1e-9)
+
+        try:
+            u, s, vh = np.linalg.svd(K_ff)
+            tol = s[0] * 1e-5 if len(s) > 0 else 1e-9
+            rank = int(np.sum(s > tol))
+        except np.linalg.LinAlgError:
+            rank = 0
+
         return rank < len(free_dofs)
 
     def _apply_geometric_scaling(
