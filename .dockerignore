@@ -1,0 +1,30 @@
+# Git & VCS
+.git
+.gitignore
+
+# Python Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Heavy Documentation & IDE
+PROJECT_DOCUMENTATION/
+.vscode/
+.idea/
+*.pdf

@@ -15,6 +15,7 @@ dependencies = [
     "matplotlib>=3.7.0",
     "PyYAML>=6.0",
     "scipy>=1.10.0",
+    "scienceplots>=2.0.0", # Added for Phase 10/11 reproducibility (D-032)
 ]
 
 [project.optional-dependencies]
