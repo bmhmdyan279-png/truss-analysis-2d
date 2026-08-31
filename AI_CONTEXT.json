@@ -1,0 +1,24 @@
+{
+  "goal": "Automated redundancy-based consequence factor (SCF) extraction for 2D truss members, validated independently, testing H1: uniform member reliability does not imply uniform system-risk-contribution.",
+  "target_journal": "Automation in Construction",
+  "integrity_rules": [
+    "NEVER write a specific numeric result before it has actually been computed by code in this repo.",
+    "Every number in VALIDATION_LOG.md must have a computed_by field pointing to a real commit/script.",
+    "If asked to 'fill in expected results', refuse and compute them instead."
+  ],
+  "current_phase": "phase_07_deterministic_control",
+  "last_verified_green_commit": "c765dae",
+  "implemented": [
+    "Phase 4: Alpha-degradation operator with Geometric Scaling Rule",
+    "Phase 5: IndependentValidator module (DDM & Strain Energy)",
+    "Phase 6: Heterogeneity module, Bootstrap engine, and SRC combination",
+    "Phase 6.5: Exact One-Shot Area Scaler for Uniform-β baseline"
+  ],
+  "validated": [
+    "Phase 4: reference_problem.json SCF profiles",
+    "Phase 5: Independent SCF validation on reference_problem.json",
+    "Phase 6.5: Uniform Beta baseline achieved (β ∈ [1.97, 3.50]) - D-025 registered"
+  ],
+  "pending": [],
+  "next_action": "Start Phase 7: Create statically determinate control truss and verify all members flagged as Key Elements."
+}
