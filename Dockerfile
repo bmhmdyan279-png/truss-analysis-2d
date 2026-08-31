@@ -29,9 +29,10 @@ RUN pip wheel --no-cache-dir --wheel-dir /app/wheels . scienceplots
 # ==========================================
 FROM python:3.11-slim AS runtime
 
+# Critical for headless matplotlib execution in Docker
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    MPLBACKEND=Agg  # Critical for headless matplotlib execution in Docker
+    MPLBACKEND=Agg
 
 # Install runtime system dependencies for Matplotlib & Arabic Reshaper
 RUN apt-get update && apt-get install -y --no-install-recommends \
