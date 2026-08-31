@@ -2,23 +2,172 @@
   "units": "SI",
   "temperature_change": 0.0,
   "nodes": [
-    {"id": 1, "x": 0.0, "y": 0.0, "is_support": true, "support_dx": true, "support_dy": true},
-    {"id": 2, "x": 3.0, "y": 0.0, "is_support": false},
-    {"id": 3, "x": 0.0, "y": 4.0, "is_support": true, "support_dx": true, "support_dy": true}
+    {
+      "id": 1,
+      "x": 0.0,
+      "y": 0.0,
+      "is_support": true,
+      "support_dx": true,
+      "support_dy": true
+    },
+    {
+      "id": 2,
+      "x": 4.0,
+      "y": 0.0,
+      "is_support": false
+    },
+    {
+      "id": 3,
+      "x": 8.0,
+      "y": 0.0,
+      "is_support": true,
+      "support_dx": true,
+      "support_dy": true
+    },
+    {
+      "id": 4,
+      "x": 2.0,
+      "y": 3.0,
+      "is_support": false
+    },
+    {
+      "id": 5,
+      "x": 6.0,
+      "y": 3.0,
+      "is_support": false
+    }
   ],
   "elements": [
-    {"id": 1, "node_i": 1, "node_j": 2, "E": 200000000000.0, "A": 0.001, "alpha": 1.2e-05, "delta_T": 50.0, "delta_L0": 0.0, "effective_length_factor": 1.0, "section_type": "rectangular", "I_sec": 8.33e-10},
-    {"id": 2, "node_i": 2, "node_j": 3, "E": 200000000000.0, "A": 0.002, "alpha": 1.2e-05, "delta_T": 0.0, "delta_L0": 0.0, "effective_length_factor": 1.0, "section_type": "rectangular", "I_sec": 1.67e-09},
-    {"id": 3, "node_i": 1, "node_j": 3, "E": 200000000000.0, "A": 0.0015, "alpha": 1.2e-05, "delta_T": 0.0, "delta_L0": 0.0, "effective_length_factor": 1.0, "section_type": "rectangular", "I_sec": 1.25e-09}
+    {
+      "id": 1,
+      "node_i": 1,
+      "node_j": 2,
+      "A": 0.05614464823207003,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
+      "delta_T": 0.0,
+      "delta_L0": 0.0,
+      "effective_length_factor": 1.0,
+      "section_type": "rectangular",
+      "I_sec": 2.6258005304107027e-08,
+      "properties": {
+        "I_sec": 8.33e-06
+      }
+    },
+    {
+      "id": 2,
+      "node_i": 2,
+      "node_j": 3,
+      "A": 0.01,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
+      "delta_T": 0.0,
+      "delta_L0": 0.0,
+      "effective_length_factor": 1.0,
+      "section_type": "rectangular",
+      "I_sec": 8.33e-10,
+      "properties": {
+        "I_sec": 8.33e-06
+      }
+    },
+    {
+      "id": 3,
+      "node_i": 1,
+      "node_j": 4,
+      "A": 0.1371483172631923,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
+      "delta_T": 0.0,
+      "delta_L0": 0.0,
+      "effective_length_factor": 1.0,
+      "section_type": "rectangular",
+      "I_sec": 1.0449811626736253e-07,
+      "properties": {
+        "I_sec": 8.33e-06
+      }
+    },
+    {
+      "id": 4,
+      "node_i": 4,
+      "node_j": 2,
+      "A": 0.015,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
+      "delta_T": 0.0,
+      "delta_L0": 0.0,
+      "effective_length_factor": 1.0,
+      "section_type": "rectangular",
+      "I_sec": 1.25e-09,
+      "properties": {
+        "I_sec": 8.33e-06
+      }
+    },
+    {
+      "id": 5,
+      "node_i": 2,
+      "node_j": 5,
+      "A": 0.09831737465162638,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
+      "delta_T": 0.0,
+      "delta_L0": 0.0,
+      "effective_length_factor": 1.0,
+      "section_type": "rectangular",
+      "I_sec": 5.370170087993482e-08,
+      "properties": {
+        "I_sec": 8.33e-06
+      }
+    },
+    {
+      "id": 6,
+      "node_i": 5,
+      "node_j": 3,
+      "A": 0.18276835826407078,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
+      "delta_T": 0.0,
+      "delta_L0": 0.0,
+      "effective_length_factor": 1.0,
+      "section_type": "rectangular",
+      "I_sec": 1.855792932363541e-07,
+      "properties": {
+        "I_sec": 8.33e-06
+      }
+    },
+    {
+      "id": 7,
+      "node_i": 4,
+      "node_j": 5,
+      "A": 0.24635931681049855,
+      "E": 210000000000.0,
+      "alpha": 1.2e-05,
+      "delta_T": 0.0,
+      "delta_L0": 0.0,
+      "effective_length_factor": 1.0,
+      "section_type": "rectangular",
+      "I_sec": 2.5339291168872613e-07,
+      "properties": {
+        "I_sec": 8.33e-06
+      }
+    }
   ],
   "loads": [
-    {"node_id": 2, "Fx": 10000.0, "Fy": -5000.0}
+    {
+      "node_id": 4,
+      "Fx": 20000.0,
+      "Fy": -30000.0
+    },
+    {
+      "node_id": 5,
+      "Fx": -20000.0,
+      "Fy": -30000.0
+    }
   ],
   "options": {
     "use_sparse": true,
     "bc_method": "elimination",
     "penalty_value": 1000000000000.0,
-    "plot_results": false,
+    "plot_results": true,
     "displacement_scale": "auto"
   }
 }
