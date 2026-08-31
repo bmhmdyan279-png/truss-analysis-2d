@@ -38,7 +38,7 @@ where = ["src"]
 
 [tool.setuptools_scm]
 write_to = "src/truss_analysis/_version.py"
-fallback_version = "2.1.6"
+fallback_version = "2.5.0"
 
 [tool.ruff]
 line-length = 88
