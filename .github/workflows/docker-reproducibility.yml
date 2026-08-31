@@ -1,0 +1,31 @@
+# .github/workflows/docker-reproducibility.yml
+name: Docker Reproducibility Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docker-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t truss-scf:phase11 .
+
+      - name: Run H1 Test (Phase 8)
+        run: docker run --rm truss-scf:phase11
+
+      - name: Extract raw JSON artifact
+        run: |
+          mkdir -p reproducibility_audit
+          docker run --rm -v ${{ github.workspace }}/reproducibility_audit:/app/PROJECT_DOCUMENTATION/raw_outputs truss-scf:phase11
+
+      - name: Upload reproducibility artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproducibility-audit
+          path: reproducibility_audit/
