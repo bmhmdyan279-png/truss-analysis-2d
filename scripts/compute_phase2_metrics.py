@@ -83,9 +83,9 @@ def load_example1() -> tuple[list[Node], list[Element], list[NodalLoad]]:
     return nodes, elements, loads
 
 
-def define_random_variables() -> dict[
-    str, RandomVariable
-]:  # تغییر از object به RandomVariable
+def define_random_variables() -> (
+    dict[str, RandomVariable]
+):  # تغییر از object به RandomVariable
     """Define random variables based on Phase 1 default mapping."""
     return {
         "E_1": LognormalRV(mean=200.0e9, cov=0.05, seed=42),
