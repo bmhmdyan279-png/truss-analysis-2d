@@ -63,9 +63,9 @@ def test_golden_thermal_loading():
     )
 
     # چون گره ۲ در راستای X آزاد است، میله منبسط می‌شود و delta_l_mech = 0 خواهد بود
-    assert (
-        strain_energy < 1e-6
-    ), f"Free thermal expansion should produce zero strain energy, got {strain_energy}"
+    assert strain_energy < 1e-6, (
+        f"Free thermal expansion should produce zero strain energy, got {strain_energy}"
+    )
 
     check_energy(U, F_mech, strain_energy, prestress_work)
 
@@ -105,6 +105,6 @@ def test_golden_thermal_constrained():
     k_axial = 200e9 * 0.001 / L
     expected_energy = 0.5 * k_axial * (delta_l_thermal**2)
 
-    assert (
-        abs(strain_energy - expected_energy) < 1e-3
-    ), f"Constrained thermal: expected energy {expected_energy}, got {strain_energy}"
+    assert abs(strain_energy - expected_energy) < 1e-3, (
+        f"Constrained thermal: expected energy {expected_energy}, got {strain_energy}"
+    )
