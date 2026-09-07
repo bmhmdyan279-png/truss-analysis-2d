@@ -67,7 +67,10 @@ def tau_b(
     by :func:`natural_sort_key` for determinism).  If fewer than two pairs
     exist, or either field is constant (all pairs tied), the comparison is
     degenerate: ``tau=None`` and ``is_degenerate=True`` — never a silent
-    1.0 or 0.0 (prompt-04 §C10, CONTEXT_LOCK §4.5 B4).
+    1.0 or 0.0 (prompt-04 §C10, CONTEXT_LOCK §4.5 B4).  Fields containing
+    non-finite values (mechanism members carry ``CI = +inf``) are likewise
+    degenerate: the quantisation grid is undefined for infinities and the
+    comparison carries no rank information (prompt-08, DR-025).
 
     ``quantize`` (optional, e.g. ``1e-10``): values are snapped to a grid of
     that resolution before comparing.  Kendall's tau is a discrete rank
@@ -82,6 +85,16 @@ def tau_b(
     n_pairs = n * (n - 1) // 2
     a_vals = [ci_a[k] for k in keys]
     b_vals = [ci_b[k] for k in keys]
+    # non-finite values (members flagged as mechanisms, CI = +inf) cannot be
+    # quantised and carry no rank information in this statistic: degenerate,
+    # never a silent number and never a math.floor(inf) crash (prompt-08,
+    # DR-025).  Tie counts reported here are the raw (unquantised) ones.
+    if not all(math.isfinite(v) for v in a_vals) or not all(
+        math.isfinite(v) for v in b_vals
+    ):
+        return TauResult(
+            None, n_pairs, _tie_pairs(a_vals), _tie_pairs(b_vals), None, True
+        )
     if quantize:
         a_vals = [math.floor(v / quantize + 0.5) for v in a_vals]
         b_vals = [math.floor(v / quantize + 0.5) for v in b_vals]

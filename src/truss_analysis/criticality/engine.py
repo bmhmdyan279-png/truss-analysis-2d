@@ -393,7 +393,14 @@ def compute_ci_for_topology(
             setup0 = build_engine(nodes, elements, loads, temps_base)
             u0 = base_displacement(setup0, load_vector(nodes, loads, setup0.free_dofs))
             if float(np.max(np.abs(u0))) >= tol:
-                sweep0 = ci_sweep(setup0, u0, alpha)
+                # the cold reference sweep takes the SAME guard routing as the
+                # hot one (prompt-08 fix: with alpha=0 on a determinate truss
+                # every cold member is near-mechanism and the missing
+                # fallback raised instead of flagging — DR-025)
+                brute0 = lambda i: _solve_perturbed_full(  # noqa: E731
+                    nodes, elements, loads, temps_base, alpha, i
+                )
+                sweep0 = ci_sweep(setup0, u0, alpha, brute_column=brute0)
                 tau_res = tau_b(ci_values, sweep0.ci_values, quantize=1e-10)
             else:
                 tau_res = TauResult(None, 0, 0, 0, None, True)
