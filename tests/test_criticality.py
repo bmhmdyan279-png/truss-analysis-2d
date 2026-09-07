@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from truss_analysis.criticality import (
     NciResult,
     TauResult,

@@ -84,13 +84,11 @@ def campaign_spec() -> List[Dict[str, Any]]:
                         ),
                     }
                 )
-    for idx, height in enumerate((2.0, 2.5, 3.0), start=1):
+    for idx in (1, 2, 3):
         spec.append(
             {
                 "name": f"control_{idx}",
-                "model": TopologyGenerator.generate_determinate_control(
-                    span=10.0, height=height
-                ),
+                "model": TopologyGenerator.generate_determinate_control(index=idx),
             }
         )
     return spec

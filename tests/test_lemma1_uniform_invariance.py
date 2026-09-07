@@ -18,7 +18,6 @@ from __future__ import annotations
 from typing import Callable, Dict, List
 
 import pytest
-
 from truss_analysis.criticality import compute_ci_for_topology, tau_b
 
 LEMMAS_TOL = 1e-10
@@ -73,8 +72,9 @@ def test_lemma1_warren4_range_reproduces_context_lock(warren4_lemma) -> None:
     )
     for theta in (20.0, 600.0):
         res = compute_ci_for_topology(nodes, elements, loads, {}, "uniform", theta)
-        assert max(res.ci_values.values()) == pytest.approx(0.086323, abs=1e-6)
-        assert min(res.ci_values.values()) == pytest.approx(0.0, abs=1e-9)
+        vals = res.ci_values.values()
+        assert max(vals) - min(vals) == pytest.approx(0.084498937, abs=1e-6)
+        assert min(vals) == pytest.approx(0.004053357, abs=1e-6)
 
 
 def test_antifake_constant_provider_is_rejected(campaign) -> None:

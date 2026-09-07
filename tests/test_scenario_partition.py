@@ -8,7 +8,6 @@ left-third members.  The centroid partition must now be exact everywhere.
 from __future__ import annotations
 
 import pytest
-
 from truss_analysis.criticality import (
     SCENARIOS,
     get_scenario_temperatures,

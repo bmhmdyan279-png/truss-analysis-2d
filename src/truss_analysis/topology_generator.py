@@ -1,26 +1,58 @@
 """Parametric topology generator for 2D pin-jointed planar trusses.
 
-Generates Warren, Pratt, and Howe truss families as JSON-compatible
-dictionaries conforming to the truss-analysis-2d input schema.
+Generates Warren, Pratt, and Howe truss families plus three statically
+determinate controls as JSON-compatible dictionaries conforming to the
+truss-analysis-2d input schema.  Geometry and connectivity only: no thermal
+loading is applied at this stage (``delta_T = 0``).
 
-Phase 1 deliverable — geometry and connectivity only.
-No thermal loading is applied at this stage (``delta_T = 0``).
+Load model (prompt-05, task T1)
+-------------------------------
+The pre-prompt-5 generator hard-coded ``Fy = -10 kN`` per node on nodes with
+``not is_support and y > 0``.  That pattern is **family-dependent**: in Warren
+the unloaded non-support bottom-chord nodes carry no load while in Pratt/Howe
+the load set differs, so total demand changed between families and between
+``n_panels`` — corrupting any cross-topology comparison (H2 in particular).
 
-Lemma 1 readiness
------------------
-The generator produces *uniform* section properties across all members.
-This guarantees that a uniform temperature field (which scales every
-member's E by the same factor) cannot alter the stiffness matrix
-*eigenstructure*, preserving CI ranking (Kendall τ = 1).  Any future
-thermal module must therefore apply degradation through this generator's
-output rather than mutating individual member properties ad-hoc.
+The model now is:
+
+* **Loaded set = all non-support nodes**, independent of ``y`` and family.
+* The vertical demand is a single configuration parameter ``total_load``
+  [N] (default 100 kN), shared **equally** by the loaded nodes:
+  ``Fy_i = -total_load / n_loaded``.  Keeping the *total* constant makes the
+  demand comparable across ``n_panels`` and families (screening-level
+  idealisation; a tributary-area deck model is a possible refinement, not a
+  correctness requirement, because CI is a ratio and therefore invariant to
+  the overall load scale — what matters is the *pattern*, and this pattern is
+  family-independent by construction).
+* Horizontal nodal loads are zero (gravity-type screening load).
+
+Lemma 1 (correct statement, prompt-05 task T4)
+----------------------------------------------
+Lemma 1 (uniform-temperature invariance of the CI ranking) holds because a
+uniform temperature field scales the **whole stiffness matrix** by
+``k_E(theta)`` when sections are uniform: ``K(theta) = k_E(theta) K_0``, so
+every perturbed/base displacement ratio — and therefore every CI and every
+rank comparison — is temperature-invariant.  It does **not** follow from
+"uniform sections imply tau = 1" by any eigenstructure argument; the legacy
+wording was wrong and was removed.  The measured form of the lemma lives in
+``tests/test_lemma1_uniform_invariance.py`` (prompt-04).
+
+Determinism (prompt-05, task T6)
+--------------------------------
+:func:`model_to_json` emits canonical JSON (sorted keys, fixed separators,
+no NaN) and :func:`content_hash` returns its SHA-256; generating the same
+configuration twice yields byte-identical JSON and an identical hash.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
+
+from truss_analysis.sections import SquareHSS, idealised_square_hss
 
 # ----------------------------------------------------------------------
 #  Public API: both the object-oriented generator and a simple function
@@ -30,8 +62,12 @@ __all__ = [
     "TrussFamily",
     "TrussConfig",
     "TopologyGenerator",
-    "generate_topology",  # <-- added for scripts/compute_phase2_deterministic.py
+    "content_hash",
+    "generate_topology",
+    "model_to_json",
 ]
+
+DEFAULT_TOTAL_LOAD: Final[float] = 100.0e3  # N, screening-level total demand
 
 
 class TrussFamily(Enum):
@@ -62,9 +98,15 @@ class TrussConfig:
         Young's modulus [Pa].
     thermal_expansion:
         Coefficient of thermal expansion [1/°C].
+    total_load:
+        Total vertical demand [N] shared equally by all non-support nodes
+        (see the module-level *Load model* section).
+    section_thickness_ratio:
+        Width-to-thickness ratio ``b/t`` of the idealised square HSS used to
+        derive ``I_sec`` from ``area`` (see :mod:`truss_analysis.sections`).
     moment_of_inertia:
-        Second moment of area [m⁴]. If ``None``, computed as ``A²/12``
-        (square hollow-section approximation per Phase 1 scope-lock).
+        Optional explicit override of ``I_sec`` [m⁴]; when ``None`` the
+        idealised square HSS value is used.
 
     Raises
     ------
@@ -79,6 +121,8 @@ class TrussConfig:
     area: float = 0.01
     youngs_modulus: float = 210.0e9
     thermal_expansion: float = 1.2e-5
+    total_load: float = DEFAULT_TOTAL_LOAD
+    section_thickness_ratio: float = 25.0
     moment_of_inertia: float | None = None
 
     def __post_init__(self) -> None:
@@ -88,13 +132,20 @@ class TrussConfig:
             raise ValueError(f"span must be > 0, got {self.span}")
         if self.height <= 0.0:
             raise ValueError(f"height must be > 0, got {self.height}")
+        if self.total_load <= 0.0:
+            raise ValueError(f"total_load must be > 0, got {self.total_load}")
+
+    @property
+    def section(self) -> SquareHSS:
+        """Idealised square HSS matching ``area`` at the configured b/t."""
+        return idealised_square_hss(self.area, self.section_thickness_ratio)
 
     @property
     def i_sec(self) -> float:
-        """Effective second moment of area [m⁴]."""
+        """Second moment of area [m⁴]: explicit override or idealised HSS."""
         if self.moment_of_inertia is not None:
             return self.moment_of_inertia
-        return self.area**2 / 12.0
+        return self.section.i_sec
 
 
 class TopologyGenerator:
@@ -154,84 +205,116 @@ class TopologyGenerator:
         }
 
     # ──────────────────────────────────────────────────────────────
-    # Determinate control (negative control for H1)
+    # Determinate controls (negative controls for H1) — prompt-05 T3
     # ──────────────────────────────────────────────────────────────
 
     @staticmethod
     def generate_determinate_control(
+        index: int = 1,
         span: float = 10.0,
         height: float = 2.0,
         area: float = 0.01,
         youngs_modulus: float = 210.0e9,
+        total_load: float = DEFAULT_TOTAL_LOAD,
     ) -> dict[str, Any]:
-        """Generate a simple 3-member statically determinate truss.
+        """Generate one of three **geometrically distinct** determinate trusses.
 
-        This serves as the *negative control* for the H1 hypothesis
-        test (Phase 8 scope): a determinate truss has no redundant
-        load paths, so all members are equally critical.
+        ``index=1``: single triangle (3 nodes / 3 members).
+        ``index=2``: two-panel Warren-like chain (5 nodes / 7 members).
+        ``index=3``: the chain plus an apex node (6 nodes / 9 members).
+
+        All three satisfy ``m + r = 2j`` exactly (statically determinate) and
+        become mechanisms when any single member is removed — asserted in
+        ``tests/test_topology_generator.py``.  The legacy single-triangle
+        variant with three heights (DR-003) is replaced: height variety alone
+        was not a geometric variety.
 
         Parameters
         ----------
-        span:
-            Span length [m].
-        height:
-            Apex height [m].
-        area:
-            Cross-sectional area [m²].
-        youngs_modulus:
-            Young's modulus [Pa].
-
-        Returns
-        -------
-        dict[str, Any]
-            Model dictionary for a statically determinate triangle.
+        index:
+            Control geometry selector (1, 2 or 3).
+        span, height, area, youngs_modulus, total_load:
+            As in :class:`TrussConfig`; the total load is shared equally by
+            all non-support nodes.
         """
-        i_sec = area**2 / 12.0
-        elem_template: dict[str, Any] = {
+        if index not in (1, 2, 3):
+            msg = f"index must be 1, 2 or 3, got {index}"
+            raise ValueError(msg)
+        i_sec = idealised_square_hss(area).i_sec
+        template: dict[str, Any] = {
             "A": area,
             "E": youngs_modulus,
             "alpha": 1.2e-5,
             "delta_T": 0.0,
             "delta_L0": 0.0,
             "effective_length_factor": 1.0,
-            "section_type": "rectangular",
+            "section_type": "idealised_square_hss",
             "I_sec": i_sec,
         }
+
+        def node(nid: int, x: float, y: float, support: str = "") -> dict[str, Any]:
+            out: dict[str, Any] = {
+                "id": nid,
+                "x": x,
+                "y": y,
+                "is_support": bool(support),
+            }
+            if support == "pin":
+                out["support_dx"] = True
+                out["support_dy"] = True
+            elif support == "roller":
+                out["support_dx"] = False
+                out["support_dy"] = True
+            return out
+
+        if index == 1:
+            nodes = [
+                node(1, 0.0, 0.0, "pin"),
+                node(2, span, 0.0, "roller"),
+                node(3, span / 2.0, height),
+            ]
+            members = [(1, 2), (1, 3), (2, 3)]
+        elif index == 2:
+            nodes = [
+                node(1, 0.0, 0.0, "pin"),
+                node(2, span / 2.0, 0.0),
+                node(3, span, 0.0, "roller"),
+                node(4, span / 4.0, height),
+                node(5, 3.0 * span / 4.0, height),
+            ]
+            members = [(1, 2), (2, 3), (4, 5), (1, 4), (4, 2), (2, 5), (5, 3)]
+        else:
+            nodes = [
+                node(1, 0.0, 0.0, "pin"),
+                node(2, span / 2.0, 0.0),
+                node(3, span, 0.0, "roller"),
+                node(4, span / 4.0, height),
+                node(5, 3.0 * span / 4.0, height),
+                node(6, span / 2.0, 2.0 * height),
+            ]
+            members = [
+                (1, 2),
+                (2, 3),
+                (4, 5),
+                (1, 4),
+                (4, 2),
+                (2, 5),
+                (5, 3),
+                (4, 6),
+                (6, 5),
+            ]
+        loaded = [n["id"] for n in nodes if not n["is_support"]]
+        share = -total_load / len(loaded)
         return {
             "units": "SI",
             "temperature_change": 0.0,
-            "nodes": [
-                {
-                    "id": 1,
-                    "x": 0.0,
-                    "y": 0.0,
-                    "is_support": True,
-                    "support_dx": True,
-                    "support_dy": True,
-                },
-                {
-                    "id": 2,
-                    "x": span,
-                    "y": 0.0,
-                    "is_support": True,
-                    "support_dx": False,
-                    "support_dy": True,
-                },
-                {"id": 3, "x": span / 2.0, "y": height, "is_support": False},
-            ],
+            "nodes": nodes,
             "elements": [
-                {"id": 1, "node_i": 1, "node_j": 2, **elem_template},
-                {"id": 2, "node_i": 1, "node_j": 3, **elem_template},
-                {"id": 3, "node_i": 2, "node_j": 3, **elem_template},
+                {"id": i, "node_i": ni, "node_j": nj, **template}
+                for i, (ni, nj) in enumerate(members, start=1)
             ],
-            "loads": [{"node_id": 3, "Fx": 0.0, "Fy": -10000.0}],
-            "options": {
-                "use_sparse": True,
-                "bc_method": "elimination",
-                "penalty_value": 1.0e12,
-                "plot_results": True,
-                "displacement_scale": "auto",
-            },
+            "loads": [{"node_id": nid, "Fx": 0.0, "Fy": share} for nid in loaded],
+            "options": dict(TopologyGenerator._OPTIONS),
         }
 
     # ──────────────────────────────────────────────────────────────
@@ -367,12 +450,16 @@ class TopologyGenerator:
         for i in range(1, n):
             add(b(i), t(i))
 
-        # Diagonals — Pratt: slope *down* toward mid-span
+        # Diagonals — Pratt: slope *down* toward mid-span.  For an odd panel
+        # count the centre panel needs its own diagonal, otherwise the panel
+        # is a shear mechanism (DR-020, measured cond(K) ~ 1e16).
         mid = n // 2
         for i in range(n):
             if i < mid:
                 if i + 1 < n:
                     add(b(i), t(i + 1))
+            elif i == mid and n % 2 == 1:
+                add(b(i), t(i + 1))
             elif (n % 2 == 0) or (i > mid):
                 if 1 <= i < n:
                     add(t(i), b(i + 1))
@@ -398,33 +485,35 @@ class TopologyGenerator:
         for i in range(1, n):
             add(b(i), t(i))
 
-        # Diagonals — Howe: slope *up* toward mid-span (mirror of Pratt)
+        # Diagonals — Howe: slope *up* toward mid-span (mirror of Pratt),
+        # including the centre-panel diagonal for odd panel counts (DR-020).
         mid = n // 2
         for i in range(n):
             if i < mid:
                 if i + 1 < n:
                     add(t(i + 1), b(i))
+            elif i == mid and n % 2 == 1:
+                add(t(i + 1), b(i))
             elif (n % 2 == 0) or (i > mid):
                 if 1 <= i < n:
                     add(b(i + 1), t(i))
 
     # ──────────────────────────────────────────────────────────────
-    # Loads
+    # Loads — family-independent total-load model (prompt-05 T1)
     # ──────────────────────────────────────────────────────────────
 
     def _build_loads(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Apply default vertical loads to all top-chord (non-support) nodes."""
-        loads: list[dict[str, Any]] = []
-        for node in nodes:
-            if not node["is_support"] and node["y"] > 0.0:
-                loads.append(
-                    {
-                        "node_id": node["id"],
-                        "Fx": 0.0,
-                        "Fy": -10000.0,
-                    }
-                )
-        return loads
+        """Share ``total_load`` equally over **all** non-support nodes.
+
+        No ``y``-threshold, no hard-coded magnitude: see the module-level
+        *Load model* section for why this pattern is family-independent and
+        size-normalised.
+        """
+        loaded = [node for node in nodes if not node["is_support"]]
+        if not loaded:
+            return []
+        share = -self._cfg.total_load / len(loaded)
+        return [{"node_id": node["id"], "Fx": 0.0, "Fy": share} for node in loaded]
 
     # ──────────────────────────────────────────────────────────────
     # Helpers
@@ -461,13 +550,28 @@ class TopologyGenerator:
             "delta_T": 0.0,
             "delta_L0": 0.0,
             "effective_length_factor": 1.0,
-            "section_type": "rectangular",
+            "section_type": "idealised_square_hss",
             "I_sec": cfg.i_sec,
         }
 
 
 # ======================================================================
-#  Simple function‑based interface (for scripts/compute_phase2_deterministic.py)
+#  Deterministic serialisation (prompt-05 T6)
+# ======================================================================
+
+
+def model_to_json(model: dict[str, Any]) -> str:
+    """Canonical JSON: sorted keys, fixed separators, NaN rejected."""
+    return json.dumps(model, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def content_hash(model: dict[str, Any]) -> str:
+    """SHA-256 of the canonical JSON — stable across regenerations."""
+    return hashlib.sha256(model_to_json(model).encode("utf-8")).hexdigest()
+
+
+# ======================================================================
+#  Simple function‑based interface (for scripts/compute_phase2_*.py)
 # ======================================================================
 
 
@@ -479,11 +583,12 @@ def generate_topology(
     area: float = 0.01,
     youngs_modulus: float = 210.0e9,
     thermal_expansion: float = 1.2e-5,
+    total_load: float = DEFAULT_TOTAL_LOAD,
 ) -> dict[str, Any]:
     """Generate a complete truss model dictionary using the object‑oriented generator.
 
     This is a convenience wrapper around ``TopologyGenerator``, intended for
-    scripts that expect a simple function with this exact signature.
+    scripts that expect a simple function with this signature.
 
     Parameters
     ----------
@@ -501,11 +606,14 @@ def generate_topology(
         Young's modulus [Pa] (default 210.0e9).
     thermal_expansion : float, optional
         Coefficient of thermal expansion [1/°C] (default 1.2e-5).
+    total_load : float, optional
+        Total vertical demand [N] shared equally by all non-support nodes
+        (default 100 kN).
 
     Returns
     -------
     dict[str, Any]
-        Model dictionary conforming to the truss‑analysis‑2d input schema.
+        Model dictionary conforming to the truss-analysis-2d input schema.
 
     Raises
     ------
@@ -527,5 +635,6 @@ def generate_topology(
         area=area,
         youngs_modulus=youngs_modulus,
         thermal_expansion=thermal_expansion,
+        total_load=total_load,
     )
     return TopologyGenerator(cfg).generate()

@@ -45,7 +45,6 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve
-
 from truss_analysis.material.steel_eurocode import FloatOrArray
 from truss_analysis.material.steel_eurocode import k_E as ssot_k_E
 from truss_analysis.model import Element, Node

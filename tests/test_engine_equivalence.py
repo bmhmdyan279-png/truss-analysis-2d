@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from truss_analysis.assembly import assemble_global_matrices
 from truss_analysis.criticality import (
     MechanismError,
@@ -181,7 +180,6 @@ def test_woodbury_rank_r_matches_full_resolve(campaign) -> None:
         k_scale[cm.elements[i].id] *= a
     b, k = member_matrices(cm.nodes, cm.elements, k_scale)
     from scipy.linalg import lu_factor, lu_solve
-
     from truss_analysis.criticality.engine import free_dof_indices
 
     free = free_dof_indices(cm.nodes)
