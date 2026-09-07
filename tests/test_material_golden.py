@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
 from truss_analysis.material import steel_eurocode as ss
 from truss_analysis.thermal.material import get_eurocode_k_E, get_eurocode_k_y
 
@@ -30,7 +29,7 @@ FIXTURE_PKG = (
 )
 
 GRID = np.arange(20.0, 1200.01, 1.0)
-TEMPS = None  # filled from fixture in setup_module
+TEMPS: np.ndarray
 
 
 def setup_module(_: object) -> None:
@@ -322,7 +321,9 @@ def test_stress_strain_degenerate_and_errors() -> None:
 
 def test_stress_strain_vectorised() -> None:
     eps = np.linspace(0.0, 0.2, 41)
-    vec = ss.stress_strain(eps, 600.0)
+    vec_out = ss.stress_strain(eps, 600.0)
+    assert isinstance(vec_out, np.ndarray)
+    vec = vec_out
     assert vec.shape == eps.shape
     scalars = [ss.stress_strain(float(e), 600.0) for e in eps]
     np.testing.assert_allclose(vec, scalars, rtol=0.0, atol=0.0)
