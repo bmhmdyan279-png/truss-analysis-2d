@@ -36,6 +36,9 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"truss_analysis.material" = ["data/*.json"]
+
 [tool.setuptools_scm]
 write_to = "src/truss_analysis/_version.py"
 fallback_version = "2.5.0"
