@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from truss_analysis.sections import (
     SectionCatalog,
     SquareHSS,
