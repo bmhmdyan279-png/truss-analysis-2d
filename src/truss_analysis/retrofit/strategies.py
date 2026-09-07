@@ -22,10 +22,9 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import dataclass
-from typing import Dict, Iterator, Mapping, Sequence, Tuple
+from typing import Callable, Dict, Iterator, Mapping, Sequence, Tuple
 
 import numpy as np
-
 from truss_analysis.criticality.engine import (
     base_displacement,
     build_engine,
@@ -339,7 +338,7 @@ def stress_based_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
     return RetrofitOutcome(dec, evaluate(ctx, dec))
 
 
-STRATEGIES: Dict[str, object] = {
+STRATEGIES: Dict[str, Callable[[RetrofitContext], RetrofitOutcome]] = {
     "greedy": greedy,
     "exhaustive": exhaustive,
     "robust": robust_strategy,

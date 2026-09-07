@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Mapping
 
 import numpy as np
-
 from truss_analysis.criticality.ranking import rank_members
 
 __all__ = ["ProbabilisticRanking", "probabilistic_ranking"]

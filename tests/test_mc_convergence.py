@@ -7,7 +7,6 @@ import tracemalloc
 from pathlib import Path
 
 import numpy as np
-
 from truss_analysis.limitstates import ci_two_component
 from truss_analysis.uncertainty import (
     RunningStat,
@@ -103,7 +102,7 @@ def test_probabilistic_ranking_four_steps(campaign) -> None:
     means = {"live_load": 1.0, "f_y": 235.0e6, "fire_intensity": 600.0, "E": 210.0e9}
     n = 300
     samples = sample_spec_matrix(specs, means, n, seed=SEED + 1)
-    per_member = {e.id: [] for e in cm.elements}
+    per_member: dict = {e.id: [] for e in cm.elements}
     for i in range(n):
         loads = {
             nid: {

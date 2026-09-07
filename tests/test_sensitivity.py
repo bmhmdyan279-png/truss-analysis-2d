@@ -18,6 +18,10 @@ def _create_simple_truss() -> tuple[list[Node], list[Element], list[NodalLoad]]:
     elements = [
         Element(id="1", node_i="1", node_j="3", E=200e9, A=0.01),
         Element(id="2", node_i="2", node_j="3", E=200e9, A=0.01),
+        # bottom chord: without it the two-member "truss" is a kinematic
+        # mechanism (rank(K_ff)=2 < 3 free DOFs); the legacy solver solved it
+        # silently (D-012); the prompt-7 rank check raises instead.
+        Element(id="3", node_i="1", node_j="2", E=200e9, A=0.01),
     ]
     loads = [NodalLoad(node_id="3", fx=1000.0, fy=-2000.0)]
     return nodes, elements, loads
@@ -27,7 +31,7 @@ def test_independent_validator_initialization() -> None:
     nodes, elements, loads = _create_simple_truss()
     validator = IndependentValidator(nodes, elements, loads)
     assert len(validator.nodes) == 3
-    assert len(validator.elements) == 2
+    assert len(validator.elements) == 3
     assert validator.node_map["1"] == 0
 
 
@@ -36,9 +40,9 @@ def test_independent_validator_compute_all() -> None:
     validator = IndependentValidator(nodes, elements, loads)
     results = validator.compute_all()
 
-    assert len(results) == 2
+    assert len(results) == 3
     for res in results:
-        assert res.member_id in ["1", "2"]
+        assert res.member_id in ["1", "2", "3"]
         assert isinstance(res.ddm_sensitivity, float)
         assert isinstance(res.strain_energy, float)
         assert res.strain_energy >= 0.0

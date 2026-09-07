@@ -27,7 +27,6 @@ from enum import Enum
 from typing import Dict, Mapping, Optional, Sequence
 
 import numpy as np
-
 from truss_analysis.criticality.engine import (
     base_displacement,
     build_engine,

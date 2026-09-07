@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, List
 
 import numpy as np
+from scipy.linalg import lu_factor, lu_solve
 
 from .assembly import assemble_global_matrices
 from .model import Element, Node
@@ -61,8 +62,28 @@ class IndependentValidator:
         K_ff = K[np.ix_(free_dofs, free_dofs)]
         U_f = U[free_dofs]
 
-        # Pre-invert K_ff (safe since solve() would have caught singularity)
-        K_ff_inv = np.linalg.inv(K_ff)
+        # Rank-1 DDM machinery (prompt-7, critic 6 item 6): one LU factorisation
+        # plus one solve for the whole compatibility matrix B replaces the
+        # explicit inverse.  dU/dk_i = -Z_i (b_i^T U_f); dk_i/dA = E/L, so
+        # dU/dA_i = -(E_i/L_i) Z_i (b_i^T U_f).  Identical mathematics, no
+        # explicit inverse, no silent failure on ill-conditioned matrices
+        # (singularity is caught by solve() via the D-012 rank check).
+        node_idx = {nd.id: i for i, nd in enumerate(self.nodes)}
+        b_free = np.zeros((len(self.elements), len(free_dofs)))
+        for e_i, elem in enumerate(self.elements):
+            i_idx = node_idx[elem.node_i]
+            j_idx = node_idx[elem.node_j]
+            dx = self.nodes[j_idx].x - self.nodes[i_idx].x
+            dy = self.nodes[j_idx].y - self.nodes[i_idx].y
+            length = math.hypot(dx, dy)
+            c, s = dx / length, dy / length
+            dofs = [2 * i_idx, 2 * i_idx + 1, 2 * j_idx, 2 * j_idx + 1]
+            for k, dof in enumerate(dofs):
+                try:
+                    b_free[e_i, free_dofs.index(dof)] = (-c, -s, c, s)[k]
+                except ValueError:
+                    pass
+        z_mat = lu_solve(lu_factor(K_ff), b_free.T)
 
         # Find critical node for max displacement
         disp_magnitudes = np.hypot(U[0::2], U[1::2])
@@ -77,7 +98,7 @@ class IndependentValidator:
 
         results: list[SensitivityResult] = []
 
-        for elem in self.elements:
+        for e_i, elem in enumerate(self.elements):
             i_idx = self.node_map[elem.node_i]
             j_idx = self.node_map[elem.node_j]
 
@@ -122,15 +143,10 @@ class IndependentValidator:
                 ]
             )
 
-            K_i_global = np.zeros((2 * n, 2 * n))
-            dofs = [2 * i_idx, 2 * i_idx + 1, 2 * j_idx, 2 * j_idx + 1]
-            for ii in range(4):
-                for jj in range(4):
-                    K_i_global[dofs[ii], dofs[jj]] = k_i[ii, jj]
-
-            K_i_ff = K_i_global[np.ix_(free_dofs, free_dofs)]
-
-            dU_f_dA = -K_ff_inv @ (K_i_ff / elem.A) @ U_f
+            del k_i  # kept only for documentation; rank-1 path below is used
+            z_i = z_mat[:, e_i]
+            b_i_u = float(b_free[e_i] @ U_f)
+            dU_f_dA = -(elem.E / L) * z_i * b_i_u
 
             try:
                 idx_x = free_dofs.index(crit_dof_x)

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import abc
 import math
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Sequence
+from typing import ClassVar, Mapping, Sequence
 
 import numpy as np
+from truss_analysis.material.steel_eurocode import k_E as ssot_k_E
 
 from .assembly import assemble_global_matrices
 from .exceptions import SingularMatrixError
@@ -211,3 +213,82 @@ class DamageOperator:
         alphas: Sequence[float] = (1.0, 0.9, 0.8, 0.7),
     ) -> list[MemberSensitivityProfile]:
         return [self.analyze_member(elem.id, alphas) for elem in self.elements]
+
+
+# ----------------------------------------------------------------------
+# Prompt-7 (critic 6 item 1): ONE degradation type, two implementations.
+# The pilot used a mechanical alpha-scaling definition while Track B used a
+# thermal k_E(T) definition; both now implement the same interface and a
+# registry guard rejects any third ad-hoc definition (CI guard in tests).
+# ----------------------------------------------------------------------
+
+
+class DegradationOperator(abc.ABC):
+    """Common interface for member-stiffness degradation models."""
+
+    kind: ClassVar[str] = "abstract"
+
+    @abc.abstractmethod
+    def apply(self, elements: list[Element]) -> list[Element]:
+        """Return a new element list with the degradation applied."""
+
+
+class MechanicalDegradation(DegradationOperator):
+    """Pilot definition: scale ``A`` by alpha and ``I`` by alpha**2."""
+
+    kind: ClassVar[str] = "mechanical"
+
+    def __init__(self, target_id: str, alpha: float) -> None:
+        self.target_id = target_id
+        self.alpha = alpha
+
+    def apply(self, elements: list[Element]) -> list[Element]:
+        out = []
+        for elem in elements:
+            if elem.id == self.target_id:
+                new = deepcopy(elem)
+                new.A = elem.A * self.alpha
+                new.I_sec = elem.I_sec * (self.alpha**2)
+                out.append(new)
+            else:
+                out.append(elem)
+        return out
+
+
+class ThermalDegradation(DegradationOperator):
+    """Track-B definition: scale ``E`` by the EN 1993-1-2 k_E(T) SSOT."""
+
+    kind: ClassVar[str] = "thermal"
+
+    def __init__(self, temps: Mapping[str, float]) -> None:
+        self.temps = dict(temps)
+
+    def apply(self, elements: list[Element]) -> list[Element]:
+        out = []
+        for elem in elements:
+            new = deepcopy(elem)
+            new.E = elem.E * float(ssot_k_E(self.temps[elem.id]))
+            out.append(new)
+        return out
+
+
+_REGISTRY: dict[str, type[DegradationOperator]] = {
+    MechanicalDegradation.kind: MechanicalDegradation,
+    ThermalDegradation.kind: ThermalDegradation,
+}
+
+
+def registered_degradation_kinds() -> tuple[str, ...]:
+    """The only degradation definitions allowed in this library."""
+    return tuple(_REGISTRY)
+
+
+def get_degradation_operator(kind: str, **kwargs: object) -> DegradationOperator:
+    """Factory with a guard: unknown kinds raise instead of silent ad-hoc."""
+    try:
+        cls = _REGISTRY[kind]
+    except KeyError as exc:
+        kinds = registered_degradation_kinds()
+        msg = f"unknown degradation kind {kind!r}; registered: {kinds}"
+        raise ValueError(msg) from exc
+    return cls(**kwargs)  # type: ignore[arg-type]

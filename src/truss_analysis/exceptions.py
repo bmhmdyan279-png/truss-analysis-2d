@@ -23,3 +23,7 @@ class SingularMatrixError(TrussError):
 
 class UnitConversionError(TrussError):
     pass
+
+
+class IllConditionedWarning(UserWarning):
+    """Raised (as warning) when cond(K_ff) exceeds the screening threshold."""

@@ -217,3 +217,24 @@ def compute_heterogeneity(
         unstable_members=unstable_members,
         warnings=warnings_list,
     )
+
+
+def gini_normalized(values: npt.ArrayLike) -> float:
+    """Bias-corrected Gini (D-046): ``gini * n / (n - 1)``.
+
+    Known-distribution checks: all-equal -> 0; single holder of everything
+    -> 1.0 (raw Gini (n-1)/n scaled up).  n < 2 returns 0.0.
+    """
+    arr = np.asarray(values, dtype=float)
+    arr = arr[~np.isnan(arr) & ~np.isinf(arr)]
+    n = len(arr)
+    if n < 2:
+        return 0.0
+    arr_abs = np.abs(arr)
+    total = float(np.sum(arr_abs))
+    if total == 0.0:
+        return 0.0
+    order = np.sort(arr_abs)
+    idx = np.arange(1, n + 1)
+    raw = float(np.sum((2 * idx - n - 1) * order) / (n * total))
+    return raw * n / (n - 1)

@@ -2,25 +2,62 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
-from .exceptions import EnergyValidationError, SingularMatrixError
+from .exceptions import (
+    EnergyValidationError,
+    IllConditionedWarning,
+    SingularMatrixError,
+)
+
+CONDITION_WARNING_THRESHOLD = 1e12
 
 
 def solve(
     K: np.ndarray,
     F: np.ndarray,
     fixed_dofs: list[int],
+    check_condition: bool = True,
 ) -> np.ndarray:
-    """Solve the linear system KU=F with boundary conditions."""
+    """Solve the linear system KU=F with boundary conditions.
+
+    Prompt-7 hardening (D-012 verification): the legacy code only caught
+    ``np.linalg.LinAlgError`` AFTER attempting the solve; the rank (SVD) check
+    now runs BEFORE the solve and raises ``SingularMatrixError`` with an
+    explicit mechanism message.  ``cond(K_ff) > 1e12`` emits an
+    ``IllConditionedWarning`` instead of failing silently.  ``fixed_dofs``
+    membership uses a set (the legacy ``i not in list`` scan was O(n*m)).
+    """
     n = len(K)
     U = np.zeros(n)
-    free_dofs = [i for i in range(n) if i not in fixed_dofs]
+    fixed_set = set(fixed_dofs)
+    free_dofs = [i for i in range(n) if i not in fixed_set]
     if not free_dofs:
         return U
 
     K_ff = K[np.ix_(free_dofs, free_dofs)]
     F_f = F[free_dofs]
+
+    if check_condition:
+        sv = np.linalg.svd(K_ff, compute_uv=False)
+        s_max = float(sv[0]) if sv.size else 0.0
+        rank = int(np.count_nonzero(sv > s_max * 1e-13)) if s_max > 0.0 else 0
+        if rank < len(free_dofs):
+            raise SingularMatrixError(
+                f"mechanism detected before solve: rank(K_ff)={rank} < "
+                f"{len(free_dofs)} free DOFs"
+            )
+        if s_max > 0.0 and sv[-1] > 0.0:
+            cond = s_max / float(sv[-1])
+            if cond > CONDITION_WARNING_THRESHOLD:
+                warnings.warn(
+                    f"ill-conditioned stiffness: cond(K_ff)={cond:.3e} > "
+                    f"{CONDITION_WARNING_THRESHOLD:.0e}",
+                    IllConditionedWarning,
+                    stacklevel=2,
+                )
 
     try:
         U_f = np.linalg.solve(K_ff, F_f)
@@ -37,7 +74,7 @@ def check_energy(
     F_mechanical: np.ndarray,
     strain_energy: float,
     prestress_work: float,
-    tol: float = 0.01,
+    tol: float = 1e-8,
 ) -> bool:
     """Check thermodynamic energy balance (generalized Clapeyron theorem).
 
@@ -62,6 +99,10 @@ def check_energy(
     Therefore: 2 U_strain + W_prestress = U^T F_mechanical
     Or: 0.5 * U^T F_mechanical = U_strain + 0.5 * W_prestress
     """
+    # Prompt-7 (DL-030): the default tolerance was 1% with no documented
+    # reason; a linear-elastic solve closes the Clapeyron balance to machine
+    # precision, so the default is now 1e-8 (relative).  Callers handling
+    # deliberately ill-conditioned cases may pass a looser tol.
     W_mech = 0.5 * np.dot(U, F_mechanical)
 
     # For self-equilibrated problems (no external mechanical loads)
