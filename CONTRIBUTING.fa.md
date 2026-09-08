@@ -24,11 +24,14 @@
 # همه تست‌ها پاس شوند
 pytest
 
-# پوشش کد >= 85%
-pytest --cov=truss_analysis --cov-report=term-missing
+# پوشش کد >= ۹۰٪ (همان گیت CI)
+pytest tests/ --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=90
 
 # Pre-commit hooks پاس شوند
 pre-commit run --all-files
+
+# یا همهٔ گیت‌های محلی یک‌جا (lint + mypy --strict + تست با گیت پوشش)
+make check-all
 ```
 
 ## 📝 قوانین کد
@@ -37,7 +40,7 @@ pre-commit run --all-files
 - **Ruff**: برای linting و formatting استفاده می‌شود
 - **Line length**: حداکثر 88 کاراکتر
 - **Type hints**: برای همه توابع عمومی
-- **Docstrings**: به فرمت Google
+- **Docstrings**: به فرمت NumPy (طبق قواعد pydocstyle در ruff با `convention = "numpy"`)
 
 ### مثال تابع خوب
 
@@ -49,21 +52,27 @@ def calculate_element_forces(
 ) -> tuple[list[dict], float, float]:
     """Calculate axial forces, strain energy, and prestress work.
 
-    Args:
-        nodes: List of Node objects
-        elements: List of Element objects
-        U: Displacement vector (numpy array)
+    Parameters
+    ----------
+    nodes : list[Node]
+        List of Node objects.
+    elements : list[Element]
+        List of Element objects.
+    U : np.ndarray
+        Displacement vector (numpy array).
 
-    Returns:
-        Tuple of:
+    Returns
+    -------
+    tuple[list[dict], float, float]
         - results: List of element force dictionaries
         - strain_energy: Total mechanical strain energy (J)
         - prestress_work: Total prestress work (J)
 
-    Example:
-        >>> results, U_strain, W_prestress = calculate_element_forces(
-        ...     nodes, elements, U
-        ... )
+    Examples
+    --------
+    >>> results, U_strain, W_prestress = calculate_element_forces(
+    ...     nodes, elements, U
+    ... )
     """
     # Implementation...
 ```

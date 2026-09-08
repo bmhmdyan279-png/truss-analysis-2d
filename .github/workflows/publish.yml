@@ -1,7 +1,8 @@
 name: Publish to PyPI
 on:
-  push:
-    tags: ['v*']
+  # Manual-only: publishing must be an explicit action (prevents accidental
+  # releases from tag pushes).
+  workflow_dispatch:
 permissions:
   contents: read
   id-token: write  # Mandatory for Trusted Publishing (OIDC)

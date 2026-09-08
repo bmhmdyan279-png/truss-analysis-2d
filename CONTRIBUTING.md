@@ -20,14 +20,15 @@ Thank you for your interest in contributing!
 ## 🧪 Running Tests
 ```bash
 pytest                                    # All tests pass
-pytest --cov=truss_analysis --cov-report=term-missing  # Coverage >= 85%
+pytest tests/ --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=90   # Coverage gate >= 90% (as in CI)
 pre-commit run --all-files               # Hooks pass
+make check-all                           # lint + mypy --strict + tests with coverage gate
 ```
 
 ## 📝 Code Standards
 - **Ruff** for linting and formatting (line length: 88)
 - **Type hints** on all public functions
-- **Docstrings** in Google format
+- **Docstrings** in NumPy format (enforced by ruff's pydocstyle rules, `convention = "numpy"`)
 
 ## 🔧 Pull Request Process
 1. Create a branch: `git checkout -b feature/amazing-feature`

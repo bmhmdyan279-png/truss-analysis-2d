@@ -1,0 +1,49 @@
+# sdist manifest — the source distribution ships the installable library plus
+# top-level documentation only. Development/repo-management content (.github/,
+# tests/, scripts/, examples/, config/, Docker/CI files) is intentionally
+# excluded so the published artifact stays lean and self-contained.
+
+include MANIFEST.in
+include LICENSE
+include README.md
+include README.fa.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include CONTRIBUTING.fa.md
+include CITATION.cff
+include docs/theory.md
+include docs/error_codes.md
+
+# Package data (EN 1993-1-2 material tables, py.typed marker) travels with the
+# package automatically via [tool.setuptools.package-data]; nothing to graft.
+
+# --- exclusions -------------------------------------------------------------
+prune .github
+prune tests
+prune scripts
+prune examples
+prune docs/images
+prune src/truss_analysis.egg-info
+prune data
+prune vault
+prune STATE
+
+exclude Dockerfile
+exclude .dockerignore
+exclude Makefile
+exclude .pre-commit-config.yaml
+exclude .editorconfig
+exclude .gitattributes
+exclude RELEASE_NOTES.md
+exclude requirements.txt
+exclude requirements-dev.txt
+
+global-exclude *.py[cod]
+global-exclude *.log
+global-exclude *.whl
+global-exclude *.ttf
+global-exclude .baseline_perf
+global-exclude structure.txt
+global-exclude PKG-INFO SOURCES.txt
+global-exclude .coverage coverage.xml
+recursive-exclude src *.egg-info

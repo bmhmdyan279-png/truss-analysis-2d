@@ -1,10 +1,11 @@
-"""Tests for Phase 4 degradation operator."""
+"""Tests for the degradation operator."""
 
 from __future__ import annotations
 
 import math
 
 import pytest
+
 from truss_analysis.degradation import DamageOperator
 from truss_analysis.model import Element, Node
 from truss_analysis.reliability_adapter import NodalLoad

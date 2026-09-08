@@ -1,10 +1,11 @@
 """
-Tests for Phase 1: Uncertainty Layer
+Tests for the uncertainty layer.
 Validates statistical convergence of empirical samples against theoretical parameters.
 """
 
 import numpy as np
 import pytest
+
 from truss_analysis.uncertainty import (
     GumbelRV,
     LognormalRV,
@@ -13,7 +14,7 @@ from truss_analysis.uncertainty import (
     load_distributions_config,
 )
 
-# Tolerances based on Phase 1 requirements (2% for mean, 5% for std)
+# Acceptance tolerances: 2% for the mean, 5% for the standard deviation
 MEAN_TOL = 0.02
 STD_TOL = 0.05
 N_SAMPLES = 10000
@@ -82,7 +83,7 @@ def test_cov_vs_std_initialization() -> None:
 
 
 def test_missing_std_and_cov_raises() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must be provided"):
         NormalRV(mean=100.0, seed=SEED)
 
 

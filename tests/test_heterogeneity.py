@@ -1,7 +1,8 @@
-"""Tests for Phase 6 Heterogeneity module."""
+"""Tests for the heterogeneity module."""
 
 import numpy as np
 import pytest
+
 from truss_analysis.heterogeneity import compute_heterogeneity
 
 

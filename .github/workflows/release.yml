@@ -1,9 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Manual-only: releases must be an explicit action (prevents accidental
+  # GitHub Releases from tag pushes).
+  workflow_dispatch:
 
 jobs:
   release:
