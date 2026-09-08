@@ -17,7 +17,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import tomllib
+# Python 3.10 compatibility: tomllib is available from 3.11 onward.
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
