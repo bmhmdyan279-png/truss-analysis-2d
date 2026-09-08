@@ -1,15 +1,14 @@
-"""Explicit PROXY cost models for retrofit triage (prompt-06, task 12).
+"""Explicit PROXY cost models for retrofit triage.
 
 All costs here are **proxies** proportional to member length, used only to
-make strategy comparison possible at screening level (critic 2 in ``3.md``,
-item 2).  They are NOT industrial cost models; the naming and docstrings say
-so on purpose.
+make strategy comparison possible at screening level.  They are NOT
+industrial cost models; the naming and docstrings say so on purpose.
 
-Three scenarios (prompt-06 task 12):
+Three scenarios:
 
-* ``linear``   — proposal §5.5 weights (0, 1500, 3000, 5000) per metre;
-* ``quadratic``— super-linear protection costs (0, 1500, 6000, 13500) = 1500 x^2;
-* ``step``     — stepped procurement costs (0, 2000, 4000, 8000).
+* ``linear``    - screening weights (0, 1500, 3000, 5000) per metre;
+* ``quadratic`` - super-linear protection costs (0, 1500, 6000, 13500) = 1500 x^2;
+* ``step``      - stepped procurement costs (0, 2000, 4000, 8000).
 
 Budget: ``sum_i c_{x_i} L_i <= 0.2 * C_base`` with ``C_base`` the proxy cost
 of the unprotected steel structure (``STEEL_COST_PROXY_PER_M * sum L_i``).
@@ -17,7 +16,7 @@ of the unprotected steel structure (``STEEL_COST_PROXY_PER_M * sum L_i``).
 
 from __future__ import annotations
 
-from typing import Dict, Mapping, Sequence, Tuple
+from collections.abc import Mapping, Sequence
 
 __all__ = [
     "COST_SCENARIOS",
@@ -28,7 +27,7 @@ __all__ = [
 ]
 
 #: per-metre proxy weights per decision level, per cost scenario
-COST_SCENARIOS: Dict[str, Tuple[float, float, float, float]] = {
+COST_SCENARIOS: dict[str, tuple[float, float, float, float]] = {
     "linear": (0.0, 1500.0, 3000.0, 5000.0),
     "quadratic": (0.0, 1500.0, 6000.0, 13500.0),
     "step": (0.0, 2000.0, 4000.0, 8000.0),
@@ -48,7 +47,7 @@ def base_cost(lengths: Mapping[str, float]) -> float:
 def budget_for(
     lengths: Mapping[str, float], fraction: float = BUDGET_FRACTION
 ) -> float:
-    """Allowed retrofit budget: ``fraction * C_base``."""
+    """Return the allowed retrofit budget ``fraction * C_base``."""
     return fraction * base_cost(lengths)
 
 
@@ -66,4 +65,5 @@ def decision_cost(
 
 
 def scenario_names() -> Sequence[str]:
+    """Return the names of the available proxy cost scenarios."""
     return tuple(COST_SCENARIOS)

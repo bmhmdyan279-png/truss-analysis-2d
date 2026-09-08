@@ -17,9 +17,9 @@ statics+geometry features of a member to its exact criticality index.
 * metric   = per-state Spearman rho between predicted and exact CI ranking;
   aggregate = mean over the 144 held-out states; gate: mean rho > 0.85.
 
-Uniform states are excluded by design: Lemma 1 makes their CI field equal
-to the ambient one, so they would add duplicated targets under conflicting
-feature values instead of information.
+Uniform states are excluded by design: uniform-field invariance makes their
+CI field equal to the ambient one, so they would add duplicated targets
+under conflicting feature values instead of information.
 
 Controls carried in this file: the force-ratio-only baseline (surrogate must
 beat a single static feature), a permutation control (shuffled training
@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from truss_analysis.validation import (
     CV_RHO_GATE,
     FEATURES,
@@ -106,9 +107,9 @@ def test_ridge_recovers_exact_linear_relation():
 
 def test_cv_requires_both_train_and_test_families(campaign):
     tops = _topology_tuples(campaign)
-    with pytest.raises(ValueError):  # no training family present
+    with pytest.raises(ValueError, match="no training topologies"):  # no train family
         cross_family_cv([t for t in tops if t[1] == "warren"])
-    with pytest.raises(ValueError):  # no test family present
+    with pytest.raises(ValueError, match="no test topologies"):  # no test family
         cross_family_cv([t for t in tops if t[1] == "pratt"])
 
 
@@ -116,7 +117,7 @@ def test_ridge_input_guards():
     model = RidgeSurrogate()
     with pytest.raises(RuntimeError):
         model.predict(np.zeros((3, 2)))
-    with pytest.raises(ValueError):
-        model.fit(np.zeros((3, 2)), np.zeros(4))  # shape mismatch
-    with pytest.raises(ValueError):
-        model.fit(np.zeros((1, 2)), np.zeros(1))  # too few samples
+    with pytest.raises(ValueError, match="shape mismatch"):
+        model.fit(np.zeros((3, 2)), np.zeros(4))
+    with pytest.raises(ValueError, match="at least two training samples"):
+        model.fit(np.zeros((1, 2)), np.zeros(1))

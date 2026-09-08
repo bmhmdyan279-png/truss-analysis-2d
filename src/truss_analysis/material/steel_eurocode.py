@@ -18,9 +18,9 @@ Provenance (measured, see fixture ``cross_checked_against``):
 
 Behaviour outside the tabulated range [20, 1200] degC: values are CLAMPED to
 the range endpoints (documented, conservative); never extrapolated, never a
-silent zero (the failure mode of the pre-SSOT implementation).
+silent zero.
 
-Notation notes (measured from the document, DR-017):
+Notation notes (verified against the printed standard):
   * Table 3.1 defines exactly one elastic reduction factor, k_E,theta =
     E_a,theta / E_a (slope of the linear elastic range).  ``k_s`` is exposed as
     a documented alias of ``k_E`` for compatibility with notations that
@@ -36,7 +36,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -60,7 +60,7 @@ __all__ = [
     "unit_mass",
 ]
 
-FloatOrArray = Union[float, "np.ndarray[Any, np.dtype[np.float64]]"]
+FloatOrArray = float | NDArray[np.float64]
 
 _DATA_PATH = Path(__file__).resolve().parent / "data" / "en1993_1_2_table3_1.json"
 
@@ -71,17 +71,20 @@ _BRANCH_EPS_OF_SIGMA = "eps_of_sigma"
 @lru_cache(maxsize=1)
 def _data() -> dict[str, Any]:
     """Load and cache the provenance fixture (immutable for the process)."""
-    return json.loads(_DATA_PATH.read_text(encoding="utf-8"))
+    data: dict[str, Any] = json.loads(_DATA_PATH.read_text(encoding="utf-8"))
+    return data
 
 
 def table() -> dict[str, Any]:
     """Return a deep copy of the Table 3.1 block of the fixture."""
-    return json.loads(json.dumps(_data()["table"]))
+    block: dict[str, Any] = json.loads(json.dumps(_data()["table"]))
+    return block
 
 
 def table_temperatures() -> NDArray[np.float64]:
     """Tabulated steel temperatures [degC] (20..1200 step 100)."""
-    return np.asarray(_data()["table"]["temperatures_c"], dtype=float)
+    temps: list[float] = _data()["table"]["temperatures_c"]
+    return np.asarray(temps, dtype=float)
 
 
 def _is_scalar(value: FloatOrArray) -> bool:
@@ -92,12 +95,14 @@ def _clamped_theta(theta: FloatOrArray) -> NDArray[np.float64]:
     """Clamp temperature into the standard's validity range (documented)."""
     temps = table_temperatures()
     arr = np.atleast_1d(np.asarray(theta, dtype=float))
-    return np.clip(arr, float(temps[0]), float(temps[-1]))
+    clamped: NDArray[np.float64] = np.clip(arr, float(temps[0]), float(temps[-1]))
+    return clamped
 
 
 def _interp_column(theta: FloatOrArray, column: str) -> FloatOrArray:
     temps = table_temperatures()
-    vals = np.asarray(_data()["table"][column], dtype=float)
+    raw: list[float] = _data()["table"][column]
+    vals = np.asarray(raw, dtype=float)
     arr = _clamped_theta(theta)
     out = np.interp(arr, temps, vals)  # np.interp clamps outside the range
     return float(out[0]) if _is_scalar(theta) else out

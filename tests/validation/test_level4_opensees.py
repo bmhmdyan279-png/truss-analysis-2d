@@ -4,7 +4,7 @@ Skipped as a whole when the optional ``openseespy`` dependency is absent
 (there is NO mock mode: fabricated reference numbers are worse than none).
 
 For each protocol case (Pratt 4-panel, Warren 6-panel, Howe 8-panel from the
-campaign suite, depth variant H1) and each checked state:
+test suite, shallow depth variant) and each checked state:
 
 * node-by-node displacement comparison and member-by-member axial-force
   comparison against an independent solver fed the SAME explicit modulus
@@ -14,7 +14,7 @@ campaign suite, depth variant H1) and each checked state:
   the structural path, while the reduction curves are validated separately
   at level 2);
 * the criticality sweep reproduced in OpenSees as **n+1 fully independent
-  models** and compared against the internal rank-1 (Sherman–Morrison)
+  models** and compared against the internal rank-1 (Sherman-Morrison)
   sweep — the equivalence witness for the exact-update engine;
 * the rank correlation classified through the pre-coded three-branch
   decision tree (>=0.9 full validation, 0.7..0.9 cause analysis, <0.7 model
@@ -32,9 +32,9 @@ import pytest
 
 pytest.importorskip("openseespy")
 
-from truss_analysis.criticality import get_scenario_temperatures  # noqa: E402
-from truss_analysis.model import Element, Node  # noqa: E402
-from truss_analysis.validation import (  # noqa: E402
+from truss_analysis.criticality import get_scenario_temperatures
+from truss_analysis.model import Element, Node
+from truss_analysis.validation import (
     RHO_FULL,
     OpenseesSolveError,
     RhoVerdict,
@@ -45,7 +45,7 @@ from truss_analysis.validation import (  # noqa: E402
     solve_truss_in_opensees,
 )
 
-CASES = ("pratt_4_H1", "warren_6_H1", "howe_8_H1")
+CASES = ("pratt_4_shallow", "warren_6_shallow", "howe_8_shallow")
 STATE_TOL = 1e-8  # relative agreement gate for u and N (measured ~1e-14)
 CI_TOL = 1e-8  # relative agreement gate for CI values (measured ~1e-13)
 ALPHA = 0.7
@@ -89,14 +89,16 @@ def test_singular_model_raises_opensees_solve_error():
 
 
 def test_zero_baseline_displacement_is_refused(campaign):
-    cm = _model(campaign, "pratt_4_H1")
+    cm = _model(campaign, "pratt_4_shallow")
     temps = {e.id: 20.0 for e in cm.elements}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="zero baseline displacement"):
         ci_sweep_in_opensees(cm.nodes, cm.elements, {}, temps, 0.7)
 
 
 @pytest.mark.parametrize("name", CASES)
-@pytest.mark.parametrize("scenario,temperature", [("uniform", 20.0), ("uniform", HOT)])
+@pytest.mark.parametrize(
+    ("scenario", "temperature"), [("uniform", 20.0), ("uniform", HOT)]
+)
 def test_state_matches_opensees(campaign, name, scenario, temperature):
     cm = _model(campaign, name)
     temps = get_scenario_temperatures(cm.nodes, cm.elements, scenario, temperature)
@@ -137,7 +139,7 @@ def test_ci_ranking_matches_n_plus_one_opensees_models(campaign, name, scenario)
     # (measured: exactly 1.0 on 4/6 comparisons, 1-2e-16 on the other two).
     assert comp.rho >= 1.0 - 1e-9
     assert comp.extra["rho_raw_unquantised"] > RHO_FULL
-    # Sherman–Morrison vs n+1 independent models: value-level equivalence
+    # Sherman-Morrison vs n+1 independent models: value-level equivalence
     assert comp.max_rel_ci_diff < CI_TOL
     assert comp.n_opensees_solves == len(cm.elements) + 1
     assert comp.u_max_base_internal == pytest.approx(

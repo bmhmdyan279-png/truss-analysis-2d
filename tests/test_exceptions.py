@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 from truss_analysis.assembly import AssemblyError, assemble_global_matrices
 from truss_analysis.exceptions import SingularMatrixError
 from truss_analysis.model import Element, Node

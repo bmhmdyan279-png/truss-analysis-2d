@@ -1,13 +1,13 @@
 """Deterministic ranking and Kendall tau-b computed from CI **values**.
 
-Pre-prompt-4 defects fixed here (CONTEXT_LOCK §4.5):
-* B1 — ``rank_members`` sorted ties by the raw identifier string, so
-  ``'10' < '2'``; ties now break on :func:`natural_sort_key`, which is
-  deterministic, documented and independent of the identifier format.
-* B4 — ``compute_kendall_tau`` consumed pre-sorted identifier *lists*, which
-  destroyed ties (tau-b silently degenerated to tau-a) and returned a silent
-  1.0 in the all-ties case.  :func:`tau_b` consumes the CI value mappings
-  directly, reports tie counts, and returns ``tau=None`` with
+Design policy (documented and enforced by the test suite):
+
+* ``rank_members`` breaks ties on :func:`natural_sort_key`, which is
+  deterministic, documented and independent of the identifier format
+  (numeric chunks compare numerically: ``'2' < '10'``).
+* :func:`tau_b` consumes the CI value mappings directly - never pre-sorted
+  identifier lists, which would destroy ties and silently degenerate tau-b
+  to tau-a.  It reports tie counts and returns ``tau=None`` with
   ``is_degenerate=True`` when the comparison carries no information.
 """
 
@@ -16,8 +16,8 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import List, Mapping, Optional
 
 from scipy.stats import kendalltau
 
@@ -28,30 +28,30 @@ __all__ = ["TauResult", "natural_sort_key", "rank_members", "tau_b"]
 class TauResult:
     """Structured Kendall tau-b outcome (never a silent number)."""
 
-    tau: Optional[float]
+    tau: float | None
     n_pairs: int
     n_ties_a: int
     n_ties_b: int
-    p_value: Optional[float]
+    p_value: float | None
     is_degenerate: bool
 
 
-def natural_sort_key(key: str) -> List[object]:
+def natural_sort_key(key: str) -> list[object]:
     """Sort key comparing numeric chunks numerically: ``'2' < '10'``."""
     parts = re.split(r"(\d+)", key)
     return [int(part) if part.isdigit() else part.lower() for part in parts]
 
 
-def rank_members(ci_dict: Mapping[str, float]) -> List[str]:
+def rank_members(ci_dict: Mapping[str, float]) -> list[str]:
     """Rank member ids by CI descending.
 
-    Tie-break: :func:`natural_sort_key` of the identifier — deterministic,
-    format-independent and documented (prompt-04 §C9).
+    Tie-break: :func:`natural_sort_key` of the identifier - deterministic,
+    format-independent and documented.
     """
     return sorted(ci_dict, key=lambda eid: (-ci_dict[eid], natural_sort_key(eid)))
 
 
-def _tie_pairs(values: List[float]) -> int:
+def _tie_pairs(values: list[float]) -> int:
     counts = Counter(values)
     return sum(c * (c - 1) // 2 for c in counts.values())
 
@@ -59,26 +59,26 @@ def _tie_pairs(values: List[float]) -> int:
 def tau_b(
     ci_a: Mapping[str, float],
     ci_b: Mapping[str, float],
-    quantize: Optional[float] = None,
+    quantize: float | None = None,
 ) -> TauResult:
     """Kendall tau-b between two CI fields, computed from the **values**.
 
     Members are aligned on the intersection of the identifier sets (ordered
     by :func:`natural_sort_key` for determinism).  If fewer than two pairs
     exist, or either field is constant (all pairs tied), the comparison is
-    degenerate: ``tau=None`` and ``is_degenerate=True`` — never a silent
-    1.0 or 0.0 (prompt-04 §C10, CONTEXT_LOCK §4.5 B4).  Fields containing
-    non-finite values (mechanism members carry ``CI = +inf``) are likewise
-    degenerate: the quantisation grid is undefined for infinities and the
-    comparison carries no rank information (prompt-08, DR-025).
+    degenerate: ``tau=None`` and ``is_degenerate=True`` - never a silent
+    1.0 or 0.0.  Fields containing non-finite values (mechanism members
+    carry ``CI = +inf``) are likewise degenerate: the quantisation grid is
+    undefined for infinities and the comparison carries no rank
+    information.
 
     ``quantize`` (optional, e.g. ``1e-10``): values are snapped to a grid of
     that resolution before comparing.  Kendall's tau is a discrete rank
     statistic: sub-tolerance floating-point noise between near-equal members
     (mirror-symmetric pairs of a symmetric truss) would otherwise flip pairs
     and report spurious discordance.  Quantising at the stated tolerance makes
-    "ranks unchanged up to the tolerance" the measured quantity (prompt-04 §B7
-    lemma convention); noise below the tolerance is not a rank signal.
+    "ranks unchanged up to the tolerance" the measured quantity (the
+    documented tolerance convention); noise below it is not a rank signal.
     """
     keys = sorted(set(ci_a) & set(ci_b), key=natural_sort_key)
     n = len(keys)
@@ -87,8 +87,8 @@ def tau_b(
     b_vals = [ci_b[k] for k in keys]
     # non-finite values (members flagged as mechanisms, CI = +inf) cannot be
     # quantised and carry no rank information in this statistic: degenerate,
-    # never a silent number and never a math.floor(inf) crash (prompt-08,
-    # DR-025).  Tie counts reported here are the raw (unquantised) ones.
+    # never a silent number and never a math.floor(inf) crash.  Tie counts
+    # reported here are the raw (unquantised) ones.
     if not all(math.isfinite(v) for v in a_vals) or not all(
         math.isfinite(v) for v in b_vals
     ):

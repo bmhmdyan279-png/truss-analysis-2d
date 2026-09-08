@@ -1,16 +1,15 @@
-"""Single-source guard for the EN 1993-1-2 reduction factors (prompt-03, task 5).
+"""Single-source guard for the EN 1993-1-2 reduction factors.
 
 Proves by AST traversal of every ``*.py`` under ``src/`` and ``scripts/`` that
 no SECOND array/tuple/dict of reduction values (k_E, k_y, k_p, k_s / eurocode /
 ec3) exists anywhere in the codebase, and that no file carries a fingerprint of
 the standard's distinctive tabulated constants.  Anyone re-typing a table turns
-the suite red.  (Critic 6's "two different definitions" finding, closed
-permanently.)
+the suite red.  Two different definitions of the same standard's table can
+never coexist again.
 
 The forbidden legacy identifiers are assembled from fragments inside this file
-so that the repository-wide literal grep gate of prompt-03
-(the repository-wide literal grep for the three legacy table identifiers)
-does not match this test file itself.
+so that repository-wide literal searches for the legacy table identifiers
+do not match this test file itself.
 """
 
 from __future__ import annotations

@@ -1,10 +1,11 @@
-"""Graph/numerical validation tests (prompt-05, T5)."""
+"""Graph and numerical validation tests."""
 
 from __future__ import annotations
 
 import copy
 
 import pytest
+
 from truss_analysis.graph_validation import (
     TopologyValidationError,
     structural_report,
@@ -111,7 +112,7 @@ def test_orphan_and_zero_length_and_disconnected_rejected() -> None:
 
 
 @pytest.mark.parametrize("family", FAMILIES)
-@pytest.mark.parametrize("n_panels", (4, 6, 8))
+@pytest.mark.parametrize("n_panels", [4, 6, 8])
 def test_campaign_reports_complete_and_healthy(family: str, n_panels: int) -> None:
     model = generate_topology(
         family, n_panels=n_panels, span=4.0 * n_panels, height=0.15 * 4.0 * n_panels
@@ -134,7 +135,7 @@ def test_campaign_reports_complete_and_healthy(family: str, n_panels: int) -> No
     assert report.indeterminacy == 0, (family, n_panels)
 
 
-@pytest.mark.parametrize("index", (1, 2, 3))
+@pytest.mark.parametrize("index", [1, 2, 3])
 def test_controls_symmetric_and_determinate(index: int) -> None:
     from truss_analysis.topology_generator import TopologyGenerator
 

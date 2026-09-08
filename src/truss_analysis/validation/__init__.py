@@ -1,6 +1,6 @@
 """Validation package: external-reference checks and transfer metrics.
 
-Public API (prompt-08, multi-level validation suite):
+Public API (multi-level validation suite):
 
 * :mod:`.metrics` — rank correlation and the three-branch verdict for
   reference-solver agreement (full validation / cause analysis / model
@@ -11,7 +11,7 @@ Public API (prompt-08, multi-level validation suite):
   member explicitly (OpenSees ``Truss`` elements carry no temperature
   dependence of their own), and reproduces the criticality sweep as n+1
   independent solves — the strongest possible witness for the rank-1
-  (Sherman–Morrison) engine.
+  (Sherman-Morrison) engine.
 * :mod:`.surrogate` — the cross-family transfer check: a member-level
   ridge surrogate on statics+geometry features, trained on one truss
   family and rank-correlated against the exact CI field of held-out

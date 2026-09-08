@@ -4,7 +4,7 @@ Scope of the comparison (explicit, to preempt the circularity objection)
 ------------------------------------------------------------------------
 The OpenSees ``Truss`` element has **no temperature dependence of its own**.
 Every member therefore receives an explicit ``uniaxialMaterial Elastic`` with
-``E_i(T) = k_E(T_i) * E_i`` built from the same reduction-curve SSOT that the
+``E_i(T) = k_E(T_i) * E_i`` built from the same single-source reduction curves that the
 internal engine uses.  The comparison consequently validates the
 *structural* path — assembly, boundary conditions, solution, the single-member
 stiffness-perturbation (criticality) sweep and its ranking — against an
@@ -16,7 +16,7 @@ validation suite).
 The criticality sweep is reproduced in OpenSees the hard way: **n+1 fully
 independent models** (baseline plus one model per member with that member's
 modulus additionally scaled by ``alpha``).  Comparing those against the
-internal rank-1 (Sherman–Morrison) sweep is the strongest equivalence
+internal rank-1 (Sherman-Morrison) sweep is the strongest equivalence
 witness available: exact linear algebra on one side, an external black-box
 finite-element solver on the other.
 
@@ -36,8 +36,9 @@ Displacements are read with ``ops.nodeDisp`` in global X/Y order.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -49,12 +50,12 @@ from ..criticality.engine import (
     load_vector,
 )
 from ..material.steel_eurocode import FloatOrArray
-from ..material.steel_eurocode import k_E as ssot_k_E
+from ..material.steel_eurocode import k_E as eurocode_k_E
 from ..model import Element, Node
 from .metrics import RhoBranch, classify_rho, rank_correlation
 
 try:  # pragma: no cover - environment dependent
-    from openseespy import opensees as _ops  # type: ignore
+    from openseespy import opensees as _ops
 except ImportError:  # pragma: no cover - environment dependent
     _ops = None
 _HAS_OPENSEES = _ops is not None
@@ -62,8 +63,8 @@ _HAS_OPENSEES = _ops is not None
 RHO_QUANTIZE: float = 1e-10
 
 __all__ = [
-    "CiRankingComparison",
     "RHO_QUANTIZE",
+    "CiRankingComparison",
     "OpenseesSolveError",
     "OpenseesUnavailableError",
     "StateComparison",
@@ -117,9 +118,9 @@ def _require_ops() -> Any:
 class OpenseesSolution:
     """One linear static solve of the pin-jointed model in OpenSees."""
 
-    node_ids: Tuple[str, ...]
+    node_ids: tuple[str, ...]
     disp: NDArray[np.float64]  # (2*nN,) global DOF order of ``node_ids``
-    member_forces: Dict[str, float]  # tension positive
+    member_forces: dict[str, float]  # tension positive
     analyze_status: int
 
 
@@ -127,7 +128,7 @@ def solve_truss_in_opensees(
     nodes: Sequence[Node],
     elements: Sequence[Element],
     loads: Mapping[str, Mapping[str, float]],
-    k_scale: Optional[Mapping[str, float]] = None,
+    k_scale: Mapping[str, float] | None = None,
 ) -> OpenseesSolution:
     """Build and solve the truss in OpenSeesPy (one fresh model per call).
 
@@ -138,7 +139,7 @@ def solve_truss_in_opensees(
     ops = _require_ops()
     ops.wipe()
     ops.model("basic", "-ndm", 2, "-ndf", 2)
-    tag_of_node: Dict[str, int] = {}
+    tag_of_node: dict[str, int] = {}
     for pos, node in enumerate(nodes):
         tag = pos + 1
         tag_of_node[node.id] = tag
@@ -185,7 +186,7 @@ def solve_truss_in_opensees(
         tag = tag_of_node[node.id]
         disp[2 * (tag - 1)] = float(ops.nodeDisp(tag, 1))
         disp[2 * (tag - 1) + 1] = float(ops.nodeDisp(tag, 2))
-    forces: Dict[str, float] = {}
+    forces: dict[str, float] = {}
     for pos, elem in enumerate(elements):
         forces[elem.id] = float(ops.basicForce(pos + 1)[0])
     return OpenseesSolution(
@@ -200,7 +201,7 @@ def solve_truss_in_opensees(
 class OpenseesCiSweep:
     """CI field from n+1 independent OpenSees models (no rank-1 shortcut)."""
 
-    ci_values: Dict[str, float]
+    ci_values: dict[str, float]
     u_max_base: float
     u_max_perturbed_max: float
     n_solves: int
@@ -212,16 +213,16 @@ def ci_sweep_in_opensees(
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
     alpha: float = 0.7,
-    k_e_func: Callable[[FloatOrArray], FloatOrArray] = ssot_k_E,
+    k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
 ) -> OpenseesCiSweep:
-    """Reference criticality sweep: baseline + one degraded member per model."""
+    """Run the reference criticality sweep: baseline + one degraded member."""
     base_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
     base = solve_truss_in_opensees(nodes, elements, loads, base_scale)
     u_max_base = float(np.max(np.abs(base.disp)))
     if u_max_base <= 0.0:
         msg = "zero baseline displacement: the CI ratio is undefined"
         raise ValueError(msg)
-    ci: Dict[str, float] = {}
+    ci: dict[str, float] = {}
     u_max_pert_max = 0.0
     for elem in elements:
         scale = dict(base_scale)
@@ -239,7 +240,7 @@ def _internal_state(
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
     k_e_func: Callable[[FloatOrArray], FloatOrArray],
-) -> Tuple[NDArray[np.float64], Dict[str, float]]:
+) -> tuple[NDArray[np.float64], dict[str, float]]:
     """Full-DOF displacement and member forces from the internal engine.
 
     ``build_engine`` receives the *temperature field* and applies
@@ -262,17 +263,17 @@ def _internal_state(
 class StateComparison:
     """Node-by-node / member-by-member comparison of one physical state."""
 
-    temperature_field: Dict[str, float]
+    temperature_field: dict[str, float]
     u_max_internal: float
     u_max_opensees: float
     rel_err_u_max: float
     max_abs_node_err: float  # [m], over all nodal DOFs
     max_rel_node_err: float  # scaled by max|u| of the internal solution
     max_rel_force_err: float  # scaled by max|N| of the internal solution
-    nodal_disp_internal: Dict[str, List[float]]
-    nodal_disp_opensees: Dict[str, List[float]]
-    forces_internal: Dict[str, float]
-    forces_opensees: Dict[str, float]
+    nodal_disp_internal: dict[str, list[float]]
+    nodal_disp_opensees: dict[str, list[float]]
+    forces_internal: dict[str, float]
+    forces_opensees: dict[str, float]
 
 
 def compare_state(
@@ -280,7 +281,7 @@ def compare_state(
     elements: Sequence[Element],
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
-    k_e_func: Callable[[FloatOrArray], FloatOrArray] = ssot_k_E,
+    k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
 ) -> StateComparison:
     """Solve the identical degraded state in both solvers and compare."""
     k_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
@@ -296,8 +297,8 @@ def compare_state(
     ]
     u_max_ops = float(np.max(np.abs(sol.disp)))
     rel_umax = abs(u_max_ops - u_scale) / u_scale if u_scale > 0.0 else float("nan")
-    disp_int: Dict[str, List[float]] = {}
-    disp_ops: Dict[str, List[float]] = {}
+    disp_int: dict[str, list[float]] = {}
+    disp_ops: dict[str, list[float]] = {}
     for i, node in enumerate(nodes):
         disp_int[node.id] = [float(u_int[2 * i]), float(u_int[2 * i + 1])]
         disp_ops[node.id] = [float(sol.disp[2 * i]), float(sol.disp[2 * i + 1])]
@@ -321,8 +322,8 @@ class CiRankingComparison:
     """Rank-1 internal sweep vs the n+1-model OpenSees reference sweep."""
 
     alpha: float
-    ci_internal: Dict[str, float]
-    ci_opensees: Dict[str, float]
+    ci_internal: dict[str, float]
+    ci_opensees: dict[str, float]
     rho: float
     branch: RhoBranch
     max_abs_ci_diff: float
@@ -330,7 +331,7 @@ class CiRankingComparison:
     u_max_base_internal: float
     u_max_base_opensees: float
     n_opensees_solves: int
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 def compare_ci_ranking(
@@ -339,7 +340,7 @@ def compare_ci_ranking(
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
     alpha: float = 0.7,
-    k_e_func: Callable[[FloatOrArray], FloatOrArray] = ssot_k_E,
+    k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
 ) -> CiRankingComparison:
     """Compare criticality fields and classify the rank correlation."""
     setup = build_engine(nodes, elements, loads, temps, k_e_func)
@@ -347,7 +348,7 @@ def compare_ci_ranking(
     sweep = ci_sweep(setup, u_free, alpha)
     u_max_int = float(np.max(np.abs(u_free)))
     ref = ci_sweep_in_opensees(nodes, elements, loads, temps, alpha, k_e_func)
-    # Tie-noise convention (same as ranking.tau_b, DL-028): two exact
+    # Tie-noise convention (same as ranking.tau_b): two exact
     # solvers agree on the CI field to ~1e-13, but symmetric topologies
     # carry near-tied CI pairs whose ORDER is pure floating-point noise.
     # The ranked quantity is therefore computed on values quantised at

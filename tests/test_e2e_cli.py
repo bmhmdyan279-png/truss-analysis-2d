@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from truss_analysis import run
 from truss_analysis.main import AnalysisResult, main
 
@@ -34,7 +35,7 @@ SIMPLE = {
 }
 
 
-@pytest.fixture()
+@pytest.fixture
 def simple_json(tmp_path):
     p = tmp_path / "simple.json"
     p.write_text(json.dumps(SIMPLE), encoding="utf-8")
@@ -72,7 +73,8 @@ def test_cli_main(capsys, simple_json):
 def test_plot_save(simple_json, tmp_path):
     png = tmp_path / "t.png"
     run(str(simple_json), plot_path=str(png))
-    assert png.exists() and png.stat().st_size > 0
+    assert png.exists()
+    assert png.stat().st_size > 0
 
 
 def test_examples_do_not_crash():
@@ -81,7 +83,7 @@ def test_examples_do_not_crash():
     for f in files:
         # اعتبارسنجی اولیه: فقط فایل‌هایی که ساختار ورودی دارند را اجرا کن
         try:
-            with open(f, "r") as fp:
+            with open(f) as fp:
                 data = json.load(fp)
             if "nodes" in data and "elements" in data:
                 assert run(str(f)).status == "SUCCESS"

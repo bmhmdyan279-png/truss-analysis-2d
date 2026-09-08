@@ -1,17 +1,17 @@
-"""Level 3 — physical validation: Lemma 1 measured on the full grid.
+"""Level 3 — physical validation: uniform-field invariance measured on the full grid.
 
 Uniform-temperature invariance of the criticality field, measured (never
-assumed, never hard-coded) on **all 21 campaign topologies x 5 temperatures**
+assumed, never hard-coded) on **all 21 suite topologies x 5 temperatures**
 (200/400/600/800/1000 degC), with three nested criteria of increasing
 strength:
 
 1. Kendall tau-b between the CI ranking at theta and at 20 degC equals
    1.000 within 1e-8 (the acceptance tolerance of the protocol).
-2. Element-wise CI drift below 1e-10 (the lemma quantisation convention).
+2. Element-wise CI drift below 1e-10 (the tie-noise quantisation convention).
 3. Element-wise ``allclose`` at rtol=1e-8, atol=1e-10 — the strongest
    practical form: the whole CI VECTOR, not just its ranks, is invariant.
 
-Plus the scaling law that makes the lemma precise: under a uniform field the
+Plus the scaling law behind the invariance: under a uniform field the
 stiffness matrix scales by k_E(theta), hence
 ``u_max(theta) / u_max(20) == 1 / k_E(theta)`` to machine precision.
 """
@@ -20,12 +20,13 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from truss_analysis.criticality import T_AMBIENT, compute_ci_for_topology
 from truss_analysis.material.steel_eurocode import k_E
 
 THETAS = (200.0, 400.0, 600.0, 800.0, 1000.0)
 TAU_TOL = 1e-8  # protocol acceptance: tau = 1.000 +/- 1e-8
-DRIFT_TOL = 1e-10  # lemma quantisation convention
+DRIFT_TOL = 1e-10  # tie-noise quantisation convention
 N_TOPOLOGIES = 21
 
 
@@ -35,7 +36,7 @@ def _uniform_state(cm, theta):
     )
 
 
-def test_lemma1_full_grid_tau_drift_and_vector_invariance(campaign) -> None:
+def test_uniform_field_full_grid_tau_drift_and_vector_invariance(campaign) -> None:
     assert len(campaign) == N_TOPOLOGIES
     measured = 0
     for cm in campaign:
@@ -69,11 +70,11 @@ def test_lemma1_full_grid_tau_drift_and_vector_invariance(campaign) -> None:
     assert measured == N_TOPOLOGIES * len(THETAS)
 
 
-def test_lemma1_is_not_vacuous_cold_equals_hot_ranking_content(campaign) -> None:
+def test_uniform_field_is_not_vacuous_cold_equals_hot_ranking_content(campaign) -> None:
     """Guard against a vacuous pass: the CI fields being compared must be
     informative (non-constant) — a constant field would make tau degenerate
     and the engine reports that as tau=None, never as 1.0."""
-    cm = next(c for c in campaign if c.name == "warren_8_H2")
+    cm = next(c for c in campaign if c.name == "warren_8_deep")
     res = _uniform_state(cm, 600.0)
     values = list(res.ci_values.values())
     assert max(values) - min(values) > 1e-6  # real spread, not all-equal

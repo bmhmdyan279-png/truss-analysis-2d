@@ -1,11 +1,20 @@
-"""Phase 2: Monte Carlo engine for sampled safety margins."""
+"""Monte Carlo reliability engine for sampled safety margins.
+
+This module provides a small, dependency-light engine that propagates
+random variables through a user-supplied analysis callback and summarises
+the resulting safety margins (yield, buckling and serviceability) with
+first-order reliability statistics.
+
+The theory behind the margin definitions and the estimator conventions
+is documented in ``docs/theory.md``.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TypeAlias, Union
+from typing import TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -13,17 +22,21 @@ from scipy.stats import norm
 
 from .uncertainty import RandomVariable
 
-TargetId: TypeAlias = Union[int, str]
+TargetId: TypeAlias = int | str
 ScalarSample: TypeAlias = Mapping[str, float]
 
 
 class LimitState(str, Enum):
+    """Limit state whose safety margin is tracked by the engine."""
+
     YIELD = "yield"
     BUCKLING = "buckling"
     SERVICEABILITY = "serviceability"
 
 
 class Direction(str, Enum):
+    """Displacement direction used by serviceability limits."""
+
     X = "x"
     Y = "y"
     MAGNITUDE = "magnitude"
@@ -31,10 +44,31 @@ class Direction(str, Enum):
 
 @dataclass(frozen=True)
 class MemberResponse:
+    """Axial response and section properties of one truss member.
+
+    Attributes
+    ----------
+    axial_force : float
+        Member axial force; tension is positive.
+    E : float
+        Young's modulus of the member material.
+    A : float
+        Cross-sectional area.
+    I_sec : float
+        Second moment of area (named ``I_sec`` to avoid the ambiguous
+        single-letter ``I`` and to match the element model).
+    length : float
+        Member length.
+    effective_length_factor : float
+        Buckling effective-length factor ``k``.
+    yield_stress : float or None, optional
+        Yield stress; when ``None`` the yield margin is not evaluated.
+    """
+
     axial_force: float
     E: float
     A: float
-    I_sec: float  # Renamed from I to avoid E741 and match Element model
+    I_sec: float
     length: float
     effective_length_factor: float
     yield_stress: float | None = None
@@ -42,29 +76,84 @@ class MemberResponse:
 
 @dataclass(frozen=True)
 class AnalysisSample:
-    # تغییر int به TargetId برای پشتیبانی از شناسه‌های str در مدل واقعی
+    """Result of analysing one sampled variable vector.
+
+    Attributes
+    ----------
+    member_responses : Mapping[TargetId, MemberResponse]
+        Per-member responses keyed by member identifier (``int`` or ``str``).
+    nodal_displacements : Mapping[TargetId, tuple[float, float]]
+        Per-node displacements ``(ux, uy)`` keyed by node identifier.
+    """
+
     member_responses: Mapping[TargetId, MemberResponse]
     nodal_displacements: Mapping[TargetId, tuple[float, float]]
 
 
 @dataclass(frozen=True)
 class ServiceLimit:
-    node_id: TargetId  # تغییر از int به TargetId برای پشتیبانی از str
+    """Allowable displacement at one node and direction.
+
+    Attributes
+    ----------
+    node_id : TargetId
+        Identifier of the monitored node.
+    direction : Direction
+        Monitored displacement direction.
+    limit : float
+        Non-negative allowable displacement.
+    name : str or None, optional
+        Human-readable key; defaults to a name derived from node and direction.
+    """
+
+    node_id: TargetId
     direction: Direction
     limit: float
     name: str | None = None
 
     def __post_init__(self) -> None:
+        """Validate that the allowable displacement is non-negative."""
         if self.limit < 0:
             raise ValueError("Serviceability limit must be non-negative.")
 
     @property
     def key(self) -> str:
+        """Return the stable identifier of this limit.
+
+        Returns
+        -------
+        str
+            ``name`` when provided, otherwise ``node_<id>_<direction>``.
+        """
         return self.name or f"node_{self.node_id}_{self.direction.value}"
 
 
 @dataclass
 class MarginStatistics:
+    """Summary statistics of one sampled margin series.
+
+    Attributes
+    ----------
+    limit_state : LimitState
+        Limit state that produced the margin.
+    target_id : TargetId
+        Member or serviceability-limit identifier.
+    sample_size : int
+        Number of samples in the series (including invalid ones).
+    valid_samples : int
+        Number of finite samples actually summarised.
+    mean : float
+        Arithmetic mean of the finite margins.
+    std : float
+        Sample standard deviation (``ddof=1``) of the finite margins.
+    beta_hat : float
+        Reliability index estimate ``mean / std``.
+    pf_approx : float
+        Approximate failure probability ``Phi(-beta_hat)``.
+    margins : numpy.ndarray
+        Raw margin series; ``NaN`` marks samples where the margin is undefined.
+    """
+
     limit_state: LimitState
     target_id: TargetId
     sample_size: int
@@ -78,12 +167,36 @@ class MarginStatistics:
 
 @dataclass
 class ReliabilityReport:
+    """Reliability statistics for one fixed sample size.
+
+    Attributes
+    ----------
+    sample_size : int
+        Number of Monte Carlo samples behind this report.
+    statistics : tuple[MarginStatistics, ...]
+        Per-target statistics, sorted by limit state then target identifier.
+    """
+
     sample_size: int
     statistics: tuple[MarginStatistics, ...]
 
     def get(
         self, limit_state: LimitState, target_id: TargetId
     ) -> MarginStatistics | None:
+        """Return statistics for one limit state and target.
+
+        Parameters
+        ----------
+        limit_state : LimitState
+            Limit state to look up.
+        target_id : TargetId
+            Member or serviceability-limit identifier.
+
+        Returns
+        -------
+        MarginStatistics or None
+            Matching statistics, or ``None`` when the target is absent.
+        """
         for stat in self.statistics:
             if stat.limit_state == limit_state and stat.target_id == target_id:
                 return stat
@@ -97,6 +210,26 @@ def sample_named_variables(
     variables: Mapping[str, RandomVariable],
     n_samples: int,
 ) -> dict[str, npt.NDArray[np.float64]]:
+    """Draw ``n_samples`` realisations from each named random variable.
+
+    Parameters
+    ----------
+    variables : Mapping[str, RandomVariable]
+        Random variables keyed by name.
+    n_samples : int
+        Number of samples to draw from every variable; must be positive.
+
+    Returns
+    -------
+    dict[str, numpy.ndarray]
+        Sample arrays keyed by variable name, each of shape ``(n_samples,)``.
+
+    Raises
+    ------
+    ValueError
+        If ``n_samples`` is not positive or a variable returns a sample
+        array whose shape is not ``(n_samples,)``.
+    """
     if n_samples <= 0:
         raise ValueError("n_samples must be positive.")
 
@@ -112,6 +245,19 @@ def sample_named_variables(
 
 
 class ReliabilityEngine:
+    """Monte Carlo engine that summarises sampled safety margins.
+
+    Parameters
+    ----------
+    variables : Mapping[str, RandomVariable]
+        Random variables propagated through the analysis callback.
+    analyze_fn : AnalyzeSample
+        Callback mapping one sampled variable vector to an
+        :class:`AnalysisSample`.
+    service_limits : Sequence[ServiceLimit], optional
+        Serviceability limits evaluated on nodal displacements.
+    """
+
     def __init__(
         self,
         variables: Mapping[str, RandomVariable],
@@ -123,12 +269,45 @@ class ReliabilityEngine:
         self._service_limits = tuple(service_limits)
 
     def run(self, n_samples: int) -> ReliabilityReport:
+        """Run the engine once at a fixed sample size.
+
+        Parameters
+        ----------
+        n_samples : int
+            Number of Monte Carlo samples; must be positive.
+
+        Returns
+        -------
+        ReliabilityReport
+            Statistics for the requested sample size.
+        """
         reports = self.run_convergence((n_samples,))
         return reports[n_samples]
 
     def run_convergence(
         self, sample_sizes: Sequence[int]
     ) -> dict[int, ReliabilityReport]:
+        """Run the engine once and report statistics at several sample sizes.
+
+        The largest requested size is simulated; smaller reports reuse the
+        corresponding prefix of the same sample stream, which keeps the
+        comparison across sizes free of resampling noise.
+
+        Parameters
+        ----------
+        sample_sizes : Sequence[int]
+            Positive sample sizes; duplicates are ignored.
+
+        Returns
+        -------
+        dict[int, ReliabilityReport]
+            Report for each requested sample size, keyed by that size.
+
+        Raises
+        ------
+        ValueError
+            If ``sample_sizes`` is empty or contains non-positive values.
+        """
         if not sample_sizes:
             raise ValueError("sample_sizes must not be empty.")
 
@@ -201,6 +380,20 @@ class ReliabilityEngine:
 
     @staticmethod
     def _buckling_margin(member: MemberResponse) -> float:
+        """Return the Euler buckling margin of a compressed member.
+
+        Parameters
+        ----------
+        member : MemberResponse
+            Member response; tension (non-negative axial force) or any
+            non-positive stiffness/geometry yields ``NaN``.
+
+        Returns
+        -------
+        float
+            ``P_cr - |N|`` with ``P_cr`` the Euler critical load, or ``NaN``
+            when the margin is undefined.
+        """
         if member.axial_force >= 0.0:
             return float("nan")
 
@@ -222,6 +415,21 @@ class ReliabilityEngine:
         response: AnalysisSample,
         limit: ServiceLimit,
     ) -> float:
+        """Return the displacement margin ``limit - |u|`` at one node.
+
+        Parameters
+        ----------
+        response : AnalysisSample
+            Sampled analysis result providing nodal displacements.
+        limit : ServiceLimit
+            Serviceability limit to evaluate.
+
+        Returns
+        -------
+        float
+            Margin for the monitored direction, or ``NaN`` when the node is
+            missing from the response.
+        """
         displacement = response.nodal_displacements.get(limit.node_id)
         if displacement is None:
             return float("nan")
@@ -243,6 +451,7 @@ def _statistics(
     target_id: TargetId,
     margins: npt.NDArray[np.float64],
 ) -> MarginStatistics:
+    """Summarise one margin series into :class:`MarginStatistics`."""
     finite = margins[np.isfinite(margins)]
     valid_samples = int(finite.size)
 
@@ -278,6 +487,7 @@ def _statistics(
 
 
 def _beta_hat(mean: float, std: float) -> float:
+    """Return the reliability index ``mean / std`` with degenerate guards."""
     if not np.isfinite(mean) or not np.isfinite(std):
         return float("nan")
 
@@ -293,6 +503,7 @@ def _beta_hat(mean: float, std: float) -> float:
 
 
 def _pf_from_beta(beta: float) -> float:
+    """Return the approximate failure probability ``Phi(-beta)``."""
     if np.isnan(beta):
         return float("nan")
     if np.isposinf(beta):

@@ -1,14 +1,16 @@
-"""Sampling: Latin Hypercube, Gaussian-copula correlation, spec-driven draws.
+"""Sampling: Latin hypercube, Gaussian-copula correlation, spec-driven draws.
 
-Prompt-06 part B: LHS (screening, 100 samples) + Monte Carlo (validation,
-2000 samples) with **correlation support** via a Gaussian copula (Cholesky of
-the target rank-correlation matrix), deterministic seeds, and generation that
-is independent of call order (every draw is a pure function of ``seed``).
+Provides the stochastic input layer for screening (small Latin-hypercube
+designs) and Monte Carlo studies (larger sample counts) with **correlation
+support** via a Gaussian copula (Cholesky factor of the target
+rank-correlation matrix), deterministic seeds, and generation that is
+independent of call order (every draw is a pure function of ``seed``).
 """
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import cast
 
 import numpy as np
 from scipy.stats import norm
@@ -18,6 +20,7 @@ from .random_variables import (
     DistributionSpec,
     GumbelRV,
     LognormalRV,
+    RandomVariable,
     TruncatedNormalRV,
 )
 
@@ -25,10 +28,30 @@ __all__ = ["gaussian_copula_correlate", "latin_hypercube", "sample_spec_matrix"]
 
 
 def latin_hypercube(n: int, dim: int, seed: int) -> np.ndarray:
-    """Stratified uniform matrix ``(n, dim)``: one sample per stratum per dim.
+    """Draw a stratified uniform matrix ``(n, dim)``.
 
-    Column ``d`` is a random permutation of the strata midpoints
-    ``(k + U_k)/n``; fully determined by ``seed`` (order-independent).
+    One sample per stratum per dimension: column ``d`` is a random
+    permutation of the strata midpoints ``(k + U_k)/n``; fully determined
+    by ``seed`` (order-independent).
+
+    Parameters
+    ----------
+    n : int
+        Number of samples (strata per dimension); must be >= 1.
+    dim : int
+        Number of dimensions; must be >= 1.
+    seed : int
+        Generator seed.
+
+    Returns
+    -------
+    np.ndarray
+        Uniform ``(n, dim)`` matrix in ``[0, 1)``.
+
+    Raises
+    ------
+    ValueError
+        If ``n`` or ``dim`` is below 1.
     """
     if n < 1 or dim < 1:
         msg = f"require n,dim >= 1, got n={n}, dim={dim}"
@@ -36,16 +59,33 @@ def latin_hypercube(n: int, dim: int, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     u = rng.random((n, dim))
     perms = np.argsort(rng.random((n, dim)), axis=0)
-    strata = (perms + u) / n
+    strata: np.ndarray = (perms + u) / n
     return strata
 
 
 def gaussian_copula_correlate(u: np.ndarray, correlation: np.ndarray) -> np.ndarray:
-    """Map independent uniforms to uniforms with the target rank correlation.
+    """Map independent uniforms to uniforms with a target rank correlation.
 
     ``z = Phi^-1(u)``, ``z_c = L z`` with ``L = cholesky(correlation)``,
-    ``u_c = Phi(z_c)``.  The target matrix is the correlation in normal space
-    (Spearman-type rank correlation of the output, approximately).
+    ``u_c = Phi(z_c)``. The target matrix is the correlation in normal
+    space (approximately the Spearman-type rank correlation of the output).
+
+    Parameters
+    ----------
+    u : np.ndarray
+        Independent uniform matrix ``(n, m)``.
+    correlation : np.ndarray
+        Symmetric positive-definite target correlation matrix ``(m, m)``.
+
+    Returns
+    -------
+    np.ndarray
+        Correlated uniform matrix ``(n, m)``.
+
+    Raises
+    ------
+    ValueError
+        If the column count of ``u`` does not match ``correlation``.
     """
     m = correlation.shape[0]
     if u.shape[1] != m:
@@ -57,7 +97,10 @@ def gaussian_copula_correlate(u: np.ndarray, correlation: np.ndarray) -> np.ndar
     return np.asarray(norm.cdf(z_c))
 
 
-def _build_rv(spec: DistributionSpec, mean: float, seed: int):
+def _build_rv(
+    spec: DistributionSpec, mean: float, seed: int
+) -> RandomVariable | DeterministicRV:
+    """Instantiate the random variable described by ``spec``."""
     if spec.family == "gumbel":
         return GumbelRV(mean=mean, cov=spec.parameters["cov"], seed=seed)
     if spec.family == "lognormal":
@@ -82,27 +125,50 @@ def sample_spec_matrix(
     n: int,
     seed: int,
     correlation: np.ndarray | None = None,
-) -> dict:
+) -> dict[str, np.ndarray]:
     """Draw ``(n, len(specs))`` samples keyed by spec name.
 
-    ``correlation`` (optional, len(specs) x len(specs)) couples the draws via
-    :func:`gaussian_copula_correlate`; deterministic specs ignore coupling.
-    The result depends only on ``(specs, means, n, seed)`` — never on call
-    order or history.
+    ``correlation`` (optional, ``len(specs) x len(specs)``) couples the
+    draws via :func:`gaussian_copula_correlate`; deterministic specs ignore
+    the coupling. The result depends only on ``(specs, means, n, seed)`` -
+    never on call order or history.
+
+    Parameters
+    ----------
+    specs : Sequence[DistributionSpec]
+        Variable specifications (e.g. from ``default_rv_specs``).
+    means : Mapping[str, float]
+        Variable name -> mean value (unused for deterministic specs, whose
+        value comes from ``spec.parameters["value"]``).
+    n : int
+        Number of samples.
+    seed : int
+        Base seed; spec ``d`` uses ``seed + d``.
+    correlation : np.ndarray or None
+        Optional target rank-correlation matrix.
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Variable name -> sample vector of length ``n``.
+
+    Raises
+    ------
+    ValueError
+        On unknown distribution families (see :func:`_build_rv`).
     """
     u = latin_hypercube(n, len(specs), seed)
     if correlation is not None:
         u = gaussian_copula_correlate(u, correlation)
-    out: dict = {}
+    out: dict[str, np.ndarray] = {}
     for d, spec in enumerate(specs):
         if spec.family == "deterministic":
-            rv = _build_rv(
-                spec, means.get(spec.name, spec.parameters["value"]), seed + d
-            )
-            out[spec.name] = rv.sample(n)
+            # deterministic specs always take their spec value (the ``means``
+            # entry, when present, is documentation only - historic behaviour)
+            det = DeterministicRV(spec.parameters["value"], seed=seed + d)
+            out[spec.name] = det.sample(n)
             continue
-        rv = _build_rv(spec, means[spec.name], seed + d)
+        rv = cast(RandomVariable, _build_rv(spec, means[spec.name], seed + d))
         # invert the rv's distribution through the (possibly correlated) uniforms
-        dist = rv.dist
-        out[spec.name] = np.asarray(dist.ppf(u[:, d]))
+        out[spec.name] = np.asarray(rv.dist.ppf(u[:, d]))
     return out

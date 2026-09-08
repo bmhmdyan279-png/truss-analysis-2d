@@ -1,38 +1,38 @@
-"""Retrofit strategies over ONE common decision space (prompt-06, tasks 10-14).
+"""Retrofit strategies over ONE common decision space.
 
-Fair-comparison rule (critics 2 and 4 in ``3.md``): every strategy searches
-the SAME space ``x_i in {0,1,2,3}`` under the SAME proxy budget
+Fair-comparison rule: every strategy searches the SAME space
+``x_i in {0,1,2,3}`` under the SAME proxy budget
 ``sum_i c_{x_i} L_i <= 0.2 C_base``.  Strategies that would need a topology
 change (adding members) are documented as limited and use a cost-equivalent
 in-space equivalent instead:
 
-* ``redundant`` — the proposal's "add a diagonal in the mid panel" changes the
-  topology and therefore leaves the common space.  Its documented in-space
-  equivalent upgrades the member with the highest redundancy participation
-  (largest ``u_max`` increase when removed) to ``x=3``, whose proxy cost
-  ``c_3 L`` equals the cost the proposal assigned to the added member.
+* ``redundant`` - "add a diagonal in the mid panel" changes the topology and
+  therefore leaves the common space.  Its documented in-space equivalent
+  upgrades the member with the highest redundancy participation (largest
+  ``u_max`` increase when removed) to ``x=3``, whose proxy cost ``c_3 L``
+  equals the cost assigned to the added member.
 
-Performance metrics (prompt-06 task 13): ``u_max`` at the scenario
-temperature, the system critical temperature ``theta*_sys``, and the count of
-members with ``DCR >= 1``.  The optimisation objective is ``u_max``
-(minimised); the other two are reported for every outcome.
+Performance metrics: ``u_max`` at the scenario temperature, the system
+critical temperature ``theta*_sys``, and the count of members with
+``DCR >= 1``.  The optimisation objective is ``u_max`` (minimised); the
+other two are reported for every outcome.
 """
 
 from __future__ import annotations
 
 import itertools
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterator, Mapping, Sequence, Tuple
 
 import numpy as np
-from truss_analysis.criticality.engine import (
+
+from ..criticality.engine import (
     base_displacement,
     build_engine,
     load_vector,
 )
-from truss_analysis.limitstates import dcr_field, system_critical_temperature
-from truss_analysis.model import Element, Node
-
+from ..limitstates import dcr_field, system_critical_temperature
+from ..model import Element, Node
 from .actions import apply_decision
 from .costs import budget_for, decision_cost
 
@@ -71,23 +71,24 @@ class RetrofitContext:
     cost_scenario: str
     budget: float
     lengths: Mapping[str, float]
-    member_ids: Tuple[str, ...]
+    member_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class Decision:
     """A point of the common decision space."""
 
-    member_ids: Tuple[str, ...]
-    actions: Tuple[int, ...]
+    member_ids: tuple[str, ...]
+    actions: tuple[int, ...]
 
-    def as_map(self) -> Dict[str, int]:
-        return dict(zip(self.member_ids, self.actions))
+    def as_map(self) -> dict[str, int]:
+        """Return the decision as a ``member_id -> action level`` mapping."""
+        return dict(zip(self.member_ids, self.actions, strict=True))
 
 
 @dataclass(frozen=True)
 class RetrofitMetrics:
-    """Performance metrics of one decision (prompt-06 task 13)."""
+    """Performance metrics of one decision vector."""
 
     u_max: float
     theta_sys: float
@@ -104,13 +105,15 @@ class RetrofitOutcome:
 
     @property
     def objective(self) -> float:
+        """Return the optimisation objective (``u_max``, minimised)."""
         return self.metrics.u_max
 
 
 def member_lengths(
     nodes: Sequence[Node], elements: Sequence[Element]
-) -> Dict[str, float]:
-    out: Dict[str, float] = {}
+) -> dict[str, float]:
+    """Return the geometric length [m] of every member, keyed by id."""
+    out: dict[str, float] = {}
     nmap = {n.id: n for n in nodes}
     for e in elements:
         ni, nj = nmap[e.node_i], nmap[e.node_j]
@@ -129,6 +132,12 @@ def make_context(
     cost_scenario: str = "linear",
     budget_fraction: float = 0.2,
 ) -> RetrofitContext:
+    """Build the shared strategy context (identical inputs for all strategies).
+
+    The budget is computed once from the member lengths and the chosen
+    proxy cost scenario so that every strategy is compared under the same
+    constraint.
+    """
     lengths = member_lengths(nodes, elements)
     return RetrofitContext(
         nodes=nodes,
@@ -145,8 +154,8 @@ def make_context(
     )
 
 
-def _scenario_temps(ctx: RetrofitContext) -> Dict[str, float]:
-    from truss_analysis.criticality.scenarios import get_scenario_temperatures
+def _scenario_temps(ctx: RetrofitContext) -> dict[str, float]:
+    from ..criticality.scenarios import get_scenario_temperatures
 
     return get_scenario_temperatures(
         list(ctx.nodes), list(ctx.elements), ctx.scenario, ctx.t_target
@@ -154,8 +163,9 @@ def _scenario_temps(ctx: RetrofitContext) -> Dict[str, float]:
 
 
 def feasible(ctx: RetrofitContext, decision: Decision) -> bool:
-    return (
-        decision_cost(decision.as_map(), ctx.lengths, ctx.cost_scenario) <= ctx.budget
+    """Return True when the decision's proxy cost fits the shared budget."""
+    return decision_cost(decision.as_map(), ctx.lengths, ctx.cost_scenario) <= (
+        ctx.budget
     )
 
 
@@ -207,12 +217,12 @@ def exhaustive(ctx: RetrofitContext) -> RetrofitOutcome:
 
 
 def greedy(ctx: RetrofitContext) -> RetrofitOutcome:
-    """Iterative greedy: best ``delta_u_max`` per added proxy cost per step.
+    """Upgrade greedily: best ``delta_u_max`` per added proxy cost per step.
 
-    After every reinforcement the CI field is recomputed through the rank-1
-    engine (cheap, prompt-4), so the greedy loop sees redistribution effects.
-    Greedy can be strictly worse than the global optimum; when that happens
-    it must be REPORTED, not hidden (prompt-06 task 14).
+    After every reinforcement the state is re-evaluated through the rank-1
+    engine (one factorisation serves all members), so the greedy loop sees
+    redistribution effects.  Greedy can be strictly worse than the global
+    optimum; when that happens it must be REPORTED, not hidden.
     """
     current = Decision(
         member_ids=ctx.member_ids, actions=tuple(0 for _ in ctx.member_ids)
@@ -221,7 +231,7 @@ def greedy(ctx: RetrofitContext) -> RetrofitOutcome:
     while True:
         candidate_best: RetrofitOutcome | None = None
         best_ratio = 0.0
-        for idx, mid in enumerate(ctx.member_ids):
+        for idx in range(len(ctx.member_ids)):
             cur_x = current.actions[idx]
             for up in range(cur_x + 1, 4):
                 actions = list(current.actions)
@@ -244,9 +254,9 @@ def greedy(ctx: RetrofitContext) -> RetrofitOutcome:
         best = candidate_best
 
 
-def _axial_stress_order(ctx: RetrofitContext) -> list:
-    """Members ordered by |N_i|/A_i at t_target (descending)."""
-    from truss_analysis.limitstates import member_axial_forces
+def _axial_stress_order(ctx: RetrofitContext) -> list[str]:
+    """Return members ordered by ``|N_i| / A_i`` at t_target (descending)."""
+    from ..limitstates import member_axial_forces
 
     temps = _scenario_temps(ctx)
     forces = member_axial_forces(list(ctx.nodes), list(ctx.elements), ctx.loads, temps)
@@ -255,7 +265,7 @@ def _axial_stress_order(ctx: RetrofitContext) -> list:
 
 
 def robust_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
-    """Proposal 'Robust': upgrade the single most-stressed member (|N|/A)."""
+    """Robust strategy: upgrade the single most-stressed member (|N|/A)."""
     order = _axial_stress_order(ctx)
     actions = dict.fromkeys(ctx.member_ids, 0)
     top = order[0]
@@ -275,14 +285,14 @@ def robust_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
 
 
 def redundant_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
-    """In-space equivalent of the proposal's topology-changing 'Redundant'.
+    """In-space equivalent of a topology-changing 'add redundancy' action.
 
-    LIMITATION (documented, prompt-06 task 10): adding a diagonal changes the
-    topology and leaves the common decision space, so a fair comparison is
-    impossible; the equivalent used here upgrades the member with the highest
-    redundancy participation (largest u_max increase when the member is
-    removed) to ``x=3``, whose proxy cost ``c_3 L`` equals the cost the
-    proposal assigned to the added member.
+    LIMITATION (documented): adding a diagonal changes the topology and
+    leaves the common decision space, so a like-for-like comparison is
+    impossible; the equivalent used here upgrades the member with the
+    highest redundancy participation (largest u_max increase when the
+    member is removed) to ``x=3``, whose proxy cost ``c_3 L`` equals the
+    cost assigned to the added member.
     """
     temps = _scenario_temps(ctx)
     setup = build_engine(list(ctx.nodes), list(ctx.elements), ctx.loads, temps)
@@ -290,7 +300,7 @@ def redundant_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
         setup, load_vector(list(ctx.nodes), ctx.loads, setup.free_dofs)
     )
     base_umax = float(np.max(np.abs(u0)))
-    participation: Dict[str, float] = {}
+    participation: dict[str, float] = {}
     for e in ctx.elements:
         kept = [x for x in ctx.elements if x.id != e.id]
         try:
@@ -319,7 +329,7 @@ def redundant_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
 
 
 def stress_based_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
-    """Manual strategy 3: light protection on members in stress order."""
+    """Stress-based strategy: light protection on members in stress order."""
     order = _axial_stress_order(ctx)
     actions = dict.fromkeys(ctx.member_ids, 0)
     for mid in order:
@@ -338,7 +348,7 @@ def stress_based_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
     return RetrofitOutcome(dec, evaluate(ctx, dec))
 
 
-STRATEGIES: Dict[str, Callable[[RetrofitContext], RetrofitOutcome]] = {
+STRATEGIES: dict[str, Callable[[RetrofitContext], RetrofitOutcome]] = {
     "greedy": greedy,
     "exhaustive": exhaustive,
     "robust": robust_strategy,

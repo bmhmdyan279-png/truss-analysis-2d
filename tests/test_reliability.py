@@ -1,4 +1,4 @@
-"""Phase 2 tests for the Monte Carlo reliability engine."""
+"""Tests for the Monte Carlo reliability engine."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+
 from truss_analysis.reliability import (
     AnalysisSample,
     Direction,
@@ -148,13 +149,13 @@ def test_serviceability_limit_state_is_evaluated() -> None:
 
 
 def test_service_limit_rejects_negative_limit() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="non-negative"):
         ServiceLimit(node_id=2, direction=Direction.X, limit=-1.0)
 
 
 def test_engine_rejects_nonpositive_sample_size() -> None:
     engine = ReliabilityEngine(variables={}, analyze_fn=_empty_analysis)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must be positive"):
         engine.run(0)
 
 

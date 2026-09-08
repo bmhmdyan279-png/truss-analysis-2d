@@ -1,4 +1,4 @@
-"""Prompt-7 core-hardening tests: solver guards, D-012, check_energy tol, DDM FD."""
+"""Core-hardening tests: solver guards, energy-check tolerance, DDM FD."""
 
 from __future__ import annotations
 
@@ -8,7 +8,11 @@ import numpy as np
 import pytest
 
 from truss_analysis.assembly import assemble_global_matrices
-from truss_analysis.exceptions import IllConditionedWarning, SingularMatrixError
+from truss_analysis.exceptions import (
+    EnergyValidationError,
+    IllConditionedWarning,
+    SingularMatrixError,
+)
 from truss_analysis.model import Element, Node
 from truss_analysis.reliability_adapter import NodalLoad
 from truss_analysis.sensitivity import IndependentValidator
@@ -85,7 +89,7 @@ def test_check_energy_default_tol_is_tight() -> None:
     work = 0.0
     assert check_energy(U, F, strain, work) is True
     # a 1% energy error must now FAIL by default (legacy tol was 1%)
-    with pytest.raises(Exception):
+    with pytest.raises(EnergyValidationError, match="Energy balance failed"):
         check_energy(U, F, strain * 1.01, work)
 
 

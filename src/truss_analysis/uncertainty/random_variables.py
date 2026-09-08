@@ -1,25 +1,26 @@
 """Random variables with recorded, verification-checked citations.
 
 Legacy classes (``NormalRV``, ``LognormalRV``, ``GumbelRV``) keep their exact
-pre-prompt-6 behaviour; new additions:
+historical behaviour and are complemented by ``TruncatedNormalRV`` and
+``DeterministicRV``.
 
-* ``TruncatedNormalRV`` and ``DeterministicRV``;
-* ``DistributionSpec`` + :func:`proposal_rv_specs`: the proposal §5.4 random
-  variable table with a **citation status** for every entry.  Citation
-  verification was performed on 2026-09-07 (see
-  ``vault/reports/06_citation_checks.md``); unverified clause numbers are NOT
-  asserted in code — they are downgraded to proposal-internal screening
-  choices, per the project honesty rules.
+``DistributionSpec`` and :func:`default_rv_specs` provide a default
+random-variable table in which every entry carries an explicit citation and
+a **citation status**. Citation verification was performed on 2026-09-07:
+clause numbers or coefficient-of-variation values that could not be verified
+verbatim against the cited source are NOT asserted - they are downgraded to
+documented internal screening choices.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any
 
 import numpy as np
-import yaml  # type: ignore[import-untyped]
+import numpy.typing as npt
+import yaml
 from scipy import stats
 
 __all__ = [
@@ -29,21 +30,44 @@ __all__ = [
     "GumbelRV",
     "LognormalRV",
     "NormalRV",
+    "RandomVariable",
     "TruncatedNormalRV",
+    "default_rv_specs",
     "load_distributions_config",
-    "proposal_rv_specs",
 ]
 
 
 class RandomVariable:
-    """Base class for random variables with controlled seeds."""
+    """Base class for random variables with controlled seeds.
+
+    Parameters
+    ----------
+    mean : float
+        Distribution mean.
+    std : float or None
+        Standard deviation; mutually informative with ``cov`` - provide
+        exactly one of the two.
+    cov : float or None
+        Coefficient of variation (``std / mean``); used when ``std`` is
+        not given.
+    seed : int or None
+        Seed of the private ``numpy`` generator (reproducibility).
+
+    Raises
+    ------
+    ValueError
+        If neither ``std`` nor ``cov`` is provided.
+    """
+
+    #: Frozen scipy distribution built by ``_setup_distribution``.
+    dist: Any
 
     def __init__(
         self,
         mean: float,
-        std: Optional[float] = None,
-        cov: Optional[float] = None,
-        seed: Optional[int] = None,
+        std: float | None = None,
+        cov: float | None = None,
+        seed: int | None = None,
     ) -> None:
         self.mean = mean
 
@@ -61,9 +85,11 @@ class RandomVariable:
         self._setup_distribution()
 
     def _setup_distribution(self) -> None:
+        """Build ``self.dist``; subclasses must override."""
         raise NotImplementedError("Subclasses must implement _setup_distribution")
 
     def sample(self, size: int) -> np.ndarray:
+        """Draw ``size`` independent samples from the distribution."""
         raise NotImplementedError("Subclasses must implement sample")
 
 
@@ -71,16 +97,20 @@ class NormalRV(RandomVariable):
     """Normal (Gaussian) distribution."""
 
     def _setup_distribution(self) -> None:
+        """Freeze ``scipy.stats.norm`` at (mean, std)."""
         self.dist = stats.norm(loc=self.mean, scale=self.std)
 
     def sample(self, size: int) -> np.ndarray:
-        return self.dist.rvs(size=size, random_state=self.rng)
+        """Draw ``size`` normal samples with the private generator."""
+        draws: npt.NDArray[np.float64] = self.dist.rvs(size=size, random_state=self.rng)
+        return draws
 
 
 class LognormalRV(RandomVariable):
     """Lognormal distribution. Strictly positive (used for E)."""
 
     def _setup_distribution(self) -> None:
+        """Freeze ``scipy.stats.lognorm`` from (mean, CoV)."""
         # Mathematical mapping from (Mean, CoV) to SciPy's (s, scale)
         # zeta (sigma) = sqrt(ln(1 + cov^2))
         # lambda (mu) = ln(mean) - 0.5 * zeta^2
@@ -89,13 +119,16 @@ class LognormalRV(RandomVariable):
         self.dist = stats.lognorm(s=zeta, scale=np.exp(lambda_))
 
     def sample(self, size: int) -> np.ndarray:
-        return self.dist.rvs(size=size, random_state=self.rng)
+        """Draw ``size`` lognormal samples with the private generator."""
+        draws: npt.NDArray[np.float64] = self.dist.rvs(size=size, random_state=self.rng)
+        return draws
 
 
 class GumbelRV(RandomVariable):
-    """Gumbel (Type I Extreme Value) distribution for maxima (used for Loads)."""
+    """Gumbel (Type I Extreme Value) distribution for maxima (used for loads)."""
 
     def _setup_distribution(self) -> None:
+        """Freeze ``scipy.stats.gumbel_r`` from (mean, std)."""
         # Mathematical mapping from (Mean, CoV) to SciPy's (loc, scale)
         # beta_n (scale) = std * sqrt(6) / pi
         # mu_n (loc) = mean - beta_n * euler_gamma
@@ -104,7 +137,9 @@ class GumbelRV(RandomVariable):
         self.dist = stats.gumbel_r(loc=mu_n, scale=beta_n)
 
     def sample(self, size: int) -> np.ndarray:
-        return self.dist.rvs(size=size, random_state=self.rng)
+        """Draw ``size`` Gumbel samples with the private generator."""
+        draws: npt.NDArray[np.float64] = self.dist.rvs(size=size, random_state=self.rng)
+        return draws
 
 
 class TruncatedNormalRV(RandomVariable):
@@ -116,7 +151,7 @@ class TruncatedNormalRV(RandomVariable):
         std: float,
         low: float,
         high: float,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ) -> None:
         if not low < high:
             msg = f"require low < high, got [{low}, {high}]"
@@ -126,18 +161,21 @@ class TruncatedNormalRV(RandomVariable):
         super().__init__(mean=mean, std=std, seed=seed)
 
     def _setup_distribution(self) -> None:
+        """Freeze ``scipy.stats.truncnorm`` on the standardised bounds."""
         a = (self.low - self.mean) / self.std
         b = (self.high - self.mean) / self.std
         self.dist = stats.truncnorm(a=a, b=b, loc=self.mean, scale=self.std)
 
     def sample(self, size: int) -> np.ndarray:
-        return self.dist.rvs(size=size, random_state=self.rng)
+        """Draw ``size`` truncated-normal samples with the private generator."""
+        draws: npt.NDArray[np.float64] = self.dist.rvs(size=size, random_state=self.rng)
+        return draws
 
 
 class DeterministicRV:
     """Degenerate 'random' variable: a fixed value (e.g. E per EN 1993-1-1)."""
 
-    def __init__(self, value: float, seed: Optional[int] = None) -> None:
+    def __init__(self, value: float, seed: int | None = None) -> None:
         del seed  # determinism needs no randomness
         self.value = float(value)
         self.mean = self.value
@@ -145,58 +183,106 @@ class DeterministicRV:
         self.cov = 0.0
 
     def sample(self, size: int) -> np.ndarray:
+        """Return ``size`` copies of the fixed value."""
         return np.full(size, self.value)
 
 
-def load_distributions_config(config_path: Union[str, Path]) -> dict:
-    """Loads the YAML configuration for distribution mappings."""
+def load_distributions_config(config_path: str | Path) -> dict[str, Any]:
+    """Load the YAML configuration for distribution mappings.
+
+    Parameters
+    ----------
+    config_path : str or Path
+        Path to the YAML configuration file.
+
+    Returns
+    -------
+    dict[str, Any]
+        Parsed configuration mapping.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``config_path`` does not exist.
+    """
     path = Path(config_path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    with open(path, encoding="utf-8") as f:
+        data: dict[str, Any] = yaml.safe_load(f)
+    return data
 
 
 @dataclass(frozen=True)
 class DistributionSpec:
-    """One row of the proposal §5.4 random-variable table, with provenance."""
+    """One row of the default random-variable table, with provenance.
+
+    Attributes
+    ----------
+    name : str
+        Variable identifier (e.g. ``"live_load"``).
+    family : str
+        Distribution family (``gumbel``, ``lognormal``,
+        ``truncated_normal``, ``deterministic``).
+    parameters : dict[str, Any]
+        Family-specific shape parameters (e.g. ``{"cov": 0.20}``).
+    citation : str
+        Source attribution or an explicit statement that the value is an
+        internal modelling choice.
+    citation_status : str
+        One of: ``verified`` | ``verified-corrected`` | ``family-verified``
+        | ``internal-screening`` | ``not-found``.
+    note : str
+        Units and role of the variable in a reliability model.
+    """
 
     name: str
     family: str
-    parameters: dict
+    parameters: dict[str, Any]
     citation: str
-    #: one of: verified | verified-corrected | family-verified |
-    #: proposal-internal | not-found (see 06_citation_checks.md)
     citation_status: str
     note: str
 
 
 #: Citation statuses recorded during the 2026-09-07 verification session.
-#: Full evidence trail: ``vault/reports/06_citation_checks.md``.
-SPECIES_CITATION_STATUS = {
+SPECIES_CITATION_STATUS: dict[str, str] = {
     "live_load": "family-verified / clause-not-found",
-    "f_y": "family-verified / value-proposal",
-    "fire_intensity": "proposal-internal",
+    "f_y": "family-verified / value-internal",
+    "fire_intensity": "internal-screening",
     "E": "verified-corrected",
 }
 
 
-def proposal_rv_specs(fire_scenario_temperature: float = 600.0) -> tuple:
-    """The proposal §5.4 random-variable table with verified citations.
+def default_rv_specs(
+    fire_scenario_temperature: float = 600.0,
+) -> tuple[DistributionSpec, ...]:
+    """Return the default random-variable table with verified citations.
 
-    Verification outcomes (2026-09-07, see ``06_citation_checks.md``):
+    Verification outcomes (checked 2026-09-07):
 
-    * live load — Gumbel family for imposed loads is confirmed by secondary
-      literature on the JCSS Probabilistic Model Code; the exact clause
-      "4.1.2" and COV 0.20 could not be verified verbatim, so the COV is
-      recorded as a proposal screening choice (NOT attributed to JCSS).
-    * f_y — lognormal family is supported by EN 1990:2002 (which discusses
-      lognormal resistance variables but gives no COV); COV 0.05 is a proposal
-      screening choice consistent with JCSS resistance-model ranges.
-    * fire intensity — truncated normal is an internal modelling choice
-      (proposal §5.4); no external claim is made.
-    * E — EN 1993-1-1:2005 clause 3.2.6 verified verbatim: E = 210 000
-      N/mm²; the proposal's "200 GPa" is corrected here.
+    * live load - the Gumbel family for imposed loads is confirmed by
+      secondary literature on the JCSS Probabilistic Model Code; the exact
+      clause "4.1.2" and COV 0.20 could not be verified verbatim, so the
+      COV is recorded as an internal screening choice (NOT attributed to
+      the JCSS code itself).
+    * f_y - the lognormal family is supported by EN 1990:2002 (which
+      discusses lognormal resistance variables but gives no COV); COV 0.05
+      is an internal screening choice consistent with JCSS
+      resistance-model ranges.
+    * fire intensity - the truncated normal is an internal modelling
+      choice; no external claim is made.
+    * E - EN 1993-1-1:2005 clause 3.2.6 verified verbatim: E = 210 000
+      N/mm2.
+
+    Parameters
+    ----------
+    fire_scenario_temperature : float, default 600.0
+        Mean of the truncated-normal fire-intensity variable [degC].
+
+    Returns
+    -------
+    tuple[DistributionSpec, ...]
+        ``(live_load, f_y, fire_intensity, E)`` in this order.
     """
     return (
         DistributionSpec(
@@ -207,8 +293,7 @@ def proposal_rv_specs(fire_scenario_temperature: float = 600.0) -> tuple:
                 "Gumbel family for imposed loads: JCSS Probabilistic "
                 "Model Code (load models), secondary-verified "
                 "2026-09-07; clause '4.1.2' and COV value NOT "
-                "verbatim-verifiable -> COV = proposal §5.4 "
-                "screening choice"
+                "verbatim-verifiable -> COV = internal screening choice"
             ),
             citation_status=SPECIES_CITATION_STATUS["live_load"],
             note="multiplicative load scaler, mean 1.0",
@@ -219,7 +304,7 @@ def proposal_rv_specs(fire_scenario_temperature: float = 600.0) -> tuple:
             parameters={"cov": 0.05},
             citation=(
                 "lognormal family: EN 1990:2002 (lognormal suited to resistance "
-                "variables; no COV given there); COV 0.05 = proposal §5.4 screening "
+                "variables; no COV given there); COV 0.05 = internal screening "
                 "choice (JCSS resistance models: ~0.05-0.07 for steel yield)"
             ),
             citation_status=SPECIES_CITATION_STATUS["f_y"],
@@ -234,7 +319,7 @@ def proposal_rv_specs(fire_scenario_temperature: float = 600.0) -> tuple:
                 "low": 20.0,
                 "high": 1000.0,
             },
-            citation="proposal §5.4 (internal modelling choice; no external claim)",
+            citation="internal modelling choice; no external claim",
             citation_status=SPECIES_CITATION_STATUS["fire_intensity"],
             note="member/scenario temperature [degC]",
         ),
@@ -244,8 +329,7 @@ def proposal_rv_specs(fire_scenario_temperature: float = 600.0) -> tuple:
             parameters={"value": 210.0e9},
             citation=(
                 "EN 1993-1-1:2005 clause 3.2.6: E = 210 000 N/mm2 "
-                "(verified verbatim 2026-09-07; proposal value "
-                "200 GPa corrected)"
+                "(verified verbatim 2026-09-07)"
             ),
             citation_status=SPECIES_CITATION_STATUS["E"],
             note="elastic modulus [Pa], deterministic",

@@ -1,9 +1,11 @@
 """Uncertainty layer: random variables, sampling, streaming statistics.
 
-Package evolution (prompt-06): the former single module ``uncertainty.py``
-became this package.  The legacy public API (``NormalRV``, ``LognormalRV``,
-``GumbelRV``, ``load_distributions_config``) is preserved verbatim in
-:mod:`random_variables` and re-exported here.
+The legacy public API of the former single-module interface (``NormalRV``,
+``LognormalRV``, ``GumbelRV``, ``load_distributions_config``) is preserved
+verbatim in :mod:`.random_variables` and re-exported here, alongside the
+sampling utilities (:mod:`.sampling`), the memory-bounded streaming
+accumulator (:mod:`.streaming`) and the probabilistic ranking operator
+(:mod:`.probabilistic_ranking`).
 """
 
 from __future__ import annotations
@@ -18,8 +20,8 @@ from .random_variables import (
     NormalRV,
     RandomVariable,
     TruncatedNormalRV,
+    default_rv_specs,
     load_distributions_config,
-    proposal_rv_specs,
 )
 from .sampling import (
     gaussian_copula_correlate,
@@ -39,10 +41,10 @@ __all__ = [
     "RandomVariable",
     "RunningStat",
     "TruncatedNormalRV",
+    "default_rv_specs",
     "gaussian_copula_correlate",
     "latin_hypercube",
     "load_distributions_config",
     "probabilistic_ranking",
-    "proposal_rv_specs",
     "sample_spec_matrix",
 ]

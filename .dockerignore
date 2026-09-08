@@ -28,3 +28,10 @@ PROJECT_DOCUMENTATION/
 .vscode/
 .idea/
 *.pdf
+
+# Build artifacts and private directories (defensive: never enter the image)
+dist/
+build/
+*.egg-info/
+vault/
+STATE/

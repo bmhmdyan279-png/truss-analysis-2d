@@ -1,9 +1,10 @@
-"""Tests for Phase 5 IndependentValidator."""
+"""Tests for the independent validator (sensitivity checks)."""
 
 import json
 from pathlib import Path
 
 import pytest
+
 from truss_analysis.model import Element, Node
 from truss_analysis.reliability_adapter import NodalLoad
 from truss_analysis.sensitivity import IndependentValidator
@@ -20,7 +21,7 @@ def _create_simple_truss() -> tuple[list[Node], list[Element], list[NodalLoad]]:
         Element(id="2", node_i="2", node_j="3", E=200e9, A=0.01),
         # bottom chord: without it the two-member "truss" is a kinematic
         # mechanism (rank(K_ff)=2 < 3 free DOFs); the legacy solver solved it
-        # silently (D-012); the prompt-7 rank check raises instead.
+        # silently; the rank guard raises instead.
         Element(id="3", node_i="1", node_j="2", E=200e9, A=0.01),
     ]
     loads = [NodalLoad(node_id="3", fx=1000.0, fy=-2000.0)]
@@ -69,7 +70,7 @@ def test_independent_validator_with_reference_problem() -> None:
     if not ref_path.exists():
         pytest.skip("reference_problem.json not found")
 
-    with open(ref_path, "r", encoding="utf-8") as f:
+    with open(ref_path, encoding="utf-8") as f:
         data = json.load(f)
 
     nodes = [

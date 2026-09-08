@@ -1,8 +1,9 @@
-"""Golden + physical + negative-regression tests for the EN 1993-1-2 SSOT.
+"""Golden, physical and negative-regression tests for the EN 1993-1-2
+single-source material module.
 
 Every expected number here is either (a) read from the provenance fixture
-(exact equality required by prompt-03: "تک‌تک نقاط Table 3.1 دقیقاً برابر
-fixture") or (b) recomputed inside the test from the fixture's own
+(exact equality: every Table 3.1 point must match the fixture to the last
+digit) or (b) recomputed inside the test from the fixture's own
 coefficients using the standard's closed-form equations (figure 3.1,
 eq. 3.1a-c, 3.2a-d, 3.3a-b).  No material number is hard-coded.
 """
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 from truss_analysis.material import steel_eurocode as ss
 from truss_analysis.thermal.material import get_eurocode_k_E, get_eurocode_k_y
 
@@ -114,7 +116,8 @@ def test_monotonic_non_increasing() -> None:
 def test_bounds_zero_one() -> None:
     for fn in (ss.k_y, ss.k_p, ss.k_E):
         values = np.asarray(fn(GRID), float)
-        assert np.all(values >= 0.0) and np.all(values <= 1.0)
+        assert np.all(values >= 0.0)
+        assert np.all(values <= 1.0)
 
 
 def test_clamping_not_extrapolation_not_silent_zero() -> None:
@@ -180,7 +183,7 @@ def _piece_eval(piece: dict, t: float) -> float:
 
 
 @pytest.mark.parametrize(
-    "section,fn",
+    ("section", "fn"),
     [
         ("thermal_elongation", ss.alpha),
         ("specific_heat", ss.specific_heat),
@@ -310,12 +313,12 @@ def test_stress_strain_degenerate_and_errors() -> None:
     assert ss.stress_strain(mid, 20.0) == pytest.approx(law20["fy"], rel=1e-12)
     # dead material at 1200 degC
     assert ss.stress_strain(0.01, 1200.0) == 0.0
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="zero strength"):
         ss.stress_strain(1.0, 1200.0, branch="eps_of_sigma")
     # above yield: no ascending-path pre-image
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"figure 3\.1"):
         ss.stress_strain(1e9, 600.0, branch="eps_of_sigma")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="branch must be"):
         ss.stress_strain(0.01, 600.0, branch="nonsense")
 
 
@@ -348,7 +351,7 @@ FABRICATED = [
 ]
 
 
-@pytest.mark.parametrize("fn,theta,forbidden,origin", FABRICATED)
+@pytest.mark.parametrize(("fn", "theta", "forbidden", "origin"), FABRICATED)
 def test_fabricated_values_not_reproduced(
     fn, theta: float, forbidden: float, origin: str
 ) -> None:
@@ -365,9 +368,9 @@ def test_old_fake_vectors_differ_substantially() -> None:
 # compatibility layer
 # --------------------------------------------------------------------------
 def test_compat_layer_delegates_with_warning() -> None:
-    with pytest.warns(DeprecationWarning):
+    with pytest.warns(DeprecationWarning, match="deprecated"):
         assert get_eurocode_k_E(600.0) == ss.k_E(600.0)
-    with pytest.warns(DeprecationWarning):
+    with pytest.warns(DeprecationWarning, match="deprecated"):
         assert get_eurocode_k_y(600.0) == ss.k_y(600.0)
-    with pytest.warns(DeprecationWarning):
+    with pytest.warns(DeprecationWarning, match="deprecated"):
         assert get_eurocode_k_E(1100.0) == 0.0225  # legacy 0.0 is gone

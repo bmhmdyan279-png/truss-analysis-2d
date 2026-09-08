@@ -1,4 +1,4 @@
-"""Equivalence of the rank-1 engine against brute force (prompt-04 §A2).
+"""Equivalence of the rank-1 engine against brute force.
 
 The most important test of the project: on >=30 seeded random trusses and on
 all 21 campaign topologies, the Sherman-Morrison CI sweep must agree with a
@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 from truss_analysis.assembly import assemble_global_matrices
 from truss_analysis.criticality import (
     MechanismError,
@@ -25,7 +26,7 @@ from truss_analysis.criticality import (
 )
 from truss_analysis.criticality.engine import base_displacement, load_vector
 from truss_analysis.criticality.scenarios import get_scenario_temperatures
-from truss_analysis.material.steel_eurocode import k_E as ssot_k_E
+from truss_analysis.material.steel_eurocode import k_E as eurocode_k_E
 from truss_analysis.model import Element, Node
 from truss_analysis.topology_generator import generate_topology
 
@@ -167,7 +168,7 @@ def test_guard_routes_near_mechanism_and_flags_it(campaign) -> None:
 
 
 def test_woodbury_rank_r_matches_full_resolve(campaign) -> None:
-    cm = next(c for c in campaign if c.name == "warren_6_H1")
+    cm = next(c for c in campaign if c.name == "warren_6_shallow")
     temps = get_scenario_temperatures(cm.nodes, cm.elements, "local_mid", 600.0)
     setup = build_engine(cm.nodes, cm.elements, cm.loads, temps)
     u = base_displacement(setup, load_vector(cm.nodes, cm.loads, setup.free_dofs))
@@ -175,11 +176,12 @@ def test_woodbury_rank_r_matches_full_resolve(campaign) -> None:
     alphas = [0.5, 0.7, 0.9]
     u_multi = perturb_multi(setup, u, idx, alphas)
 
-    k_scale = {e.id: float(ssot_k_E(temps[e.id])) for e in cm.elements}
-    for i, a in zip(idx, alphas):
+    k_scale = {e.id: float(eurocode_k_E(temps[e.id])) for e in cm.elements}
+    for i, a in zip(idx, alphas, strict=True):
         k_scale[cm.elements[i].id] *= a
     b, k = member_matrices(cm.nodes, cm.elements, k_scale)
     from scipy.linalg import lu_factor, lu_solve
+
     from truss_analysis.criticality.engine import free_dof_indices
 
     free = free_dof_indices(cm.nodes)
@@ -195,5 +197,6 @@ def test_no_deepcopy_in_criticality_package() -> None:
 
 def test_engine_module_documents_validity_limit() -> None:
     src = (PACKAGE_DIR / "engine.py").read_text(encoding="utf-8")
-    assert "single-member" in src and "Woodbury" in src
+    assert "single-member" in src
+    assert "Woodbury" in src
     assert "perturb_multi" in inspect.getsource(perturb_multi)

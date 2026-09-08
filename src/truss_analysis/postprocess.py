@@ -1,21 +1,53 @@
-"""Post-processing: element forces, reactions, equilibrium, buckling."""
+"""Post-processing: element forces, reactions, equilibrium and buckling."""
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
+from .model import Element, Node
 
-def calculate_element_forces(nodes, elements, U):
-    """Calculate axial forces, strain energy, and prestress work.
 
-    Physical model:
-    - delta_L_total: total elongation from nodal displacements
-    - delta_L_thermal: thermal elongation = alpha * delta_T * L
-    - delta_L_prestress: total prestress elongation (thermal + fabrication)
-    - delta_L_mech: mechanical elongation = delta_L_total - delta_L_prestress
-    - N: axial force from mechanical elongation only
+def calculate_element_forces(
+    nodes: list[Node],
+    elements: list[Element],
+    U: np.ndarray,
+) -> tuple[list[dict[str, Any]], float, float]:
+    """Compute axial forces, strain energy and prestress work per element.
+
+    The mechanical elongation is the total elongation from nodal
+    displacements minus the imposed (thermal + fabrication) elongation;
+    only the mechanical part produces axial force.
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes (ordering defines the DOF map).
+    elements : list[Element]
+        Model elements.
+    U : np.ndarray
+        Global displacement vector, shape ``(2n,)``.
+
+    Returns
+    -------
+    tuple[list[dict[str, Any]], float, float]
+        ``(results, strain_energy, prestress_work)`` where ``results`` holds
+        one dict per element with keys ``id``, ``N``, ``delta_L_mech``,
+        ``delta_L_prestress`` and ``status`` (``"Tension"``,
+        ``"Compression"``, ``"Zero"`` or ``"ZERO_LENGTH"``).
+
+    Notes
+    -----
+    Per-element quantities:
+
+    - ``delta_L_total``: elongation from nodal displacements
+    - ``delta_L_thermal = alpha * delta_T * L``
+    - ``delta_L_prestress = delta_L_thermal + delta_L_free``
+    - ``delta_L_mech = delta_L_total - delta_L_prestress``
+    - ``N = (E A / L) * delta_L_mech`` (positive = tension)
     """
-    results = []
+    results: list[dict[str, Any]] = []
     strain_energy = 0.0
     prestress_work = 0.0
     node_map = {node.id: i for i, node in enumerate(nodes)}
@@ -74,11 +106,37 @@ def calculate_element_forces(nodes, elements, U):
     return results, float(strain_energy), float(prestress_work)
 
 
-def calculate_reactions(nodes, K, U, F_ext, fixed_dofs):
-    """Support reactions: R = K*U - F_ext at constrained DOFs."""
+def calculate_reactions(
+    nodes: list[Node],
+    K: np.ndarray,
+    U: np.ndarray,
+    F_ext: np.ndarray,
+    fixed_dofs: list[int],
+) -> dict[str, dict[str, float]]:
+    """Compute support reactions from ``R = K U - F_ext`` at constrained DOFs.
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes.
+    K : np.ndarray
+        Global stiffness matrix.
+    U : np.ndarray
+        Global displacement vector.
+    F_ext : np.ndarray
+        Global external force vector (mechanical + thermal).
+    fixed_dofs : list[int]
+        Indices of constrained degrees of freedom.
+
+    Returns
+    -------
+    dict[str, dict[str, float]]
+        Map ``node_id -> {"Fx": ..., "Fy": ...}``; a component is ``0.0``
+        when the corresponding DOF is not constrained.
+    """
     R = K @ U - F_ext
     fixed = set(fixed_dofs)
-    reactions = {}
+    reactions: dict[str, dict[str, float]] = {}
     for i, node in enumerate(nodes):
         dx_fixed = 2 * i in fixed
         dy_fixed = 2 * i + 1 in fixed
@@ -90,8 +148,31 @@ def calculate_reactions(nodes, K, U, F_ext, fixed_dofs):
     return reactions
 
 
-def check_equilibrium(nodes, reactions, applied_loads, tol=1e-6):
-    """Global static equilibrium: sum(Fx)=0, sum(Fy)=0, sum(M)=0."""
+def check_equilibrium(
+    nodes: list[Node],
+    reactions: dict[str, dict[str, float]],
+    applied_loads: list[dict[str, Any]],
+    tol: float = 1e-6,
+) -> dict[str, Any]:
+    """Check global static equilibrium: sum(Fx) = sum(Fy) = sum(M) = 0.
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes (used for moment arms).
+    reactions : dict[str, dict[str, float]]
+        Support reactions as returned by :func:`calculate_reactions`.
+    applied_loads : list[dict[str, Any]]
+        Applied nodal loads with keys ``node_id``, ``Fx``, ``Fy``.
+    tol : float, default 1e-6
+        Relative tolerance scaled by the magnitudes present in the model.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``{"sum_fx", "sum_fy", "sum_m", "is_valid"}`` with the raw residual
+        sums and the scaled pass/fail verdict.
+    """
     coords = {node.id: (node.x, node.y) for node in nodes}
     sum_fx = sum_fy = sum_m = 0.0
 
@@ -129,17 +210,44 @@ def check_equilibrium(nodes, reactions, applied_loads, tol=1e-6):
     }
 
 
-def calculate_buckling(nodes, elements, results, tol=1e-12):
-    """Euler buckling: P_cr = pi^2*E*I/L^2 for compressed members."""
+def calculate_buckling(
+    nodes: list[Node],
+    elements: list[Element],
+    results: list[dict[str, Any]],
+    tol: float = 1e-12,
+) -> list[dict[str, Any]]:
+    """Report Euler buckling utilisation for compressed members.
+
+    Uses the pin-ended Euler load ``P_cr = pi^2 E I / L^2``; members in
+    tension (or with negligible force, length or second moment of area)
+    are reported with ``P_cr = None`` and ``safe = True``.
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes.
+    elements : list[Element]
+        Model elements (``I_sec`` must be set for a meaningful check).
+    results : list[dict[str, Any]]
+        Element force results from :func:`calculate_element_forces`.
+    tol : float, default 1e-12
+        Numerical zero threshold for force, length and section values.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        One entry per element with keys ``id``, ``N``, ``length``,
+        ``P_cr``, ``ratio`` (= ``-N / P_cr``), ``slenderness`` and ``safe``.
+    """
     coords = {node.id: node for node in nodes}
     forces = {str(r.get("id")): float(r.get("N", 0.0)) for r in results}
-    report = []
+    report: list[dict[str, Any]] = []
 
     for e in elements:
         ni, nj = coords[e.node_i], coords[e.node_j]
         L = float(np.hypot(nj.x - ni.x, nj.y - ni.y))
         N = forces.get(str(e.id), 0.0)
-        entry = {
+        entry: dict[str, Any] = {
             "id": e.id,
             "N": N,
             "length": L,
@@ -149,9 +257,9 @@ def calculate_buckling(nodes, elements, results, tol=1e-12):
             "safe": True,
         }
 
-        if N < -tol and L > tol and e.I_sec > tol:
+        if -tol > N and tol < L and e.I_sec > tol:
             p_cr = float(np.pi**2 * e.E * e.I_sec / L**2)
-            r_gyr = float(np.sqrt(e.I_sec / e.A)) if e.A > tol else 0.0
+            r_gyr = float(np.sqrt(e.I_sec / e.A)) if tol < e.A else 0.0
             entry["P_cr"] = p_cr
             entry["ratio"] = -N / p_cr
             entry["slenderness"] = L / r_gyr if r_gyr > tol else None

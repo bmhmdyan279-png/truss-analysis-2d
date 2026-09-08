@@ -10,7 +10,7 @@ NC1  statically determinate truss: every member is structurally
      flags EVERY member as mechanism with CI = +inf (never a silent finite
      number).  tau degenerates to None, never to a fake 1.0 or 0.0.
 NC2  uniform thermal scenario: tau = 1 within 1e-8 and the CI vector is
-     element-wise identical to the ambient one (Lemma 1, measured).
+     element-wise identical to the ambient one (uniform-field invariance, measured).
 NC3  symmetric topology under mirrored local scenarios: local_left and
      local_right CI fields are mirror images (values equal on mirrored
      members; rank lists equal up to the identifier tie-break convention,
@@ -27,12 +27,13 @@ import math
 
 import numpy as np
 import pytest
+
 from truss_analysis.criticality import compute_ci_for_topology, tau_b
 from truss_analysis.graph_validation import structural_report
 from truss_analysis.topology_generator import TopologyGenerator
 
 CONTROL_INDICES = (1, 2, 3)
-SYMMETRIC_CASES = ("warren_4_H1", "pratt_6_H1", "howe_8_H2", "control_1")
+SYMMETRIC_CASES = ("warren_4_shallow", "pratt_6_shallow", "howe_8_deep", "control_1")
 
 
 def _model(campaign, name):
@@ -79,7 +80,9 @@ def test_nc1_tau_b_rejects_nonfinite_fields():
 # --------------------------------------------------------------------- NC2
 
 
-@pytest.mark.parametrize("name", ("warren_6_H1", "pratt_4_H1", "howe_8_H1"))
+@pytest.mark.parametrize(
+    "name", ["warren_6_shallow", "pratt_4_shallow", "howe_8_shallow"]
+)
 def test_nc2_uniform_scenario_tau_one(campaign, name):
     cm = _model(campaign, name)
     base = compute_ci_for_topology(cm.nodes, cm.elements, cm.loads, {}, "uniform", 20.0)
@@ -138,11 +141,11 @@ def test_nc3_local_left_right_are_mirror_images(campaign, name):
 
 
 @pytest.mark.parametrize(
-    "name,scenario,temperature",
+    ("name", "scenario", "temperature"),
     [
-        ("warren_6_H1", "uniform", 600.0),
-        ("pratt_8_H2", "local_left", 400.0),
-        ("howe_4_H1", "local_mid", 800.0),
+        ("warren_6_shallow", "uniform", 600.0),
+        ("pratt_8_deep", "local_left", 400.0),
+        ("howe_4_shallow", "local_mid", 800.0),
     ],
 )
 def test_nc4_alpha_one_ci_exactly_zero(campaign, name, scenario, temperature):
@@ -158,7 +161,7 @@ def test_nc4_alpha_one_ci_exactly_zero(campaign, name, scenario, temperature):
 # --------------------------------------------------------------------- NC5
 
 
-@pytest.mark.parametrize("name", ("warren_4_H1", "control_2"))
+@pytest.mark.parametrize("name", ["warren_4_shallow", "control_2"])
 def test_nc5_zero_load_is_flagged_not_nan(campaign, name):
     cm = _model(campaign, name)
     empty = compute_ci_for_topology(cm.nodes, cm.elements, {}, {}, "uniform", 600.0)

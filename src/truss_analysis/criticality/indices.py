@@ -1,20 +1,16 @@
-"""Normalized Criticality Index — one function, one documented policy.
+"""Normalized Criticality Index - one function, one documented policy.
 
-Pre-prompt-4 the package carried two NCI implementations with conflicting
-degenerate-case policies (``compute_normalized_ci`` returned 1.0,
-``compute_nci`` returned 0.5; CONTEXT_LOCK §4.5 B2).  Both fabricated
-informative-looking numbers for a field that carries no information when
-``max(CI) ≈ min(CI)``.
-
-Policy now (DL-022): the degenerate case returns ``values=None`` with
-``is_degenerate=True``; callers must surface the flag instead of inventing a
-number.  This module defines the package's only ``compute_n*`` function.
+Policy: when the CI field carries no ordering information
+(``max(CI) ~= min(CI)`` within ``1e-12``) the degenerate case returns
+``values=None`` with ``is_degenerate=True``; callers must surface the flag
+instead of inventing an informative-looking number.  This module defines
+the package's only ``compute_n*`` function.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional
 
 __all__ = ["NciResult", "compute_nci"]
 
@@ -25,7 +21,7 @@ _DEGENERACY_ATOL = 1e-12
 class NciResult:
     """NCI field plus its degeneracy flag and the observed CI range."""
 
-    values: Optional[Dict[str, float]]
+    values: dict[str, float] | None
     is_degenerate: bool
     min_ci: float
     max_ci: float

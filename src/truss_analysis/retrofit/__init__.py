@@ -1,4 +1,4 @@
-"""Retrofit triage with a documented decision -> physics map (prompt-06, C)."""
+"""Retrofit triage with a documented decision -> physics map."""
 
 from __future__ import annotations
 

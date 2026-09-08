@@ -1,7 +1,8 @@
 """Streaming (running) statistics for memory-bounded Monte Carlo.
 
-Prompt-06 part B8: with ~1 GB RAM the campaign must never hold all samples'
-results at once; batches of samples are folded into Welford accumulators.
+With limited RAM a large study must never hold all samples' results at
+once; batches of samples are folded into Welford accumulators instead, so
+memory use stays constant in the number of samples.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ class RunningStat:
     _m2: float = 0.0
 
     def add(self, x: float) -> None:
+        """Fold a single scalar observation into the accumulator."""
         self.count += 1
         delta = x - self.mean
         self.mean += delta / self.count
@@ -48,13 +50,16 @@ class RunningStat:
 
     @property
     def variance(self) -> float:
+        """Return the sample variance (ddof=1); 0.0 for fewer than 2 points."""
         if self.count < 2:
             return 0.0
         return self._m2 / (self.count - 1)
 
     @property
     def std(self) -> float:
+        """Return the sample standard deviation (ddof=1)."""
         return float(np.sqrt(self.variance))
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, float]:
+        """Return ``{"count", "mean", "std"}`` as plain floats."""
         return {"count": self.count, "mean": self.mean, "std": self.std}

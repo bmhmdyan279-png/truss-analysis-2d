@@ -1,6 +1,6 @@
-"""Exact rank-1 criticality engine (Sherman–Morrison) and the CI pipeline.
+"""Exact rank-1 criticality engine (Sherman-Morrison) and the CI pipeline.
 
-Mathematics (verified in CONTEXT_LOCK §4.9 and by ``test_engine_equivalence``)
+Mathematics (verified against independent full re-solves in the test suite)
 --------------------------------------------------------------------------
 Reducing the axial stiffness of a single truss member is a **rank-1 update**
 of the global stiffness matrix, because ``k_i = (E_i A_i / L_i) b_i b_i^T``
@@ -17,7 +17,7 @@ vectorised pass:
     U_pert = u - Z diag(coef)          -> column i = perturbed state of member i
     CI_i   = max|U_pert[:, i]| / max|u| - 1
 
-Validity limit (explicit, prompt-04 §A1)
+Validity limit (explicit)
 -----------------------------------------
 The rank-1 path is exact **only for single-member perturbations**.  For
 simultaneous multi-member perturbations (retrofit studies) use
@@ -25,30 +25,30 @@ simultaneous multi-member perturbations (retrofit studies) use
 rank-1 formula member-by-member to a multi-member change is wrong and no
 public function here does it.
 
-Numerical guard (prompt-04 §A1)
+Numerical guard
 -------------------------------
 ``1 + Delta_i d_i -> 0`` means the perturbed structure is (near) a mechanism.
 Such members are flagged and routed to a full brute-force solve; if that
 solve is singular the member CI is ``+inf`` with a ``mechanism`` flag.  The
 engine never emits a silent finite number for a guarded member.
 
-No deep copying of element containers anywhere in this package
-(prompt-04 §A4): perturbed states are built from the rank-1/rank-r formulas
+No deep copying of element containers anywhere in this package:
+perturbed states are built from the rank-1/rank-r formulas
 or from fresh dataclass instances via :func:`dataclasses.replace`.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve
-from truss_analysis.material.steel_eurocode import FloatOrArray
-from truss_analysis.material.steel_eurocode import k_E as ssot_k_E
-from truss_analysis.model import Element, Node
 
+from ..material.steel_eurocode import FloatOrArray
+from ..material.steel_eurocode import k_E as eurocode_k_E
+from ..model import Element, Node
 from .indices import NciResult, compute_nci
 from .ranking import TauResult, rank_members, tau_b
 from .scenarios import T_AMBIENT, get_scenario_temperatures
@@ -56,9 +56,9 @@ from .scenarios import T_AMBIENT, get_scenario_temperatures
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "GUARD_TOL",
     "CiSweep",
     "EngineSetup",
-    "GUARD_TOL",
     "MechanismError",
     "TopologyResult",
     "base_displacement",
@@ -87,23 +87,23 @@ class TopologyResult:
     scenario: str
     temperature: float
     alpha: float
-    ci_values: Dict[str, float]
-    nci_values: Optional[Dict[str, float]]
-    ranks: List[str]
-    top_5: List[str]
-    tau_vs_base: Optional[float]
+    ci_values: dict[str, float]
+    nci_values: dict[str, float] | None
+    ranks: list[str]
+    top_5: list[str]
+    tau_vs_base: float | None
     u_max_base: float
     u_max_perturbed_max: float
-    flags: Dict[str, str] = field(default_factory=dict)
+    flags: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class EngineSetup:
     """Factorised base state plus the rank-1 machinery for all members."""
 
-    ids: Tuple[str, ...]
-    free_dofs: Tuple[int, ...]
-    lu: Tuple[np.ndarray, np.ndarray]
+    ids: tuple[str, ...]
+    free_dofs: tuple[int, ...]
+    lu: tuple[np.ndarray, np.ndarray]
     b_free: np.ndarray  # (nE, ndof_free)
     k_axial: np.ndarray  # (nE,)
     z: np.ndarray  # (ndof_free, nE) = K_ff^-1 B
@@ -114,13 +114,13 @@ class EngineSetup:
 class CiSweep:
     """Full CI sweep over all members in one vectorised pass."""
 
-    ci_values: Dict[str, float]
+    ci_values: dict[str, float]
     u_pert: np.ndarray  # (ndof_free, nE); +inf columns mark mechanisms
-    flagged: Dict[str, str]
+    flagged: dict[str, str]
     u_max_perturbed_max: float
 
 
-def free_dof_indices(nodes: Sequence[Node]) -> Tuple[int, ...]:
+def free_dof_indices(nodes: Sequence[Node]) -> tuple[int, ...]:
     fixed = set()
     for i, node in enumerate(nodes):
         if node.is_support:
@@ -135,7 +135,7 @@ def member_matrices(
     nodes: Sequence[Node],
     elements: Sequence[Element],
     k_scale: Mapping[str, float] | None = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Compatibility vectors ``b`` (nE x ndof) and axial stiffnesses ``k``."""
     node_idx = {n.id: i for i, n in enumerate(nodes)}
     n_dof = 2 * len(nodes)
@@ -154,7 +154,7 @@ def member_matrices(
     return b, k
 
 
-def _check_lu(lu: Tuple[np.ndarray, np.ndarray]) -> None:
+def _check_lu(lu: tuple[np.ndarray, np.ndarray]) -> None:
     lu_mat, _piv = lu  # scipy packs L and U into one matrix; second item is pivots
     diag = np.abs(np.diag(lu_mat))
     scale = max(float(np.max(diag)), 1.0)
@@ -168,12 +168,13 @@ def build_engine(
     elements: Sequence[Element],
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float] | None = None,
-    k_e_func: Callable[[FloatOrArray], FloatOrArray] = ssot_k_E,
+    k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
 ) -> EngineSetup:
     """Factorise the (thermally degraded) base state for rank-1 sweeps.
 
     ``temps`` maps member id -> steel temperature [degC]; ``E_i`` is scaled by
-    ``k_e_func(T_i)`` (EN 1993-1-2 SSOT by default).  ``loads`` is kept in the
+    ``k_e_func(T_i)`` (EN 1993-1-2 material model by default).  ``loads`` is
+    kept in the
     signature for API symmetry but the force vector is built by
     :func:`load_vector` at solve time.
     """
@@ -217,8 +218,9 @@ def load_vector(
 
 
 def base_displacement(setup: EngineSetup, f_free: np.ndarray) -> np.ndarray:
-    """Base (unperturbed) displacement field on the free DOFs."""
-    return lu_solve(setup.lu, f_free)
+    """Return the base (unperturbed) displacement field on the free DOFs."""
+    u: np.ndarray = lu_solve(setup.lu, f_free)
+    return u
 
 
 def _solve_perturbed_full(
@@ -228,9 +230,9 @@ def _solve_perturbed_full(
     temps: Mapping[str, float],
     alpha: float,
     member_index: int,
-    k_e_func: Callable[[FloatOrArray], FloatOrArray] = ssot_k_E,
+    k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
 ) -> np.ndarray:
-    """Reference solve with member ``member_index`` additionally scaled by alpha."""
+    """Solve the reference system with one member additionally scaled by alpha."""
     k_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
     k_scale[elements[member_index].id] *= alpha
     b, k = member_matrices(nodes, elements, k_scale)
@@ -238,7 +240,8 @@ def _solve_perturbed_full(
     k_ff = np.einsum("i,ip,iq->pq", k, b, b)[np.ix_(free, free)]
     lu = lu_factor(k_ff)
     _check_lu(lu)
-    return lu_solve(lu, load_vector(nodes, loads, free))
+    u_pert: np.ndarray = lu_solve(lu, load_vector(nodes, loads, free))
+    return u_pert
 
 
 def ci_sweep(
@@ -256,7 +259,7 @@ def ci_sweep(
     ok = np.abs(denom) >= guard_tol
     coef[ok] = delta[ok] * f[ok] / denom[ok]
     u_pert = u[:, None] - setup.z * coef[None, :]
-    flagged: Dict[str, str] = {}
+    flagged: dict[str, str] = {}
     for i in np.where(~ok)[0]:
         eid = setup.ids[i]
         if brute_column is None:
@@ -303,7 +306,8 @@ def perturb_multi(
     g_ss = setup.b_free[idx] @ z_s
     core = np.diag(1.0 / deltas) + g_ss
     f_s = setup.b_free[idx] @ u
-    return u - z_s @ np.linalg.solve(core, f_s)
+    perturbed: np.ndarray = u - z_s @ np.linalg.solve(core, f_s)
+    return perturbed
 
 
 def brute_force_ci(
@@ -313,11 +317,16 @@ def brute_force_ci(
     temps: Mapping[str, float],
     alpha: float,
     tol: float = 1e-9,
-    k_e_func: Callable[[FloatOrArray], FloatOrArray] = ssot_k_E,
-) -> Tuple[Dict[str, float], float, float]:
-    """Reference implementation: one full factorisation per member.
+    k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
+) -> tuple[dict[str, float], float, float]:
+    """Compute CI values by brute force: one full factorisation per member.
 
-    Returns ``(ci_values, u_max_base, u_max_perturbed_max)``.
+    Reference path used to verify the rank-1 engine.
+
+    Returns
+    -------
+    tuple[dict[str, float], float, float]
+        ``(ci_values, u_max_base, u_max_perturbed_max)``.
     """
     k_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
     b, k = member_matrices(nodes, elements, k_scale)
@@ -327,7 +336,7 @@ def brute_force_ci(
     f_free = load_vector(nodes, loads, free)
     u = lu_solve(lu, f_free)
     u_max_base = float(np.max(np.abs(u)))
-    ci: Dict[str, float] = {}
+    ci: dict[str, float] = {}
     u_max_pert = 0.0
     for i, e in enumerate(elements):
         if u_max_base < tol:
@@ -341,21 +350,21 @@ def brute_force_ci(
 
 
 def compute_ci_for_topology(
-    nodes: List[Node],
-    elements: List[Element],
-    loads: Dict,
-    supports: Dict,
+    nodes: list[Node],
+    elements: list[Element],
+    loads: Mapping[str, Mapping[str, float]],
+    supports: Mapping[str, object],
     scenario: str,
     t_target: float,
     alpha: float = 0.7,
     tol: float = 1e-9,
 ) -> TopologyResult:
-    """Full CI pipeline on the rank-1 engine (no special-cased scenarios).
+    """Run the full CI pipeline on the rank-1 engine (no special-cased scenarios).
 
     The uniform scenario travels the same numerical path as every other
-    scenario (prompt-04 §B5): Lemma 1 is a measured outcome, not an input.
-    ``tau_vs_base`` is populated with tau-b between the CI field at
-    ``t_target`` and the one at :data:`T_AMBIENT` (prompt-04 §C12).
+    scenario: uniform-temperature invariance of the ranking is a measured
+    outcome, not an input.  ``tau_vs_base`` is populated with tau-b between
+    the CI field at ``t_target`` and the one at :data:`T_AMBIENT`.
     """
     del supports  # boundary conditions live on the Node flags
     temps = get_scenario_temperatures(nodes, elements, scenario, t_target)
@@ -364,7 +373,7 @@ def compute_ci_for_topology(
     u = base_displacement(setup, f_free)
     u_max_base = float(np.max(np.abs(u)))
 
-    flags: Dict[str, str] = {}
+    flags: dict[str, str] = {}
     if u_max_base < tol:
         ci_values = {e.id: 0.0 for e in elements}
         flags["base"] = "zero-displacement"
@@ -381,9 +390,9 @@ def compute_ci_for_topology(
     nci: NciResult = compute_nci(ci_values)
     ranks = rank_members(ci_values)
 
-    tau_vs_base: Optional[float] = None
+    tau_vs_base: float | None = None
     if u_max_base >= tol:
-        # tau is a discrete rank statistic: compare at the lemma tolerance
+        # tau is a discrete rank statistic: compare at the rank tolerance
         # (1e-10) so sub-tolerance float noise on mirror pairs is not counted
         # as rank instability (see ranking.tau_b docstring).
         if float(t_target) == T_AMBIENT:
@@ -393,10 +402,10 @@ def compute_ci_for_topology(
             setup0 = build_engine(nodes, elements, loads, temps_base)
             u0 = base_displacement(setup0, load_vector(nodes, loads, setup0.free_dofs))
             if float(np.max(np.abs(u0))) >= tol:
-                # the cold reference sweep takes the SAME guard routing as the
-                # hot one (prompt-08 fix: with alpha=0 on a determinate truss
-                # every cold member is near-mechanism and the missing
-                # fallback raised instead of flagging — DR-025)
+                # the cold reference sweep takes the SAME guard routing as
+                # the hot one: with alpha near 0 on a determinate truss every
+                # cold member can be near-mechanism, so the brute-force
+                # fallback must flag those members instead of raising
                 brute0 = lambda i: _solve_perturbed_full(  # noqa: E731
                     nodes, elements, loads, temps_base, alpha, i
                 )

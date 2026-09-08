@@ -1,4 +1,4 @@
-"""Integration tests for Phase 2: Reliability engine with real truss models."""
+"""Integration tests: reliability engine with real truss models."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+
 from truss_analysis.model import Element, Node
 from truss_analysis.reliability import (
     Direction,

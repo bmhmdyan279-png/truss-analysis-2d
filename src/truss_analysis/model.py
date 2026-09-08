@@ -1,4 +1,4 @@
-"""Pure DTOs for Truss Analysis."""
+"""Pure data-transfer objects for the truss model (nodes and elements)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ class Node:
     support_dx: bool = False
     support_dy: bool = False
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Validate node identity and coordinates after initialisation."""
         if not isinstance(self.id, str):
             raise InputValidationError(f"Node ID must be string, got {type(self.id)}")
         if not all(isinstance(v, (int, float)) for v in [self.x, self.y]):
@@ -41,7 +42,8 @@ class Element:
     density: float = 0.0  # Material density (for self-weight)
     effective_length_factor: float = 1.0  # For buckling calculation
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Validate element identity, material and geometry after initialisation."""
         if not isinstance(self.id, str):
             raise InputValidationError(
                 f"Element ID must be string, got {type(self.id)}"
@@ -62,7 +64,6 @@ class Element:
 
 def validate_inputs(nodes: list[Node], elements: list[Element]) -> None:
     """Validate input data for consistency and correctness."""
-
     # Check unique node IDs
     node_ids = {n.id for n in nodes}
     if len(node_ids) != len(nodes):

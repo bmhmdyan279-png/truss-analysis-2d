@@ -5,15 +5,16 @@ determinate controls as JSON-compatible dictionaries conforming to the
 truss-analysis-2d input schema.  Geometry and connectivity only: no thermal
 loading is applied at this stage (``delta_T = 0``).
 
-Load model (prompt-05, task T1)
--------------------------------
-The pre-prompt-5 generator hard-coded ``Fy = -10 kN`` per node on nodes with
-``not is_support and y > 0``.  That pattern is **family-dependent**: in Warren
-the unloaded non-support bottom-chord nodes carry no load while in Pratt/Howe
-the load set differs, so total demand changed between families and between
-``n_panels`` — corrupting any cross-topology comparison (H2 in particular).
+Load model
+----------
+The loaded set is defined geometrically, never by family-specific node
+patterns: a ``y``-threshold rule (e.g. "load nodes with ``y > 0``") would be
+family-dependent - in Warren it would skip non-support bottom-chord nodes
+while in Pratt/Howe the loaded set differs - so the total demand would
+change between families and between ``n_panels``, corrupting any
+cross-topology comparison.
 
-The model now is:
+The model is:
 
 * **Loaded set = all non-support nodes**, independent of ``y`` and family.
 * The vertical demand is a single configuration parameter ``total_load``
@@ -26,19 +27,18 @@ The model now is:
   family-independent by construction).
 * Horizontal nodal loads are zero (gravity-type screening load).
 
-Lemma 1 (correct statement, prompt-05 task T4)
-----------------------------------------------
-Lemma 1 (uniform-temperature invariance of the CI ranking) holds because a
-uniform temperature field scales the **whole stiffness matrix** by
+Uniform-temperature invariance
+------------------------------
+A uniform temperature field scales the **whole stiffness matrix** by
 ``k_E(theta)`` when sections are uniform: ``K(theta) = k_E(theta) K_0``, so
-every perturbed/base displacement ratio — and therefore every CI and every
-rank comparison — is temperature-invariant.  It does **not** follow from
-"uniform sections imply tau = 1" by any eigenstructure argument; the legacy
-wording was wrong and was removed.  The measured form of the lemma lives in
-``tests/test_lemma1_uniform_invariance.py`` (prompt-04).
+every perturbed/base displacement ratio - and therefore every CI value and
+every rank comparison - is temperature-invariant.  (This does **not** follow
+from any eigenstructure argument of the form "uniform sections imply
+tau = 1"; see ``docs/theory.md``.)  The measured form of this invariance is
+asserted by the test suite.
 
-Determinism (prompt-05, task T6)
---------------------------------
+Determinism
+-----------
 :func:`model_to_json` emits canonical JSON (sorted keys, fixed separators,
 no NaN) and :func:`content_hash` returns its SHA-256; generating the same
 configuration twice yields byte-identical JSON and an identical hash.
@@ -52,16 +52,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
 
-from truss_analysis.sections import SquareHSS, idealised_square_hss
+from .sections import SquareHSS, idealised_square_hss
 
 # ----------------------------------------------------------------------
 #  Public API: both the object-oriented generator and a simple function
 # ----------------------------------------------------------------------
 
 __all__ = [
-    "TrussFamily",
-    "TrussConfig",
     "TopologyGenerator",
+    "TrussConfig",
+    "TrussFamily",
     "content_hash",
     "generate_topology",
     "model_to_json",
@@ -126,6 +126,7 @@ class TrussConfig:
     moment_of_inertia: float | None = None
 
     def __post_init__(self) -> None:
+        """Validate geometric parameters (positive span/height, n_panels >= 2)."""
         if self.n_panels < 2:
             raise ValueError(f"n_panels must be >= 2, got {self.n_panels}")
         if self.span <= 0.0:
@@ -205,7 +206,7 @@ class TopologyGenerator:
         }
 
     # ──────────────────────────────────────────────────────────────
-    # Determinate controls (negative controls for H1) — prompt-05 T3
+    # Statically determinate control topologies
     # ──────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -224,10 +225,9 @@ class TopologyGenerator:
         ``index=3``: the chain plus an apex node (6 nodes / 9 members).
 
         All three satisfy ``m + r = 2j`` exactly (statically determinate) and
-        become mechanisms when any single member is removed — asserted in
-        ``tests/test_topology_generator.py``.  The legacy single-triangle
-        variant with three heights (DR-003) is replaced: height variety alone
-        was not a geometric variety.
+        become mechanisms when any single member is removed - asserted in
+        the test suite.  The three controls are geometrically distinct
+        (different node/member counts), not height variants of one shape.
 
         Parameters
         ----------
@@ -450,19 +450,15 @@ class TopologyGenerator:
         for i in range(1, n):
             add(b(i), t(i))
 
-        # Diagonals — Pratt: slope *down* toward mid-span.  For an odd panel
+        # Diagonals - Pratt: slope *down* toward mid-span.  For an odd panel
         # count the centre panel needs its own diagonal, otherwise the panel
-        # is a shear mechanism (DR-020, measured cond(K) ~ 1e16).
+        # is a shear mechanism (measured cond(K) ~ 1e16).
         mid = n // 2
         for i in range(n):
-            if i < mid:
-                if i + 1 < n:
-                    add(b(i), t(i + 1))
-            elif i == mid and n % 2 == 1:
+            if (i < mid and i + 1 < n) or (i == mid and n % 2 == 1):
                 add(b(i), t(i + 1))
-            elif (n % 2 == 0) or (i > mid):
-                if 1 <= i < n:
-                    add(t(i), b(i + 1))
+            elif ((n % 2 == 0) or (i > mid)) and 1 <= i < n:
+                add(t(i), b(i + 1))
 
     def _build_howe(
         self,
@@ -485,21 +481,17 @@ class TopologyGenerator:
         for i in range(1, n):
             add(b(i), t(i))
 
-        # Diagonals — Howe: slope *up* toward mid-span (mirror of Pratt),
-        # including the centre-panel diagonal for odd panel counts (DR-020).
+        # Diagonals - Howe: slope *up* toward mid-span (mirror of Pratt),
+        # including the centre-panel diagonal for odd panel counts.
         mid = n // 2
         for i in range(n):
-            if i < mid:
-                if i + 1 < n:
-                    add(t(i + 1), b(i))
-            elif i == mid and n % 2 == 1:
+            if (i < mid and i + 1 < n) or (i == mid and n % 2 == 1):
                 add(t(i + 1), b(i))
-            elif (n % 2 == 0) or (i > mid):
-                if 1 <= i < n:
-                    add(b(i + 1), t(i))
+            elif ((n % 2 == 0) or (i > mid)) and 1 <= i < n:
+                add(b(i + 1), t(i))
 
     # ──────────────────────────────────────────────────────────────
-    # Loads — family-independent total-load model (prompt-05 T1)
+    # Loads - family-independent total-load model
     # ──────────────────────────────────────────────────────────────
 
     def _build_loads(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -556,7 +548,7 @@ class TopologyGenerator:
 
 
 # ======================================================================
-#  Deterministic serialisation (prompt-05 T6)
+#  Deterministic serialisation
 # ======================================================================
 
 
@@ -571,7 +563,7 @@ def content_hash(model: dict[str, Any]) -> str:
 
 
 # ======================================================================
-#  Simple function‑based interface (for scripts/compute_phase2_*.py)
+#  Simple function-based interface
 # ======================================================================
 
 
@@ -585,7 +577,7 @@ def generate_topology(
     thermal_expansion: float = 1.2e-5,
     total_load: float = DEFAULT_TOTAL_LOAD,
 ) -> dict[str, Any]:
-    """Generate a complete truss model dictionary using the object‑oriented generator.
+    """Generate a complete truss model dictionary using the object-oriented generator.
 
     This is a convenience wrapper around ``TopologyGenerator``, intended for
     scripts that expect a simple function with this signature.
@@ -593,7 +585,7 @@ def generate_topology(
     Parameters
     ----------
     family : str
-        One of ``'warren'``, ``'pratt'``, or ``'howe'`` (case‑insensitive).
+        One of ``'warren'``, ``'pratt'``, or ``'howe'`` (case-insensitive).
     n_panels : int
         Number of panels (must be >= 2).
     span : float
@@ -601,7 +593,7 @@ def generate_topology(
     height : float
         Truss height [m].
     area : float, optional
-        Uniform cross‑sectional area [m²] (default 0.01).
+        Uniform cross-sectional area [m²] (default 0.01).
     youngs_modulus : float, optional
         Young's modulus [Pa] (default 210.0e9).
     thermal_expansion : float, optional

@@ -1,4 +1,4 @@
-"""Retrofit triage tests (prompt-06 C): map, proxy costs, one space, optimality."""
+"""Retrofit triage tests: map, proxy costs, one space, optimality."""
 
 from __future__ import annotations
 
@@ -70,14 +70,14 @@ def test_decision_physics_map_exact() -> None:
     assert ACTION_EFFECTS[1].theta_offset == -200.0
     assert ACTION_EFFECTS[2].theta_offset == -350.0
     assert ACTION_EFFECTS[3].area_factor == 1.3
-    nodes, elements, _ = _build(FAILURE_CASE)
+    _nodes, elements, _ = _build(FAILURE_CASE)
     temps = {e.id: 600.0 for e in elements}
     new_elements, new_temps = apply_decision(
         elements, temps, {e.id: 3 for e in elements}
     )
-    for e_old, e_new in zip(elements, new_elements):
-        assert e_new.A == pytest.approx(1.3 * e_old.A, rel=1e-12)
-        # I follows the prompt-5 section model, never A^2/12
+    for e_old, e_new in zip(elements, new_elements, strict=True):
+        assert pytest.approx(1.3 * e_old.A, rel=1e-12) == e_new.A
+        # I follows the idealised section model, never A^2/12
         assert e_new.I_sec == pytest.approx(
             idealised_square_hss(1.3 * e_old.A).i_sec, rel=1e-9
         )
@@ -104,7 +104,7 @@ def test_cost_proxy_scenarios_and_budget() -> None:
 
 
 def test_all_strategies_share_one_decision_space(campaign) -> None:
-    cm = next(c for c in campaign if c.name == "warren_4_H1")
+    cm = next(c for c in campaign if c.name == "warren_4_shallow")
     ctx = make_context(
         cm.nodes,
         cm.elements,
@@ -194,16 +194,16 @@ def test_redundant_limitation_documented() -> None:
 
 
 def test_exhaustive_guard_above_seven_members(campaign) -> None:
-    cm = next(c for c in campaign if c.name == "warren_8_H1")
+    cm = next(c for c in campaign if c.name == "warren_8_shallow")
     ctx = make_context(cm.nodes, cm.elements, cm.loads, "uniform", 600.0, 235e6)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="exhaustive search limited"):
         exhaustive(ctx)
 
 
 def test_decision_out_of_space_rejected() -> None:
-    nodes, elements, _ = _build(FAILURE_CASE)
+    _nodes, elements, _ = _build(FAILURE_CASE)
     temps = {e.id: 600.0 for e in elements}
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="out of space"):
         apply_decision(elements, temps, {e.id: 7 for e in elements})
 
 

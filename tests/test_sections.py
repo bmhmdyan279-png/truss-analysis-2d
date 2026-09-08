@@ -1,8 +1,7 @@
-"""Section model tests (prompt-05, T2): exact formulas, catalog hook, P_cr.
+"""Section model tests: exact formulas, catalog hook, P_cr.
 
 Hand-computed reference values are written as independent numeric literals
-(the "manual solution" the acceptance gate demands), not by re-calling the
-library formulas.
+(hand solutions), not by re-calling the library formulas.
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ from __future__ import annotations
 import math
 
 import pytest
+
 from truss_analysis.sections import (
     SectionCatalog,
     SquareHSS,
@@ -32,11 +32,11 @@ def test_square_hss_exact_hand_values() -> None:
 
 
 def test_square_hss_rejects_degenerate_shapes() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="wall thickness must be > 0"):
         SquareHSS(name="bad", b=0.2, t=0.0)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="leaves no void"):
         SquareHSS(name="bad", b=0.2, t=0.1)  # 2t == b -> solid/void-less
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="outer width must be > 0"):
         SquareHSS(name="bad", b=-0.2, t=0.01)
 
 
@@ -46,9 +46,9 @@ def test_idealised_roundtrip_area_and_ratio() -> None:
     assert sec.width_to_thickness == pytest.approx(25.0, rel=1e-12)
     # b = (r/2) sqrt(A/(r-1)) = 12.5 * sqrt(0.01/24)
     assert sec.b == pytest.approx(12.5 * math.sqrt(0.01 / 24.0), rel=1e-12)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"thickness_ratio must be >= 2\.0"):
         idealised_square_hss(0.01, thickness_ratio=1.5)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="area must be > 0"):
         idealised_square_hss(-0.01)
 
 
@@ -74,7 +74,7 @@ def test_catalog_nearest_area() -> None:
     assert cat.nearest_to_area(rows[1].area).name == "s2"
     assert cat.nearest_to_area(rows[2].area * 1.02).name == "s3"
     empty = SectionCatalog.from_rows("empty", [])
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="is empty"):
         empty.nearest_to_area(0.01)
 
 
@@ -87,7 +87,7 @@ def test_euler_buckling_against_hand_solution() -> None:
     assert euler_buckling_load(1e-6, 2.0, 210.0e9, 0.5) == pytest.approx(
         4 * 518154.2310571913, rel=1e-9
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="length must be > 0"):
         euler_buckling_load(1e-6, 0.0, 210.0e9)
 
 

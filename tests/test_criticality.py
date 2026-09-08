@@ -1,6 +1,6 @@
-"""Ranking / tau-b / NCI / API behaviour after the prompt-4 restructure.
+"""Ranking / tau-b / NCI / API behaviour.
 
-Covers CONTEXT_LOCK §4.5 items B1-B5 with the new policies:
+Covers the documented ranking and index policies:
 natural-sort tie-break, tau from CI values with explicit degeneracy, a single
 NCI function returning None on degenerate input, relative eps, populated
 ``tau_vs_base`` and absence of the hard-coded uniform branch.
@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from truss_analysis.criticality import (
     NciResult,
     TauResult,
@@ -58,16 +59,19 @@ def test_tau_b_uses_values_and_reports_ties() -> None:
     assert res.n_ties_a == 1  # the (a, b) pair tied in field a
     assert res.n_ties_b == 0  # field b has distinct values
     assert not res.is_degenerate
-    assert res.tau is not None and -1.0 <= res.tau <= 1.0
+    assert res.tau is not None
+    assert -1.0 <= res.tau <= 1.0
 
 
 def test_tau_b_all_ties_is_degenerate_not_silent_one() -> None:
     ci_a = {"a": 0.428571, "b": 0.428571, "c": 0.428571}
     ci_b = {"a": 0.1, "b": 0.2, "c": 0.3}
     res = tau_b(ci_a, ci_b)
-    assert res.is_degenerate and res.tau is None
+    assert res.is_degenerate
+    assert res.tau is None
     res2 = tau_b(ci_b, ci_a)
-    assert res2.is_degenerate and res2.tau is None
+    assert res2.is_degenerate
+    assert res2.tau is None
 
 
 def test_tau_b_small_samples_degenerate() -> None:
@@ -76,7 +80,7 @@ def test_tau_b_small_samples_degenerate() -> None:
 
 
 def test_tau_b_quantization_convention() -> None:
-    """Sub-tolerance noise is not a rank signal (lemma convention)."""
+    """Sub-tolerance noise is not a rank signal (tie-noise convention)."""
     ci_a = {"a": 0.5000000000000001, "b": 0.25, "c": 0.125}
     ci_b = {"a": 0.4999999999999999, "b": 0.25, "c": 0.125}
     quantised = tau_b(ci_a, ci_b, quantize=1e-10)
@@ -84,7 +88,8 @@ def test_tau_b_quantization_convention() -> None:
     # a REAL difference above the tolerance still moves tau
     ci_c = {"a": 0.125, "b": 0.25, "c": 0.5}
     moved = tau_b(ci_a, ci_c, quantize=1e-10)
-    assert moved.tau is not None and moved.tau < 1.0
+    assert moved.tau is not None
+    assert moved.tau < 1.0
 
 
 def test_nci_bounds_and_extremes() -> None:
@@ -96,13 +101,16 @@ def test_nci_bounds_and_extremes() -> None:
 
 def test_nci_degenerate_returns_none_and_flag() -> None:
     res = compute_nci({"a": 0.3, "b": 0.3, "c": 0.3})
-    assert res.values is None and res.is_degenerate
-    assert res.min_ci == pytest.approx(0.3) and res.max_ci == pytest.approx(0.3)
+    assert res.values is None
+    assert res.is_degenerate
+    assert res.min_ci == pytest.approx(0.3)
+    assert res.max_ci == pytest.approx(0.3)
 
 
 def test_nci_empty_input() -> None:
     res = compute_nci({})
-    assert res.values == {} and not res.is_degenerate
+    assert res.values == {}
+    assert not res.is_degenerate
 
 
 def test_single_nci_policy_in_package() -> None:
@@ -132,11 +140,13 @@ def test_boundary_centroid_follows_half_open_intervals() -> None:
     ]
     # span=6 -> thirds at 2 and 4; left centroid 1.5 (left), right centroid 4.5 (right)
     left, mid, right = scenario_partition(nodes, elements)
-    assert left == {"left"} and right == {"onbound"} and mid == set()
+    assert left == {"left"}
+    assert right == {"onbound"}
+    assert mid == set()
 
 
 def test_tau_vs_base_populated(campaign) -> None:
-    cm = next(c for c in campaign if c.name == "warren_6_H1")
+    cm = next(c for c in campaign if c.name == "warren_6_shallow")
     hot = compute_ci_for_topology(
         cm.nodes, cm.elements, cm.loads, {}, "local_mid", 600.0
     )

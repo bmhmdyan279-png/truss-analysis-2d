@@ -30,6 +30,7 @@ import math
 
 import numpy as np
 import pytest
+
 from truss_analysis.assembly import assemble_global_matrices
 from truss_analysis.criticality import (
     base_displacement,
@@ -136,7 +137,7 @@ def test_a2_three_member_forces_exact_fractions():
     nodes, elements = _three_bar_nodes(), _three_bar_elements()
     _K, _F, _fixed, _U, forces = _fem(nodes, elements, [("3", 6.0e3, -8.0e3)])
     hand = [68.0e3 / 9.0, -7.0e3 * SQRT13 / 9.0, -85.0e3 / 9.0]
-    for got, want in zip(forces, hand):
+    for got, want in zip(forces, hand, strict=True):
         assert _rel(got["N"], want) < REL_TOL
 
 

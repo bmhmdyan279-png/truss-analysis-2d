@@ -5,55 +5,162 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "truss_analysis"
 dynamic = ["version"]
-description = "2D Truss Analysis Tool - scientifically validated"
+description = "Linear 2D truss finite-element analysis with temperature-dependent steel properties (EN 1993-1-2)"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "bmhmdyan279-png" }]
+keywords = [
+    "truss",
+    "finite-element",
+    "structural-analysis",
+    "steel",
+    "eurocode",
+    "temperature-dependent",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+
+# Core runtime dependencies. Everything else is opt-in via extras below so a
+# plain `pip install truss_analysis` stays lean (numpy/scipy/PyYAML only).
 dependencies = [
-    "arabic_reshaper",
-    "python-bidi",
     "numpy>=1.24.0",
-    "matplotlib>=3.7.0",
-    "PyYAML>=6.0",
     "scipy>=1.10.0",
-    "scienceplots>=2.0.0", # Added for Phase 10/11 reproducibility (D-032)
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
+# Plotting stack (matplotlib plus Persian/bidi text shaping helpers).
+viz = [
+    "matplotlib>=3.7.0",
+    "scienceplots>=2.0.0",
+    "arabic-reshaper>=3.0.0",
+    "python-bidi>=0.6.0",
+]
+# Independent-reference checks against the OpenSees finite-element framework.
+validation = [
+    "openseespy>=3.5.0",
+]
+# Retrofit triage is pure numpy/scipy: no extra requirements beyond the core.
+# The marker exists so `pip install truss_analysis[retrofit]` is explicit.
+retrofit = []
+# Development: tests, linting, typing, packaging (versions match the pinned
+# pre-commit chain so local runs and the hook chain agree).
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "ruff>=0.3.0",
-    "mypy>=1.8.0",
+    "ruff==0.16.6",
+    "mypy==2.3.1",
     "pre-commit>=3.6.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
+    "vermin>=1.6.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/bmhmdyan279-png/truss-analysis-2d"
+Documentation = "https://github.com/bmhmdyan279-png/truss-analysis-2d/tree/main/docs"
+Issues = "https://github.com/bmhmdyan279-png/truss-analysis-2d/issues"
+Changelog = "https://github.com/bmhmdyan279-png/truss-analysis-2d/blob/main/CHANGELOG.md"
 
 [project.scripts]
 truss-analysis = "truss_analysis.main:main"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
+"truss_analysis" = ["py.typed"]
 "truss_analysis.material" = ["data/*.json"]
 
+# setuptools_scm: `write_to` generates _version.py at build time (gitignored);
+# `fallback_version` keeps `python -m build` working in source exports that
+# carry no .git metadata (e.g. sdist rebuilds).
 [tool.setuptools_scm]
 write_to = "src/truss_analysis/_version.py"
 fallback_version = "2.5.0"
 
+# ---------------------------------------------------------------------------
+# Linting / formatting — ruff
+# ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 88
 target-version = "py310"
+# Respect `exclude` even when files are passed explicitly (pre-commit does).
+force-exclude = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = ["E", "F", "I", "W", "UP", "B", "SIM", "RUF", "PT", "N", "D"]
+ignore = [
+    # D203/D212 vs D211/D213 conflicts are resolved by the numpy convention.
+]
 
+[tool.ruff.lint.isort]
+# Pin first-party detection so every ruff version (pinned hook == local CLI)
+# sorts `truss_analysis` imports into the same block layout.
+known-first-party = ["truss_analysis"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.pep8-naming]
+# Structural-mechanics and Eurocode notation is deliberately non-snake_case:
+# K/F/U/N/L are the standard symbols for stiffness matrix, force vector,
+# displacement vector, axial force and length; k_E is the EN 1993-1-2
+# reduction factor; delta_T/delta_L_* follow the thermo-mechanical literature.
+# Renaming them would make the code less readable for the target audience.
+extend-ignore-names = [
+    "K", "F", "U", "N", "L", "W", "R", "E", "A",
+    "_K", "_F", "_U",
+    "K_ff", "F_ext", "F_mech", "F_mechanical", "F_thermal", "F_f",
+    "U_f", "U_strain", "W_mech", "W_prestress", "A_mat", "Ry_sum",
+    "baseline_U", "baseline_N", "expected_U_strain", "hand_N",
+    "delta_T", "delta_L_free", "delta_L_mech", "delta_L_prestress",
+    "delta_L_thermal", "delta_L_total",
+    "E_a", "k_E", "get_eurocode_k_E", "old_k_E", "new_k_E",
+    "du_x_dA", "du_y_dA", "dU_f_dA",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are named descriptively; docstrings are not enforced on them.
+# N802 exemption: two test names embed the Eurocode symbol `k_E` verbatim.
+"tests/**" = ["D", "N802"]
+# Repository utility scripts: same documentation exemption, pytest-style
+# rules do not apply, and mechanics/Greek notation is kept verbatim.
+"scripts/**" = ["D", "PT", "N806", "RUF001", "RUF002", "RUF003"]
+
+# ---------------------------------------------------------------------------
+# Testing / coverage
+# ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=90"
 
+# ---------------------------------------------------------------------------
+# Typing — mypy (strict)
+# ---------------------------------------------------------------------------
 [tool.mypy]
+files = ["src"]
 mypy_path = "src"
 explicit_package_bases = true
+strict = true
+# Third-party packages without bundled type information resolve to Any here
+# and in the isolated pre-commit mypy environment; first-party code and the
+# typed scientific stack (numpy, scipy, matplotlib) remain fully checked.
+ignore_missing_imports = true

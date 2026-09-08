@@ -1,4 +1,4 @@
-"""Uncertainty layer tests (prompt-06 B): LHS, copula, seeds, streaming, specs."""
+"""Uncertainty layer tests: LHS, copula, seeds, streaming, specs."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from truss_analysis.uncertainty import (
     LognormalRV,
     RunningStat,
     TruncatedNormalRV,
+    default_rv_specs,
     gaussian_copula_correlate,
     latin_hypercube,
-    proposal_rv_specs,
     sample_spec_matrix,
 )
 
@@ -25,7 +25,8 @@ def test_lhs_stratification_exact() -> None:
     for d in range(4):
         strata = np.floor(u[:, d] * 100).astype(int)
         assert sorted(strata.tolist()) == list(range(100))
-    assert np.all(u >= 0.0) and np.all(u < 1.0)
+    assert np.all(u >= 0.0)
+    assert np.all(u < 1.0)
 
 
 def test_lhs_deterministic_and_order_independent() -> None:
@@ -42,16 +43,17 @@ def test_gaussian_copula_realises_target_rank_correlation() -> None:
     uc = gaussian_copula_correlate(u, corr)
     rho = spearmanr(uc[:, 0], uc[:, 1]).statistic
     assert abs(rho - 0.7) < 0.05
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="columns"):
         gaussian_copula_correlate(np.zeros((10, 3)), corr)
 
 
 def test_truncated_normal_respects_bounds() -> None:
     rv = TruncatedNormalRV(mean=600.0, std=50.0, low=20.0, high=1000.0, seed=5)
     x = rv.sample(5000)
-    assert np.all(x >= 20.0) and np.all(x <= 1000.0)
+    assert np.all(x >= 20.0)
+    assert np.all(x <= 1000.0)
     assert abs(float(x.mean()) - 600.0) < 5.0
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="low < high"):
         TruncatedNormalRV(mean=1.0, std=1.0, low=5.0, high=1.0)
 
 
@@ -74,7 +76,7 @@ def test_legacy_lognormal_moments() -> None:
 
 
 def test_specs_citation_statuses_recorded() -> None:
-    specs = proposal_rv_specs()
+    specs = default_rv_specs()
     names = [s.name for s in specs]
     assert names == ["live_load", "f_y", "fire_intensity", "E"]
     for s in specs:
@@ -87,14 +89,15 @@ def test_specs_citation_statuses_recorded() -> None:
 
 
 def test_sample_spec_matrix_deterministic() -> None:
-    specs = proposal_rv_specs(fire_scenario_temperature=600.0)
+    specs = default_rv_specs(fire_scenario_temperature=600.0)
     means = {"live_load": 1.0, "f_y": 235.0e6, "fire_intensity": 600.0, "E": 210.0e9}
     a = sample_spec_matrix(specs, means, 200, seed=99)
     b = sample_spec_matrix(specs, means, 200, seed=99)
     for k in a:
         assert np.array_equal(a[k], b[k])
     assert np.all(a["E"] == 210.0e9)
-    assert np.all(a["fire_intensity"] >= 20.0) and np.all(a["fire_intensity"] <= 1000.0)
+    assert np.all(a["fire_intensity"] >= 20.0)
+    assert np.all(a["fire_intensity"] <= 1000.0)
 
 
 def test_running_stat_matches_batch_stats() -> None:

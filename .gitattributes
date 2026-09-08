@@ -3,4 +3,9 @@
 *.toml text eol=lf
 *.po text eol=lf
 *.ttf binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.whl binary
+*.gz binary
 *.log text eol=lf

@@ -69,7 +69,7 @@ def test_rank_correlation_degenerate_is_nan():
 
 def test_quantisation_absorbs_sub_tolerance_tie_noise():
     """Two exact solvers agree to ~1e-13; symmetric near-tied pairs would
-    otherwise flip ranks arbitrarily.  Quantising at 1e-10 (the lemma
+    otherwise flip ranks arbitrarily.  Quantising at 1e-10 (the tie-noise
     convention) makes 'ranks equal up to tolerance' the measured quantity."""
     a = {"1": 0.5, "2": 0.3, "3": 0.5 + 1e-13}
     b = {"1": 0.5 + 1e-13, "2": 0.3, "3": 0.5}

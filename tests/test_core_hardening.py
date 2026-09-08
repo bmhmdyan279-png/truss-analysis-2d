@@ -1,4 +1,5 @@
-"""Prompt-7 tests: single DegradationOperator type + Gini extremes + viz smoke."""
+"""Core-hardening tests: single DegradationOperator type, gini_normalized
+extremes, visualization smoke."""
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from truss_analysis.degradation import (
     registered_degradation_kinds,
 )
 from truss_analysis.heterogeneity import compute_bounded_metrics, gini_normalized
-from truss_analysis.material.steel_eurocode import k_E as ssot_k_E
+from truss_analysis.material.steel_eurocode import k_E as eurocode_k_E
 from truss_analysis.model import Element
 
 
@@ -41,18 +42,18 @@ def test_unknown_kind_rejected() -> None:
 def test_mechanical_operator_physics() -> None:
     op = get_degradation_operator("mechanical", target_id="a", alpha=0.7)
     out = op.apply(_elements())
-    assert out[0].A == pytest.approx(0.7 * 0.01, rel=1e-12)
+    assert pytest.approx(0.7 * 0.01, rel=1e-12) == out[0].A
     assert out[0].I_sec == pytest.approx(0.49 * 1e-6, rel=1e-12)
-    assert out[1].A == pytest.approx(0.02, rel=1e-12)
+    assert pytest.approx(0.02, rel=1e-12) == out[1].A
 
 
-def test_thermal_operator_uses_ssot() -> None:
+def test_thermal_operator_uses_material_source() -> None:
     temps = {"a": 600.0, "b": 20.0}
     op = get_degradation_operator("thermal", temps=temps)
     out = op.apply(_elements())
-    assert out[0].E == pytest.approx(210e9 * 0.310, rel=1e-9)
-    assert out[1].E == pytest.approx(210e9, rel=1e-12)
-    assert ssot_k_E(600.0) == pytest.approx(0.310, rel=1e-9)
+    assert pytest.approx(210e9 * 0.310, rel=1e-9) == out[0].E
+    assert pytest.approx(210e9, rel=1e-12) == out[1].E
+    assert eurocode_k_E(600.0) == pytest.approx(0.310, rel=1e-9)
 
 
 def test_gini_extremes_known_distributions() -> None:

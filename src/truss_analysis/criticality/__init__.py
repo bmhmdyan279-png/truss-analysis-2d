@@ -1,10 +1,9 @@
 """Criticality package: rank-1 engine, scenarios, ranking, indices.
 
-Public API (prompt-04 restructure of the former single-module
-``criticality.py``):
+Public API:
 
 * :func:`compute_ci_for_topology` — full CI pipeline on the exact rank-1
-  engine (Sherman–Morrison), uniform scenario included with no special case.
+  engine (Sherman-Morrison), uniform scenario included with no special case.
 * :mod:`.engine` — ``build_engine``, ``ci_sweep``, ``brute_force_ci``
   (reference), ``perturb_multi`` (Woodbury rank-r), ``MechanismError``.
 * :mod:`.scenarios` — centroid-based partition ``left|mid|right`` plus

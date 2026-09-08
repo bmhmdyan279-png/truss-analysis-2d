@@ -1,18 +1,30 @@
-"""Phase 4: Alpha-degradation operator and Geometric Scaling Rule."""
+"""Member stiffness-degradation operators and the geometric scaling rule.
+
+Two degradation definitions share one interface (:class:`DegradationOperator`):
+
+* ``mechanical`` - scale the cross-sectional area by ``alpha`` and the second
+  moment of area by ``alpha**2`` (the geometric scaling rule);
+* ``thermal`` - scale Young's modulus by the EN 1993-1-2 reduction factor
+  ``k_E(T)`` from :mod:`truss_analysis.material`.
+
+A registry guard (:func:`get_degradation_operator`) rejects any other,
+ad-hoc definition.
+"""
 
 from __future__ import annotations
 
 import abc
 import math
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import ClassVar, Mapping, Sequence
+from typing import ClassVar
 
 import numpy as np
-from truss_analysis.material.steel_eurocode import k_E as ssot_k_E
 
 from .assembly import assemble_global_matrices
 from .exceptions import SingularMatrixError
+from .material.steel_eurocode import k_E as eurocode_k_E
 from .model import Element, Node
 from .reliability_adapter import NodalLoad
 from .solver import solve
@@ -20,7 +32,22 @@ from .solver import solve
 
 @dataclass(frozen=True)
 class DegradationPoint:
-    """Result of a single alpha-degradation solve."""
+    """Result of a single alpha-degradation solve.
+
+    Attributes
+    ----------
+    alpha : float
+        Scaling factor applied to the target member.
+    max_disp : float
+        Maximum nodal displacement magnitude [m]; ``inf`` when the
+        degraded model is a mechanism.
+    axial_forces : dict[str, float]
+        Member axial forces [N] keyed by element id (empty if singular).
+    is_singular : bool
+        ``True`` when the degraded stiffness matrix lost rank.
+    error : str or None
+        Solver error message when ``is_singular`` is set.
+    """
 
     alpha: float
     max_disp: float
@@ -31,7 +58,30 @@ class DegradationPoint:
 
 @dataclass
 class MemberSensitivityProfile:
-    """Sensitivity profile for a single member across multiple alpha values."""
+    """Sensitivity profile of one member across a sequence of alpha values.
+
+    Attributes
+    ----------
+    member_id : str
+        Target element id.
+    baseline_max_disp : float
+        Maximum nodal displacement of the undegraded model [m].
+    baseline_axial_forces : dict[str, float]
+        Undegraded member axial forces [N].
+    points : list[DegradationPoint]
+        One :class:`DegradationPoint` per requested alpha.
+    sensitivity_slope : float
+        Least-squares slope of ``max_disp(alpha) / baseline`` over alpha
+        on the non-singular points.
+    scf_alpha_min : float
+        Response ratio ``max_disp / baseline_max_disp`` at the smallest
+        non-singular alpha (``inf`` when every point is singular).
+    is_key_element : bool
+        ``True`` when an near-zero-alpha probe turns the structure into a
+        mechanism (the member is kinematically essential).
+    mechanism_detected_at : float or None
+        First alpha at which a mechanism was detected, if any.
+    """
 
     member_id: str
     baseline_max_disp: float
@@ -44,7 +94,17 @@ class MemberSensitivityProfile:
 
 
 class DamageOperator:
-    """Applies alpha-degradation to truss members to assess system sensitivity."""
+    """Apply alpha-degradation to truss members to assess system sensitivity.
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes.
+    elements : list[Element]
+        Model elements.
+    loads : list[NodalLoad]
+        External nodal loads.
+    """
 
     def __init__(
         self,
@@ -105,9 +165,9 @@ class DamageOperator:
         K_ff = K[np.ix_(free_dofs, free_dofs)]
 
         try:
-            u, s, vh = np.linalg.svd(K_ff)
-            tol = s[0] * 1e-5 if len(s) > 0 else 1e-9
-            rank = int(np.sum(s > tol))
+            sv = np.linalg.svd(K_ff, compute_uv=False)
+            tol = sv[0] * 1e-5 if len(sv) > 0 else 1e-9
+            rank = int(np.sum(sv > tol))
         except np.linalg.LinAlgError:
             rank = 0
 
@@ -136,6 +196,25 @@ class DamageOperator:
         alphas: Sequence[float],
         probe_near_zero: bool = True,
     ) -> MemberSensitivityProfile:
+        """Degrade one member across ``alphas`` and profile the response.
+
+        Parameters
+        ----------
+        target_id : str
+            Element to degrade.
+        alphas : Sequence[float]
+            Scaling factors applied in order (area scales by ``alpha``,
+            second moment of area by ``alpha**2``).
+        probe_near_zero : bool, default True
+            Additionally probe ``alpha = 1e-6`` to decide whether removing
+            the member turns the structure into a mechanism.
+
+        Returns
+        -------
+        MemberSensitivityProfile
+            Baseline quantities, one point per alpha, the least-squares
+            sensitivity slope and the kinematic-essentiality flag.
+        """
         baseline_U, baseline_N = self._solve(self.nodes, self.elements)
         baseline_max_disp = float(np.max(np.hypot(baseline_U[0::2], baseline_U[1::2])))
 
@@ -212,14 +291,14 @@ class DamageOperator:
         self,
         alphas: Sequence[float] = (1.0, 0.9, 0.8, 0.7),
     ) -> list[MemberSensitivityProfile]:
+        """Profile every element in turn; returns one profile per element."""
         return [self.analyze_member(elem.id, alphas) for elem in self.elements]
 
 
 # ----------------------------------------------------------------------
-# Prompt-7 (critic 6 item 1): ONE degradation type, two implementations.
-# The pilot used a mechanical alpha-scaling definition while Track B used a
-# thermal k_E(T) definition; both now implement the same interface and a
-# registry guard rejects any third ad-hoc definition (CI guard in tests).
+# One degradation interface, two registered implementations (mechanical
+# area-scaling and thermal k_E(T)); the registry guard below rejects any
+# third ad-hoc definition (covered by the test suite).
 # ----------------------------------------------------------------------
 
 
@@ -234,7 +313,7 @@ class DegradationOperator(abc.ABC):
 
 
 class MechanicalDegradation(DegradationOperator):
-    """Pilot definition: scale ``A`` by alpha and ``I`` by alpha**2."""
+    """Mechanical definition: scale ``A`` by alpha and ``I`` by ``alpha**2``."""
 
     kind: ClassVar[str] = "mechanical"
 
@@ -243,6 +322,10 @@ class MechanicalDegradation(DegradationOperator):
         self.alpha = alpha
 
     def apply(self, elements: list[Element]) -> list[Element]:
+        """Return a copy with ``A *= alpha`` and ``I *= alpha**2`` on target.
+
+        Non-target elements are shared references (they are not mutated).
+        """
         out = []
         for elem in elements:
             if elem.id == self.target_id:
@@ -256,7 +339,11 @@ class MechanicalDegradation(DegradationOperator):
 
 
 class ThermalDegradation(DegradationOperator):
-    """Track-B definition: scale ``E`` by the EN 1993-1-2 k_E(T) SSOT."""
+    """Thermal definition: scale ``E`` by the EN 1993-1-2 factor ``k_E(T)``.
+
+    The reduction factors come from the single source of truth in
+    :mod:`truss_analysis.material.steel_eurocode`.
+    """
 
     kind: ClassVar[str] = "thermal"
 
@@ -264,10 +351,14 @@ class ThermalDegradation(DegradationOperator):
         self.temps = dict(temps)
 
     def apply(self, elements: list[Element]) -> list[Element]:
+        """Return copies of all elements with ``E *= k_E(T)`` per temperature.
+
+        Every element is copied because any member may carry a temperature.
+        """
         out = []
         for elem in elements:
             new = deepcopy(elem)
-            new.E = elem.E * float(ssot_k_E(self.temps[elem.id]))
+            new.E = elem.E * float(eurocode_k_E(self.temps[elem.id]))
             out.append(new)
         return out
 
@@ -279,16 +370,34 @@ _REGISTRY: dict[str, type[DegradationOperator]] = {
 
 
 def registered_degradation_kinds() -> tuple[str, ...]:
-    """The only degradation definitions allowed in this library."""
+    """Return the degradation kinds registered in this library."""
     return tuple(_REGISTRY)
 
 
 def get_degradation_operator(kind: str, **kwargs: object) -> DegradationOperator:
-    """Factory with a guard: unknown kinds raise instead of silent ad-hoc."""
+    """Instantiate a registered degradation operator by kind.
+
+    Parameters
+    ----------
+    kind : str
+        One of :func:`registered_degradation_kinds`.
+    **kwargs : object
+        Keyword arguments forwarded to the operator constructor.
+
+    Returns
+    -------
+    DegradationOperator
+        The constructed operator.
+
+    Raises
+    ------
+    ValueError
+        If ``kind`` is not registered (ad-hoc definitions are rejected).
+    """
     try:
         cls = _REGISTRY[kind]
     except KeyError as exc:
         kinds = registered_degradation_kinds()
         msg = f"unknown degradation kind {kind!r}; registered: {kinds}"
         raise ValueError(msg) from exc
-    return cls(**kwargs)  # type: ignore[arg-type]
+    return cls(**kwargs)

@@ -1,7 +1,7 @@
-"""Force-based limit states at elevated temperature (prompt-06, part A).
+"""Force-based limit states at elevated temperature.
 
-Closes CONTEXT_LOCK §4.5 B6: ``k_y(T)`` / ``f_y(T)`` were defined by the SSOT
-but never consumed by any computational path.  This module puts them to work:
+Consumes the temperature-dependent material reduction factors of
+:mod:`truss_analysis.material` to build member and system limit states:
 
 * Euler buckling capacity ``P_cr,i(T) = pi^2 E_i(T) I_i / (k L_i)^2`` for
   compression members only (``E_i(T) = k_E(T) E``).
@@ -14,7 +14,7 @@ but never consumed by any computational path.  This module puts them to work:
 * Member critical temperature ``theta_cr,i`` (DCR = 1 crossing, root-found on
   the discrete reduction curves) and system critical temperature
   ``theta*_sys`` (highest scanned temperature with no member at DCR >= 1).
-* Two-component CI per proposal §5.3:
+* Two-component criticality index:
   ``CI_i = max(u_ratio - 1, DCR_ratio - 1)`` with both components reported
   separately plus a ``governing`` field ("displacement" | "buckling" |
   "yield").
@@ -22,21 +22,22 @@ but never consumed by any computational path.  This module puts them to work:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Mapping, Optional, Sequence
 
 import numpy as np
-from truss_analysis.criticality.engine import (
+
+from .criticality.engine import (
     base_displacement,
     build_engine,
     ci_sweep,
     load_vector,
 )
-from truss_analysis.material.steel_eurocode import k_E as ssot_k_E
-from truss_analysis.material.steel_eurocode import k_y as ssot_k_y
-from truss_analysis.model import Element, Node
-from truss_analysis.sections import euler_buckling_load
+from .material.steel_eurocode import k_E as eurocode_k_E
+from .material.steel_eurocode import k_y as eurocode_k_y
+from .model import Element, Node
+from .sections import euler_buckling_load
 
 __all__ = [
     "GAMMA_M_FIRE",
@@ -75,7 +76,7 @@ class MemberLimitState:
     temperature: float
     axial_force: float
     compression: bool
-    p_cr: Optional[float]
+    p_cr: float | None
     n_rd: float
     dcr: float
     capacity_governing: Governing  # buckling | yield (which capacity is smaller)
@@ -83,7 +84,7 @@ class MemberLimitState:
 
 @dataclass(frozen=True)
 class ComponentCI:
-    """Two-component CI with both components exposed (proposal §5.3)."""
+    """Two-component criticality index with both components exposed."""
 
     member_id: str
     ci: float
@@ -96,9 +97,9 @@ class ComponentCI:
 class TwoComponentResult:
     """Container for a two-component CI sweep."""
 
-    components: Dict[str, ComponentCI]
-    ci_values: Dict[str, float]
-    governing: Dict[str, str]
+    components: dict[str, ComponentCI]
+    ci_values: dict[str, float]
+    governing: dict[str, str]
     u_max_base: float
 
 
@@ -107,7 +108,7 @@ def member_axial_forces(
     elements: Sequence[Element],
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Member axial forces [N] (tension positive) at the given temperatures."""
     setup = build_engine(nodes, elements, loads, temps)
     u = base_displacement(setup, load_vector(nodes, loads, setup.free_dofs))
@@ -118,7 +119,7 @@ def member_axial_forces(
 
 def yield_capacity(area: float, f_y: float, temperature: float) -> float:
     """``N_Rd(T) = k_y(T) f_y A / gamma_M,fi`` [N]."""
-    return float(ssot_k_y(temperature)) * f_y * area / GAMMA_M_FIRE
+    return float(eurocode_k_y(temperature)) * f_y * area / GAMMA_M_FIRE
 
 
 def _member_limit_state(
@@ -133,8 +134,8 @@ def _member_limit_state(
     f_y: float,
 ) -> MemberLimitState:
     compression = axial_force < 0.0
-    e_t = float(ssot_k_E(temperature)) * youngs
-    p_cr: Optional[float] = (
+    e_t = float(eurocode_k_E(temperature)) * youngs
+    p_cr: float | None = (
         euler_buckling_load(i_sec, length, e_t, k_factor) if compression else None
     )
     n_rd = yield_capacity(area, f_y, temperature)
@@ -161,10 +162,10 @@ def dcr_field(
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
     f_y: float,
-) -> Dict[str, MemberLimitState]:
+) -> dict[str, MemberLimitState]:
     """DCR state of every member at the given member temperatures."""
     forces = member_axial_forces(nodes, elements, loads, temps)
-    out: Dict[str, MemberLimitState] = {}
+    out: dict[str, MemberLimitState] = {}
     for e in elements:
         ni = next(n for n in nodes if n.id == e.node_i)
         nj = next(n for n in nodes if n.id == e.node_j)
@@ -183,7 +184,7 @@ def dcr_field(
     return out
 
 
-def _uniform_temps(elements: Sequence[Element], temperature: float) -> Dict[str, float]:
+def _uniform_temps(elements: Sequence[Element], temperature: float) -> dict[str, float]:
     return {e.id: float(temperature) for e in elements}
 
 
@@ -194,15 +195,15 @@ def member_critical_temperature(
     member_id: str,
     f_y: float,
     temp_grid: Sequence[float] = _TEMP_GRID,
-) -> Optional[float]:
+) -> float | None:
     """Smallest uniform temperature at which ``DCR_member >= 1``.
 
     Root-found by scanning the discrete reduction curves and linearly
     interpolating the DCR = 1 crossing between grid points.  ``None`` when the
     member never reaches DCR = 1 within [20, 1200] degC.
     """
-    prev_t: Optional[float] = None
-    prev_dcr: Optional[float] = None
+    prev_t: float | None = None
+    prev_dcr: float | None = None
     for t in temp_grid:
         states = dcr_field(nodes, elements, loads, _uniform_temps(elements, t), f_y)
         dcr = states[member_id].dcr
@@ -252,7 +253,7 @@ def ci_two_component(
     The displacement component comes from the rank-1 engine sweep; the DCR
     component compares the perturbed member force (member i softened by
     ``alpha``) against the temperature-dependent capacity.  Both components
-    and the governing limit state are reported (proposal §5.3).
+    and the governing limit state are reported separately.
     """
     setup = build_engine(nodes, elements, loads, temps)
     f_free = load_vector(nodes, loads, setup.free_dofs)
@@ -261,17 +262,16 @@ def ci_two_component(
     sweep = ci_sweep(setup, u, alpha)
     # Cold reference state (20 degC, same geometry/loads): the DCR component
     # compares against the COLD capacity-demand state so that temperature
-    # degradation does NOT cancel out of the ratio (proposal §5.3 is silent
-    # on the reference; this reading is the only one under which the
-    # governing component can switch with temperature — recorded in
-    # vault/reports/06_limitstates_uncertainty_retrofit.md).
+    # degradation does NOT cancel out of the ratio. This reference is the
+    # only reading under which the governing component can switch with
+    # temperature; see docs/theory.md for the limit-state definitions.
     forces_cold = member_axial_forces(
         nodes, elements, loads, {e.id: 20.0 for e in elements}
     )
 
-    components: Dict[str, ComponentCI] = {}
-    ci_values: Dict[str, float] = {}
-    governing: Dict[str, str] = {}
+    components: dict[str, ComponentCI] = {}
+    ci_values: dict[str, float] = {}
+    governing: dict[str, str] = {}
     for i, eid in enumerate(setup.ids):
         u_comp = sweep.ci_values[eid]
         elem = elements[i]

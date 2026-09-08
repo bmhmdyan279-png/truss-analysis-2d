@@ -1,4 +1,4 @@
-"""Limit-state tests (prompt-06 A): hand solutions, DCR, theta_cr, governing switch."""
+"""Limit-state tests: hand solutions, DCR, theta_cr, governing switch."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def test_yield_capacity_uses_k_y() -> None:
     cap20 = yield_capacity(0.01, F_Y, 20.0)
     cap600 = yield_capacity(0.01, F_Y, 600.0)
     assert cap20 == pytest.approx(F_Y * 0.01, rel=1e-12)
-    # k_y(600) = 0.470 from the SSOT fixture
+    # k_y(600) = 0.470 from the material fixture
     assert cap600 == pytest.approx(0.470 * F_Y * 0.01, rel=1e-9)
 
 
@@ -108,7 +108,7 @@ def test_member_and_system_critical_temperatures_consistent() -> None:
 
 
 def test_dcr_field_on_campaign_truss(campaign) -> None:
-    cm = next(c for c in campaign if c.name == "warren_4_H1")
+    cm = next(c for c in campaign if c.name == "warren_4_shallow")
     temps = {e.id: 600.0 for e in cm.elements}
     states = dcr_field(cm.nodes, cm.elements, cm.loads, temps, F_Y)
     assert set(states) == {e.id for e in cm.elements}

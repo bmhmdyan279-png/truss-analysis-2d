@@ -1,0 +1,23 @@
+# Citation metadata for the software itself (CFF 1.2.0).
+# The version field tracks the latest published package release.
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "truss_analysis: linear 2D truss finite-element analysis for Python"
+authors:
+  - alias: bmhmdyan279-png
+version: "2.5.0"
+license: MIT
+type: software
+repository-code: "https://github.com/bmhmdyan279-png/truss-analysis-2d"
+keywords:
+  - truss
+  - finite-element
+  - structural-analysis
+  - steel
+  - EN 1993-1-2
+abstract: >-
+  truss_analysis is a Python library for linear static analysis of planar
+  (2D) steel trusses using the direct stiffness method. It supports
+  temperature-dependent material properties according to EN 1993-1-2,
+  parametric topology generation, member criticality indices, uncertainty
+  quantification (LHS / Monte Carlo) and retrofit prioritisation utilities.

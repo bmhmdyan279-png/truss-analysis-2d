@@ -40,7 +40,7 @@ class TrussReliabilityModel:
         self.node_map: dict[str, int] = {node.id: i for i, node in enumerate(nodes)}
 
     def create_analyze_fn(self) -> Callable[[Mapping[str, float]], AnalysisSample]:
-        """Returns a callback for the ReliabilityEngine."""
+        """Return a callback that analyses one sampled variable vector."""
 
         def analyze(sample: Mapping[str, float]) -> AnalysisSample:
             # 1. Deepcopy to prevent mutation across Monte Carlo iterations
@@ -122,7 +122,7 @@ class TrussReliabilityModel:
         elements: list[Element],
         loads: list[NodalLoad],
     ) -> None:
-        """Parses variable names like 'E_1', 'A_2', 'Fy_0' and updates the model."""
+        """Parse variable names such as ``E_1``, ``A_2``, ``Fy_0`` into the model."""
         parts = var_name.split("_", 1)
         if len(parts) != 2:
             return

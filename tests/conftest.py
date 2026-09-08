@@ -1,18 +1,16 @@
 """Pytest configuration — adds src/ to sys.path for import resolution.
 
-Also provides the shared 21-topology campaign suite (prompt-04):
-18 indeterminate trusses (3 families x {4,6,8} panels x {H1,H2} depth
-ratios, panel = 4 m) plus 3 statically determinate controls.  The controls
-are the interim single-generator variants (heights 2.0/2.5/3.0, DR-003);
-prompt 5 replaces them with truly distinct determinate topologies and the
-campaign list below is the single place to update.
+Also provides the shared 21-topology suite used across the test suite:
+18 statically indeterminate trusses (3 families x {4,6,8} panels x
+{shallow,deep} depth ratios, panel = 4 m) plus 3 statically determinate
+controls.  The campaign list below is the single place to update.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -27,18 +25,18 @@ from truss_analysis.topology_generator import (  # noqa: E402
 )
 
 PANEL = 4.0
-DEPTH_RATIOS = {"H1": 0.15, "H2": 0.25}
+DEPTH_RATIOS = {"shallow": 0.15, "deep": 0.25}
 
 
 class CampaignModel(NamedTuple):
     name: str
-    nodes: List[Node]
-    elements: List[Element]
-    loads: Dict[str, Dict[str, float]]
-    supports: Dict[str, Any]
+    nodes: list[Node]
+    elements: list[Element]
+    loads: dict[str, dict[str, float]]
+    supports: dict[str, Any]
 
 
-def model_objects(model: Dict[str, Any]) -> CampaignModel:
+def model_objects(model: dict[str, Any]) -> CampaignModel:
     nodes = [
         Node(
             id=str(n["id"]),
@@ -67,8 +65,8 @@ def model_objects(model: Dict[str, Any]) -> CampaignModel:
     return CampaignModel("", nodes, elements, loads, supports)
 
 
-def campaign_spec() -> List[Dict[str, Any]]:
-    spec: List[Dict[str, Any]] = []
+def campaign_spec() -> list[dict[str, Any]]:
+    spec: list[dict[str, Any]] = []
     for family in ("warren", "pratt", "howe"):
         for n_panels in (4, 6, 8):
             for tag, ratio in DEPTH_RATIOS.items():
@@ -95,7 +93,7 @@ def campaign_spec() -> List[Dict[str, Any]]:
 
 
 @pytest.fixture(scope="session")
-def campaign() -> List[CampaignModel]:
+def campaign() -> list[CampaignModel]:
     out = []
     for entry in campaign_spec():
         cm = model_objects(entry["model"])
@@ -104,9 +102,10 @@ def campaign() -> List[CampaignModel]:
 
 
 @pytest.fixture(scope="session")
-def warren4_lemma() -> CampaignModel:
-    """Warren-4 at depth ratio 0.1875 — the geometry that reproduces the
-    CONTEXT_LOCK §4.3 measured CI range 0.086323 (CI is scale-invariant, so
-    any similar geometry reproduces it; this one matches the §4.3 model)."""
+def warren4_uniform() -> CampaignModel:
+    """Warren-4 at depth ratio 0.1875 — the reference geometry for the
+    measured CI range 0.086323 under uniform fields (CI is scale-invariant,
+    so any similar geometry reproduces it; this one matches the reference
+    model exactly)."""
     cm = model_objects(generate_topology("warren", n_panels=4, span=16.0, height=3.0))
-    return cm._replace(name="warren_4_lemma")
+    return cm._replace(name="warren_4_uniform")

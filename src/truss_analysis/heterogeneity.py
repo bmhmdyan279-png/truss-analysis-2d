@@ -1,9 +1,20 @@
-"""Phase 6: Heterogeneity Index and H1 Test with Bootstrap."""
+"""Heterogeneity indices of member demand with bootstrap confidence bounds.
+
+Given per-member stochastic demand samples (safety margins), this module
+quantifies how unevenly demand is distributed across members:
+
+* bounded inequality metrics (Gini coefficient, log-ratio) computed on
+  absolute values, robust to sign changes and singularities;
+* an empirical heterogeneity index ``U = max/min`` per sample, reported
+  without clamping and filtered for non-finite values;
+* a one-sided bootstrap test that the mean of ``U`` exceeds 1, i.e. that
+  demand is genuinely non-uniform across the ensemble.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 import numpy as np
 import numpy.typing as npt
@@ -11,7 +22,39 @@ import numpy.typing as npt
 
 @dataclass(frozen=True)
 class HeterogeneityResult:
-    """Results of the Phase 6 heterogeneity and bootstrap analysis."""
+    """Results of the heterogeneity and bootstrap analysis.
+
+    Attributes
+    ----------
+    member_ids : list[str]
+        Sorted member identifiers.
+    scf_values : dict[str, float]
+        Per-member importance factors applied when forming the demand
+        ratio (defaults to 1.0 for members absent from the input map).
+    mu_g : dict[str, float]
+        Per-member mean safety margin.
+    beta_hat : dict[str, float]
+        Per-member reliability-like index ``mu_g / std_g`` (signed;
+        ``inf``/``-inf``/``nan`` for degenerate dispersion).
+    u_empirical_mean, u_empirical_std : float
+        Mean and sample standard deviation of the heterogeneity index
+        over the valid samples.
+    u_empirical_quantiles : dict[str, float]
+        ``2.5%``/``50%``/``97.5%`` percentiles of the index.
+    u_boot_mean_lower_95 : float
+        Lower 95% bootstrap confidence bound of the index mean.
+    cov_empirical : float
+        Mean coefficient of variation across members and samples.
+    gini_empirical : float
+        Mean Gini coefficient across the valid samples.
+    h1_accepted : bool
+        ``True`` when the bootstrap confidence bound of the index mean
+        lies above 1 (demand is significantly non-uniform).
+    unstable_members : list[str]
+        Members whose mean safety margin is non-positive.
+    warnings : list[str]
+        Human-readable diagnostics collected during the computation.
+    """
 
     member_ids: list[str]
     scf_values: dict[str, float]
@@ -29,11 +72,24 @@ class HeterogeneityResult:
 
 
 def compute_bounded_metrics(values: npt.ArrayLike) -> dict[str, float]:
-    """
-    Computes bounded heterogeneity metrics (Gini and Log-Ratio).
+    """Compute bounded heterogeneity metrics (Gini coefficient and log-ratio).
 
-    Replaces the unstable U = max/min and handles singularities honestly (D-021).
-    Uses absolute values for Gini (D-014).
+    Unlike the raw ratio ``U = max/min``, both metrics stay bounded under
+    singularities: non-finite entries (e.g. from ``beta -> 0``) are dropped,
+    the Gini coefficient is evaluated on absolute values, and the log-ratio
+    ignores entries below ``1e-12``.
+
+    Parameters
+    ----------
+    values : npt.ArrayLike
+        1-D sample of member demand values.
+
+    Returns
+    -------
+    dict[str, float]
+        ``{"gini", "log_ratio", "u_raw"}``; ``u_raw`` is the unclamped
+        ``max/min`` ratio retained for logging (``inf`` when the minimum
+        vanishes, ``nan`` when fewer than two finite values remain).
     """
     arr = np.asarray(values)
 
@@ -79,7 +135,29 @@ def compute_heterogeneity(
     n_bootstrap: int = 5000,
     bootstrap_seed: int = 2026,
 ) -> HeterogeneityResult:
-    """Compute heterogeneity index U, CoV, Gini, and perform H1 test."""
+    """Compute the heterogeneity index, CoV and Gini, with a bootstrap test.
+
+    Parameters
+    ----------
+    margins : Mapping[str, npt.NDArray[np.float64]]
+        Per-member safety-margin samples (equal-length 1-D arrays).
+    scf_values : Mapping[str, float]
+        Per-member importance factors multiplying the demand ratio.
+    n_bootstrap : int, default 5000
+        Number of bootstrap resamples of the index mean.
+    bootstrap_seed : int, default 2026
+        Seed of the bootstrap generator (reproducibility).
+
+    Returns
+    -------
+    HeterogeneityResult
+        Empirical and bootstrap statistics; see the dataclass fields.
+
+    Raises
+    ------
+    ValueError
+        If ``margins`` is empty.
+    """
     member_ids = sorted(margins.keys())
     if not member_ids:
         raise ValueError("No margins provided.")
@@ -174,7 +252,7 @@ def compute_heterogeneity(
     valid_cov = cov_arr[~np.isnan(cov_arr) & ~np.isinf(cov_arr)]
     valid_gini = gini_arr[~np.isnan(gini_arr) & ~np.isinf(gini_arr)]
 
-    # Bootstrap for H1 test on U
+    # One-sided bootstrap test on the mean of U (bound above 1 => non-uniform)
     if len(valid_u) > 0:
         rng_boot = np.random.default_rng(bootstrap_seed)
         boot_means = np.zeros(n_bootstrap)
@@ -220,10 +298,21 @@ def compute_heterogeneity(
 
 
 def gini_normalized(values: npt.ArrayLike) -> float:
-    """Bias-corrected Gini (D-046): ``gini * n / (n - 1)``.
+    """Return the bias-corrected Gini coefficient ``gini * n / (n - 1)``.
 
-    Known-distribution checks: all-equal -> 0; single holder of everything
-    -> 1.0 (raw Gini (n-1)/n scaled up).  n < 2 returns 0.0.
+    Known-distribution checks: all-equal values give 0; a single holder of
+    everything gives 1.0 (the raw ``Gini = (n-1)/n`` scaled up). Fewer than
+    two finite values give 0.0.
+
+    Parameters
+    ----------
+    values : npt.ArrayLike
+        1-D sample; non-finite entries are dropped, absolute values used.
+
+    Returns
+    -------
+    float
+        Bias-corrected Gini coefficient in ``[0, 1]``.
     """
     arr = np.asarray(values, dtype=float)
     arr = arr[~np.isnan(arr) & ~np.isinf(arr)]

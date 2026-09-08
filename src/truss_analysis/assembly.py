@@ -12,13 +12,33 @@ def assemble_global_matrices(
     nodes: list[Node],
     elements: list[Element],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int]]:
-    """Assemble global stiffness matrix and force vectors.
+    """Assemble the global stiffness matrix and force vectors.
 
-    Returns:
-        K: Global stiffness matrix
-        F_ext: External force vector (mechanical + thermal)
-        F_mechanical: Mechanical force vector only
-        fixed_dofs: List of fixed DOF indices
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes; node ordering defines the global DOF map
+        (node ``i`` owns DOFs ``2i`` and ``2i+1``).
+    elements : list[Element]
+        Model elements, including thermal (``alpha``, ``delta_T``) and
+        fabrication (``delta_L_free``) imposed-elongation fields.
+
+    Returns
+    -------
+    K : np.ndarray
+        Global stiffness matrix, shape ``(2n, 2n)``.
+    F_ext : np.ndarray
+        External force vector (mechanical loads excluded here; includes
+        equivalent nodal forces from imposed elongations).
+    F_mechanical : np.ndarray
+        Mechanical force vector (zero on entry; callers add applied loads).
+    fixed_dofs : list[int]
+        Indices of constrained degrees of freedom from the support flags.
+
+    Raises
+    ------
+    AssemblyError
+        If an element references a missing node or has zero length.
     """
     n = len(nodes)
     K = np.zeros((2 * n, 2 * n))

@@ -1,4 +1,4 @@
-"""EN 1993-1-2:2005 material layer — single source of truth (SSOT).
+"""EN 1993-1-2:2005 material layer - the single source of truth.
 
 Public API re-exported from :mod:`truss_analysis.material.steel_eurocode`.
 All values originate from the provenance fixture

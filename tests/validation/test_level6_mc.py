@@ -2,11 +2,11 @@
 
 Estimand (fixed before measurement): the spatial MEAN of the two-component
 criticality index per sample — the displacement-only CI is invariant to load
-scale (linearity) and to uniform temperature (Lemma 1), so the two-component
-statistic is the one that actually responds to the random variables.  The
-ladder uses a single deterministic LHS draw of 2000 samples (seed 20260907)
-truncated at each rung: rungs are nested prefixes of the same sample set, so
-differences between rungs are pure sample-size effects.
+scale (linearity) and to uniform temperature (uniform-field invariance), so
+the two-component statistic is the one that actually responds to the random
+variables.  The ladder uses a single deterministic LHS draw of 2000 samples
+(seed 20260907) truncated at each rung: rungs are nested prefixes of the
+same sample set, so differences between rungs are pure sample-size effects.
 
 Acceptance gate (protocol): the relative change of BOTH the mean and the
 standard deviation of the CI statistic between N=1000 and N=2000 is < 1 %.
@@ -25,10 +25,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 from scipy.stats import spearmanr
+
 from truss_analysis.limitstates import ci_two_component
 from truss_analysis.uncertainty import (
     RunningStat,
-    proposal_rv_specs,
+    default_rv_specs,
     sample_spec_matrix,
 )
 
@@ -48,8 +49,8 @@ def _loads_of(cm, factor):
 
 
 def test_mc_convergence_ladder_gates_and_rank_stability(campaign) -> None:
-    cm = next(c for c in campaign if c.name == "warren_4_H1")
-    specs = proposal_rv_specs(fire_scenario_temperature=FIRE_TEMPERATURE)
+    cm = next(c for c in campaign if c.name == "warren_4_shallow")
+    specs = default_rv_specs(fire_scenario_temperature=FIRE_TEMPERATURE)
     means = {
         "live_load": 1.0,
         "f_y": F_Y,
@@ -71,7 +72,7 @@ def test_mc_convergence_ladder_gates_and_rank_stability(campaign) -> None:
         loads = _loads_of(cm, float(live[k]))
         temps_i = {e.id: float(temps[k]) for e in cm.elements}
         res = ci_two_component(cm.nodes, cm.elements, loads, temps_i, ALPHA, F_Y)
-        for j, mid in enumerate(ids):
+        for mid in ids:
             per_member[mid][k] = res.ci_values[mid]
         s = float(np.mean([res.ci_values[mid] for mid in ids]))
         ci_stat.add(s)
@@ -111,5 +112,6 @@ def test_mc_convergence_ladder_gates_and_rank_stability(campaign) -> None:
     for rung in LADDER:
         assert curve[rung]["ci_mean"] > 0.0
         assert curve[rung]["ci_std"] > 0.0
-        assert np.isfinite(u_raw[:rung]).all() and np.isfinite(ci_raw[:rung]).all()
+        assert np.isfinite(u_raw[:rung]).all()
+        assert np.isfinite(ci_raw[:rung]).all()
     assert pytest.approx(ci_stat.mean, rel=1e-12) == float(np.mean(ci_raw))

@@ -8,27 +8,27 @@
     "edition": "EN 1993-1-2:2005 (April 2005)",
     "corrigendum": "Incorporating Corrigendum December 2005",
     "publisher": "CEN (English version, BS adopted cover)",
-    "primary_source_file": "vault/experiment/p3_materials/en1993-1-2_2005.pdf",
+    "primary_source_file": "en1993-1-2_2005.pdf (local archival copy of the standard)",
     "primary_source_sha256": "058184ab18e680b9f14c4289e53a1f47ccd460825f8e28ebcbbc5557bd1e4e2e",
     "primary_source_url": "https://www.phd.eng.br/wp-content/uploads/2015/12/en.1993.1.2.2005.pdf",
-    "primary_source_url_note": "URL cited in prompt-03 (acefirm.ir) returned HTTP 404 on 2026-09-07; this mirror carries the identical filename cited by two independent papers (MDPI Buildings 16(1):215 ref list). Identity verified from the document itself: cover page 'EUROPEAN STANDARD EN 1993-1-2 ... April 2005 ... Incorporating Corrigendum December 2005'.",
+    "primary_source_url_note": "The originally cited source URL (acefirm.ir) returned HTTP 404 on 2026-09-07; this mirror carries the identical filename cited by two independent papers (MDPI Buildings 16(1):215 ref list). Identity verified from the document itself: cover page 'EUROPEAN STANDARD EN 1993-1-2 ... April 2005 ... Incorporating Corrigendum December 2005'.",
     "pages_total": 81
   },
   "table": {
     "id": "3.1",
     "title": "Reduction factors for stress-strain relationship of carbon steel at elevated temperatures",
     "clause": "3.2.1(3)",
-    "clause_note": "Table 3.1 is introduced by clause 3.2.1(3) (printed standard page 22, PDF page index 23). Clause 3.2.2 of this standard is 'Unit mass', NOT the table location. The proposal's and phase4_common's citation 'Annex D' is wrong: Annex D of EN 1993-1-2:2005 is 'Joints (informative)' (measured: TOC + clause 4.2.1(7) cross-reference).",
+    "clause_note": "Table 3.1 is introduced by clause 3.2.1(3) (printed standard page 22, PDF page index 23). Clause 3.2.2 of this standard is 'Unit mass', NOT the table location. Citations of 'Annex D' for this table are wrong: Annex D of EN 1993-1-2:2005 is 'Joints (informative)' (measured: TOC + clause 4.2.1(7) cross-reference).",
     "printed_page": 22,
     "pdf_page_index": 23,
     "interpolation_note": "Table 3.1 NOTE: 'For intermediate values of the steel temperature, linear interpolation may be used.'",
-    "extraction_method": "pypdf text-layer extraction AND independent visual reading of a 130 dpi rendered page image (vault/experiment/p3_materials/pg24_table31-24.png); both readings agree on all 39 values.",
+    "extraction_method": "pypdf text-layer extraction AND independent visual reading of a 130 dpi rendered page image; both readings agree on all 39 values.",
     "column_definitions": {
       "k_y": "k_y,theta = f_y,theta / f_y — reduction factor for effective yield strength, relative to yield strength at 20 C",
       "k_p": "k_p,theta = f_p,theta / f_y — reduction factor for proportional limit, relative to yield strength at 20 C",
       "k_E": "k_E,theta = E_a,theta / E_a — reduction factor for the slope of the linear elastic range, relative to slope at 20 C"
     },
-    "k_s_note": "Table 3.1 defines exactly ONE elastic reduction factor: k_E,theta (slope of linear elastic range = E_a,theta/E_a), confirmed by figure 3.2 key ('Slope of linear elastic range k_E,theta = E_a,theta / E_a'). There is no separate k_s,theta column in EN 1993-1-2:2005 Table 3.1. The API exposes k_s() as a documented alias of k_E() for notation compatibility; CONTEXT_LOCK section 4.2's assumption that k_s and k_E are two different tabulated quantities is refuted by the document (DR-017).",
+    "k_s_note": "Table 3.1 defines exactly ONE elastic reduction factor: k_E,theta (slope of linear elastic range = E_a,theta/E_a), confirmed by figure 3.2 key ('Slope of linear elastic range k_E,theta = E_a,theta / E_a'). There is no separate k_s,theta column in EN 1993-1-2:2005 Table 3.1. The API exposes k_s() as a documented alias of k_E() for notation compatibility; the assumption that k_s and k_E are two different tabulated quantities is refuted by the document.",
     "temperatures_c": [
       20,
       100,
@@ -99,7 +99,7 @@
       "eps_t": 0.15,
       "eps_u": 0.2
     },
-    "note": "The strain limits of the stress-strain relationship are temperature-INDEPENDENT constants given in figure 3.1's parameter row (eps_y,theta = 0.02; eps_t,theta = 0.15; eps_u,theta = 0.20). They are NOT per-temperature columns of Table 3.1 (prompt-03's assumption corrected, DR-017).",
+    "note": "The strain limits of the stress-strain relationship are temperature-INDEPENDENT constants given in figure 3.1's parameter row (eps_y,theta = 0.02; eps_t,theta = 0.15; eps_u,theta = 0.20). They are NOT per-temperature columns of Table 3.1 (a common misreading, corrected here).",
     "eps_p_definition": "eps_p,theta = f_p,theta / E_a,theta = (k_p,theta * f_y) / (k_E,theta * E_a) — temperature-dependent, derived"
   },
   "constitutive_law": {
@@ -138,7 +138,7 @@
       "b_squared": "c * (eps_y - eps_p) * E_a_theta + c^2",
       "c": "(f_y - f_p)^2 / ((eps_y - eps_p) * E_a_theta - 2 * (f_y - f_p))"
     },
-    "note": "The standard parameterises the elliptical branch with a single constant c (plus derived a, b), not 'c1, c2, c3' as prompt-03 assumed (DR-017). Symbols f_y, f_p, E_a_theta here denote the temperature-dependent values f_y,theta = k_y*f_y(20C), f_p,theta = k_p*f_y(20C), E_a,theta = k_E*E_a(20C)."
+    "note": "The standard parameterises the elliptical branch with a single constant c (plus derived a, b), not 'c1, c2, c3' as sometimes assumed. Symbols f_y, f_p, E_a_theta here denote the temperature-dependent values f_y,theta = k_y*f_y(20C), f_p,theta = k_p*f_y(20C), E_a,theta = k_E*E_a(20C)."
   },
   "thermal": {
     "thermal_elongation": {
@@ -340,7 +340,7 @@
     "provenance": "S235 nominal yield strength (EN 10025-2, via Fonseca 2024 Table 13) and elastic modulus (EN 1993-1-1, via Fonseca 2024 Table 12). Defaults only; all API functions accept explicit f_y and E_a arguments."
   },
   "extracted_at": "2026-09-07",
-  "extracted_by": "prompt-03 session (automated pypdf extraction + visual verification of rendered pages)",
+  "extracted_by": "automated pypdf extraction + visual verification of rendered pages (2026-09)",
   "cross_checked_against": [
     {
       "name": "Fonseca, E.M.M. (2024), 'Brief Overview of the Thermal and Mechanical Properties of Wood, Steel, and Gypsum Board for Structural Connections', GeoStruct. Innov. 2(2):77-89, Table 14 + Section 3.2",
@@ -351,22 +351,22 @@
     },
     {
       "name": "ECCS Fire Design Course 2013 slide values (as recorded and verified in session 0)",
-      "url": "recorded in STATE/00_CONTEXT_LOCK.md section 4.2",
+      "url": "offline reference recorded in the extraction notes",
       "checked": "600C: 0.470/0.180/0.310; 700C: 0.230/0.075/0.130; 800C: 0.110/0.050/0.090; 900C: 0.060/0.0375/0.0675; 1000C: 0.040/0.0250/0.0450; 1100C: 0.020/0.0125/0.0225",
       "agreement": "exact",
-      "verified_live": "session 0 (2026-09-07 earlier); re-verified arithmetically against this fixture in prompt-03"
+      "verified_live": "verified 2026-09-07; re-verified arithmetically against this fixture"
     },
     {
-      "name": "acadlore/TU-Eindhoven/MDPI sources listed in CONTEXT_LOCK section 4.2",
-      "url": "see CONTEXT_LOCK 4.2",
-      "checked": "NOT re-verified live in prompt-03: the MDPI URL (mdpi.com/2571-6255/9/6/254) now resolves to a DIFFERENT article (measured 2026-09-07); academia.edu is access-gated",
-      "agreement": "unverified-live (recorded as DR-018)",
+      "name": "acadlore/TU-Eindhoven/MDPI secondary sources",
+      "url": "see extraction notes",
+      "checked": "NOT re-verified live: the MDPI URL (mdpi.com/2571-6255/9/6/254) now resolves to a DIFFERENT article (measured 2026-09-07); academia.edu is access-gated",
+      "agreement": "unverified-live",
       "verified_live": null
     }
   ],
   "misattribution_corrections": [
     "Table 3.1 lives in clause 3.2.1(3), not 3.2.2 (3.2.2 = Unit mass).",
-    "The reduction curves are NOT in 'Annex D' (Annex D = Joints, informative); the proposal and phase4_common.py cited Annex D.",
+    "The reduction curves are NOT in 'Annex D' (Annex D = Joints, informative); some secondary sources misattribute them to Annex D.",
     "Table 3.1 has three reduction factors (k_y, k_p, k_E); no k_s column exists.",
     "Strain limits are figure-3.1 constants (0.02/0.15/0.20), not Table 3.1 columns.",
     "The elliptical-branch parameters are (a, b, c), not (c1, c2, c3).",

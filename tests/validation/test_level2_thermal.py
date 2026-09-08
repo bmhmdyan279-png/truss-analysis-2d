@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
 from truss_analysis.material import steel_eurocode as ec
 
 # Hand transcription of EN 1993-1-2:2005 Table 3.1 (carbon steel).
@@ -69,7 +70,7 @@ COLUMNS = {"k_y": (ec.k_y, K_Y), "k_p": (ec.k_p, K_P), "k_E": (ec.k_E, K_E)}
 @pytest.mark.parametrize("column", sorted(COLUMNS))
 def test_api_returns_fixture_values_exactly(column):
     func, values = COLUMNS[column]
-    for theta, value in zip(TEMPS, values):
+    for theta, value in zip(TEMPS, values, strict=True):
         assert func(float(theta)) == value  # EXACT float equality (zero error)
 
 

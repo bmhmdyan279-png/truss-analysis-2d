@@ -1,10 +1,24 @@
-"""Phase 5: Independent SCF Validation (Adjoint/DDM and Strain Energy)."""
+"""Independent member-sensitivity cross-checks: adjoint DDM and strain energy.
+
+This module provides verification tools that are *independent* of the main
+assembly/solve path:
+
+* the direct differentiation method (DDM) in adjoint form, giving the
+  sensitivity of the maximum nodal displacement magnitude with respect to
+  each member's cross-sectional area, and
+* per-member strain energy computed directly from the element stiffness
+  in global coordinates.
+
+Both quantities are standard, self-contained checks of a solved model and
+are used to corroborate ranking-based tools elsewhere in the library.
+"""
 
 from __future__ import annotations
 
+import contextlib
 import math
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any
 
 import numpy as np
 from scipy.linalg import lu_factor, lu_solve
@@ -16,7 +30,19 @@ from .solver import solve
 
 @dataclass(frozen=True)
 class SensitivityResult:
-    """Result of independent sensitivity and energy validation for a single member."""
+    """Result of the independent sensitivity/energy check for one member.
+
+    Attributes
+    ----------
+    member_id : str
+        Identifier of the element.
+    ddm_sensitivity : float
+        Derivative of the maximum nodal displacement magnitude with
+        respect to the member area, ``d(|u|_max)/dA_i`` [m per m^2].
+    strain_energy : float
+        Member strain energy ``0.5 * u_e^T k_e u_e`` [J], clipped at zero
+        against negative floating-point round-off.
+    """
 
     member_id: str
     ddm_sensitivity: float
@@ -24,13 +50,24 @@ class SensitivityResult:
 
 
 class IndependentValidator:
-    """Validates Phase 4 SCF rankings using DDM and Strain Energy methods."""
+    """Cross-validate member importance rankings with DDM and strain energy.
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes.
+    elements : list[Element]
+        Model elements.
+    loads : list[Any]
+        Nodal loads; each item must expose ``node_id`` and either
+        ``fx``/``fy`` or ``Fx``/``Fy`` attributes.
+    """
 
     def __init__(
         self,
-        nodes: List[Node],
-        elements: List[Element],
-        loads: List[Any],
+        nodes: list[Node],
+        elements: list[Element],
+        loads: list[Any],
     ) -> None:
         self.nodes = nodes
         self.elements = elements
@@ -38,7 +75,14 @@ class IndependentValidator:
         self.node_map = {node.id: i for i, node in enumerate(nodes)}
 
     def compute_baseline(self) -> tuple[np.ndarray, list[int]]:
-        """Solves the baseline system KU=F."""
+        """Solve the baseline system ``K U = F`` including the nodal loads.
+
+        Returns
+        -------
+        tuple[np.ndarray, list[int]]
+            ``(U, fixed_dofs)``: the global displacement vector and the
+            list of constrained DOF indices.
+        """
         K, F_ext, _, fixed_dofs = assemble_global_matrices(self.nodes, self.elements)
 
         # Apply external loads
@@ -53,7 +97,20 @@ class IndependentValidator:
         return U, fixed_dofs
 
     def compute_all(self) -> list[SensitivityResult]:
-        """Computes DDM sensitivity and strain energy for all elements."""
+        """Compute DDM sensitivity and strain energy for every element.
+
+        The DDM uses a rank-1 formulation: one LU factorisation of ``K_ff``
+        plus one triangular solve for the whole compatibility matrix ``B``
+        replaces any explicit inverse. With ``dU/dk_i = -Z_i (b_i^T U_f)``
+        and ``dk_i/dA = E/L``:
+
+        ``dU/dA_i = -(E_i / L_i) * Z_i * (b_i^T U_f)``
+
+        Returns
+        -------
+        list[SensitivityResult]
+            One result per element, in element order.
+        """
         U, fixed_dofs = self.compute_baseline()
         n = len(self.nodes)
         free_dofs = [i for i in range(2 * n) if i not in fixed_dofs]
@@ -62,12 +119,9 @@ class IndependentValidator:
         K_ff = K[np.ix_(free_dofs, free_dofs)]
         U_f = U[free_dofs]
 
-        # Rank-1 DDM machinery (prompt-7, critic 6 item 6): one LU factorisation
-        # plus one solve for the whole compatibility matrix B replaces the
-        # explicit inverse.  dU/dk_i = -Z_i (b_i^T U_f); dk_i/dA = E/L, so
-        # dU/dA_i = -(E_i/L_i) Z_i (b_i^T U_f).  Identical mathematics, no
-        # explicit inverse, no silent failure on ill-conditioned matrices
-        # (singularity is caught by solve() via the D-012 rank check).
+        # Rank-1 DDM machinery: one LU factorisation plus one solve for the
+        # whole compatibility matrix B; no explicit inverse, and singularity
+        # is caught up-front by the rank check inside solve().
         node_idx = {nd.id: i for i, nd in enumerate(self.nodes)}
         b_free = np.zeros((len(self.elements), len(free_dofs)))
         for e_i, elem in enumerate(self.elements):
@@ -79,10 +133,8 @@ class IndependentValidator:
             c, s = dx / length, dy / length
             dofs = [2 * i_idx, 2 * i_idx + 1, 2 * j_idx, 2 * j_idx + 1]
             for k, dof in enumerate(dofs):
-                try:
+                with contextlib.suppress(ValueError):
                     b_free[e_i, free_dofs.index(dof)] = (-c, -s, c, s)[k]
-                except ValueError:
-                    pass
         z_mat = lu_solve(lu_factor(K_ff), b_free.T)
 
         # Find critical node for max displacement
@@ -108,7 +160,8 @@ class IndependentValidator:
             c = dx / L
             s = dy / L
 
-            # 1. Strain Energy (Global Coordinates)
+            # 1. Strain energy in global coordinates: 0.5 * u_e^T k_e u_e
+            #    with k_e = (E A / L) * [direction dyadic pattern].
             k_e = (elem.E * elem.A / L) * np.array(
                 [
                     [c**2, c * s, -(c**2), -c * s],
@@ -127,23 +180,13 @@ class IndependentValidator:
                 ]
             )
 
-            # FIX: Use max(0.0, ...) to prevent floating-point negative zeros
-            # Strain energy is theoretically non-negative for stable structures.
+            # Strain energy is theoretically non-negative for stable
+            # structures; max(0.0, ...) guards against floating-point
+            # negative zeros from round-off.
             raw_energy = 0.5 * float(u_e.T @ k_e @ u_e)
             strain_energy = max(0.0, raw_energy)
 
-            # 2. DDM (Adjoint Formulation on Free DOFs)
-            # dK/dA = K_i / A
-            k_i = (elem.E / L) * np.array(
-                [
-                    [c**2, c * s, -(c**2), -c * s],
-                    [c * s, s**2, -c * s, -(s**2)],
-                    [-(c**2), -c * s, c**2, c * s],
-                    [-c * s, -(s**2), c * s, s**2],
-                ]
-            )
-
-            del k_i  # kept only for documentation; rank-1 path below is used
+            # 2. DDM (adjoint formulation on free DOFs), with dK/dA = K_i / A
             z_i = z_mat[:, e_i]
             b_i_u = float(b_free[e_i] @ U_f)
             dU_f_dA = -(elem.E / L) * z_i * b_i_u

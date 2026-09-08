@@ -60,10 +60,10 @@ def test_free_thermal_expansion():
         ),
     ]
 
-    K, F_ext, F_mech, fixed_dofs = assemble_global_matrices(nodes, elements)
+    K, F_ext, _, fixed_dofs = assemble_global_matrices(nodes, elements)
     U = solve(K, F_ext, fixed_dofs)
 
-    # Free expansion: u = α·ΔT·L = 1.2e-5 * 100 * 1.0 = 1.2e-3 m
+    # Free expansion: u = alpha·ΔT·L = 1.2e-5 * 100 * 1.0 = 1.2e-3 m
     assert abs(U[2] - 1.2e-3) < 1e-6
 
     results, U_strain, W_prestress = calculate_element_forces(nodes, elements, U)
@@ -96,20 +96,20 @@ def test_constrained_thermal_expansion():
         ),
     ]
 
-    K, F_ext, F_mech, fixed_dofs = assemble_global_matrices(nodes, elements)
+    K, F_ext, _, fixed_dofs = assemble_global_matrices(nodes, elements)
     U = solve(K, F_ext, fixed_dofs)
 
     # Fully constrained: u = 0
     assert abs(U[2]) < 1e-12
 
-    results, U_strain, W_prestress = calculate_element_forces(nodes, elements, U)
+    results, U_strain, _ = calculate_element_forces(nodes, elements, U)
 
-    # Thermal stress: σ = -E·α·ΔT = -200e9 * 1.2e-5 * 100 = -240 MPa
-    # Force: F = σ·A = -240e6 * 0.001 = -240000 N (compression)
+    # Thermal stress: sigma = -E·alpha·ΔT = -200e9 * 1.2e-5 * 100 = -240 MPa
+    # Force: F = sigma·A = -240e6 * 0.001 = -240000 N (compression)
     expected_force = -200e9 * 1.2e-5 * 100 * 0.001
     assert abs(results[0]["N"] - expected_force) < 1.0
 
-    # Strain energy: ½·k·(ΔL_mech)² where ΔL_mech = -α·ΔT·L
+    # Strain energy: ½·k·(ΔL_mech)² where ΔL_mech = -alpha·ΔT·L
     k = 200e9 * 0.001 / 1.0
     delta_L_mech = -1.2e-5 * 100 * 1.0
     expected_U_strain = 0.5 * k * delta_L_mech**2

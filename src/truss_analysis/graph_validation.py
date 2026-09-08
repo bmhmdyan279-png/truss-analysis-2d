@@ -1,7 +1,7 @@
 """Graph-theoretic and numerical validation for generated truss topologies.
 
 Ensures structural validity *before* any FEM analysis is performed and
-reports the numerical quality of the base stiffness matrix (prompt-05, T5).
+reports the numerical quality of the base stiffness matrix.
 
 Checks / report fields
 ----------------------
@@ -14,8 +14,7 @@ Checks / report fields
    static indeterminacy, < 0 = under-braced).
 6. **Numerical rank and condition of ``K_ff``** via SVD — not merely
    "singular or not": a mechanism is declared when ``rank(K_ff) < n_dof_free``
-   (the SVD-based detection introduced by commit ``6d147a7`` for the
-   degradation module, here promoted to topology validation), and a
+   (SVD-based detection, the same criterion the solver applies), and a
    ``cond(K_ff) > 1e12`` raises a logged warning (ill-conditioning).
 7. **Geometric symmetry** — mirror bijection on nodes preserving supports,
    members and (mirrored) loads.
@@ -33,8 +32,9 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from truss_analysis.assembly import assemble_global_matrices
-from truss_analysis.model import Element, Node
+
+from .assembly import assemble_global_matrices
+from .model import Element, Node
 
 __all__ = [
     "COND_WARNING_THRESHOLD",

@@ -1,4 +1,4 @@
-"""Cross-family transfer check for the criticality screening (level 5).
+"""Cross-family transfer check for the criticality screening.
 
 Why this module exists
 ----------------------
@@ -41,8 +41,8 @@ ML dependency, fully reproducible from ``(X, y, a)``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -70,7 +70,7 @@ __all__ = [
 
 CV_RHO_GATE: float = 0.85
 
-FEATURES: Tuple[str, ...] = (
+FEATURES: tuple[str, ...] = (
     "force_ratio_abs",  # |N_i| / max_j |N_j| of the baseline state
     "force_sign",  # +1 tension / -1 compression / 0 zero
     "length_rel",  # L_i / mean member length of the topology
@@ -84,9 +84,9 @@ FEATURES: Tuple[str, ...] = (
 
 def _member_lengths(
     nodes: Sequence[Node], elements: Sequence[Element]
-) -> Dict[str, float]:
+) -> dict[str, float]:
     node_map = {n.id: n for n in nodes}
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     for e in elements:
         ni, nj = node_map[e.node_i], node_map[e.node_j]
         out[e.id] = float(np.hypot(nj.x - ni.x, nj.y - ni.y))
@@ -100,7 +100,7 @@ def feature_matrix(
     scenario: str,
     t_target: float,
     alpha: float = 0.7,
-) -> Tuple[NDArray[np.float64], List[str], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], list[str], NDArray[np.float64]]:
     """Rows of :data:`FEATURES`, member ids, and the exact CI targets.
 
     Performs exactly one baseline solve (for the force features) plus the
@@ -116,14 +116,14 @@ def feature_matrix(
     max_force = max((abs(v) for v in forces.values()), default=0.0)
     min_x, span = span_bounds(list(nodes))
     centroids = member_centroids(list(nodes), list(elements))
-    degree: Dict[str, int] = {n.id: 0 for n in nodes}
+    degree: dict[str, int] = {n.id: 0 for n in nodes}
     for e in elements:
         degree[e.node_i] += 1
         degree[e.node_j] += 1
     node_map = {n.id: n for n in nodes}
-    rows: List[List[float]] = []
-    ids: List[str] = []
-    targets: List[float] = []
+    rows: list[list[float]] = []
+    ids: list[str] = []
+    targets: list[float] = []
     for e in elements:
         ni, nj = node_map[e.node_i], node_map[e.node_j]
         length = lengths[e.id]
@@ -151,12 +151,32 @@ class RidgeSurrogate:
     """Closed-form ridge regression on standardised features."""
 
     alpha: float = 1.0
-    mean_: Optional[NDArray[np.float64]] = field(default=None, repr=False)
-    scale_: Optional[NDArray[np.float64]] = field(default=None, repr=False)
-    coef_: Optional[NDArray[np.float64]] = field(default=None, repr=False)
+    mean_: NDArray[np.float64] | None = field(default=None, repr=False)
+    scale_: NDArray[np.float64] | None = field(default=None, repr=False)
+    coef_: NDArray[np.float64] | None = field(default=None, repr=False)
     bias_: float = 0.0
 
-    def fit(self, x: NDArray[np.float64], y: NDArray[np.float64]) -> "RidgeSurrogate":
+    def fit(self, x: NDArray[np.float64], y: NDArray[np.float64]) -> RidgeSurrogate:
+        """Fit the closed-form ridge model on standardised features.
+
+        Parameters
+        ----------
+        x : numpy.ndarray
+            Feature matrix of shape ``(n_samples, n_features)``.
+        y : numpy.ndarray
+            Target vector of shape ``(n_samples,)``.
+
+        Returns
+        -------
+        RidgeSurrogate
+            The fitted model (``self``), for chaining.
+
+        Raises
+        ------
+        ValueError
+            If ``x`` is not 2-D, the sample counts differ, or fewer than
+            two training samples are given.
+        """
         x = np.asarray(x, dtype=float)
         y = np.asarray(y, dtype=float)
         if x.ndim != 2 or x.shape[0] != y.shape[0]:
@@ -167,15 +187,34 @@ class RidgeSurrogate:
             raise ValueError(msg)
         self.mean_ = x.mean(axis=0)
         scale = x.std(axis=0)
-        self.scale_ = np.where(scale > 0.0, scale, 1.0)
+        self.scale_ = np.asarray(np.where(scale > 0.0, scale, 1.0), dtype=np.float64)
         z = (x - self.mean_) / self.scale_
         ybar = float(y.mean())
         gram = z.T @ z + float(self.alpha) * np.eye(z.shape[1])
-        self.coef_ = np.linalg.solve(gram, z.T @ (y - ybar))
+        self.coef_ = np.asarray(
+            np.linalg.solve(gram, z.T @ (y - ybar)), dtype=np.float64
+        )
         self.bias_ = ybar
         return self
 
     def predict(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Predict targets for new feature rows.
+
+        Parameters
+        ----------
+        x : numpy.ndarray
+            Feature matrix with the same columns used in :meth:`fit`.
+
+        Returns
+        -------
+        numpy.ndarray
+            Predicted targets, one per row of ``x``.
+
+        Raises
+        ------
+        RuntimeError
+            If called before :meth:`fit`.
+        """
         if self.coef_ is None or self.mean_ is None or self.scale_ is None:
             msg = "RidgeSurrogate.predict called before fit"
             raise RuntimeError(msg)
@@ -200,20 +239,21 @@ class CrossValidationResult:
     """Aggregated cross-family transfer evidence."""
 
     train_family: str
-    test_families: Tuple[str, ...]
+    test_families: tuple[str, ...]
     n_train_samples: int
-    features: Tuple[str, ...]
+    features: tuple[str, ...]
     ridge_alpha: float
-    rows: Tuple[StateRow, ...]
+    rows: tuple[StateRow, ...]
     rho_mean: float
     rho_median: float
     rho_min: float
     rho_mean_force_baseline: float
-    rho_by_family: Dict[str, float]
+    rho_by_family: dict[str, float]
     gate: float = CV_RHO_GATE
 
     @property
     def passed(self) -> bool:
+        """Return whether the mean rank correlation exceeds the gate."""
         return bool(np.isfinite(self.rho_mean) and self.rho_mean > self.gate)
 
 
@@ -222,27 +262,35 @@ def _family_of(topology_name: str) -> str:
 
 
 def cross_family_cv(
-    topologies: Sequence[Tuple[str, str, Sequence[Node], Sequence[Element], Mapping]],
+    topologies: Sequence[
+        tuple[
+            str,
+            str,
+            Sequence[Node],
+            Sequence[Element],
+            Mapping[str, Mapping[str, float]],
+        ]
+    ],
     scenarios: Sequence[str] = ("local_left", "local_mid", "local_right"),
     temperatures: Sequence[float] = (200.0, 400.0, 600.0, 800.0),
     alpha: float = 0.7,
     train_family: str = "pratt",
     test_families: Sequence[str] = ("warren", "howe"),
     ridge_alpha: float = 1.0,
-    shuffle_targets_seed: Optional[int] = None,
+    shuffle_targets_seed: int | None = None,
 ) -> CrossValidationResult:
     """Run the whole transfer experiment.
 
     ``topologies`` is a sequence of ``(name, family, nodes, elements,
     loads)``.  Local scenarios are used deliberately: under a uniform field
-    the CI ranking is temperature-invariant (Lemma 1), so uniform states
-    would add duplicate targets with conflicting feature values instead of
-    information.
+    the CI ranking is temperature-invariant (see ``docs/theory.md``), so
+    uniform states would add duplicate targets with conflicting feature
+    values instead of information.
     """
-    train_x: List[NDArray[np.float64]] = []
-    train_y: List[NDArray[np.float64]] = []
-    test_states: List[
-        Tuple[str, str, float, NDArray[np.float64], NDArray[np.float64]]
+    train_x: list[NDArray[np.float64]] = []
+    train_y: list[NDArray[np.float64]] = []
+    test_states: list[
+        tuple[str, str, float, NDArray[np.float64], NDArray[np.float64]]
     ] = []
     for name, family, nodes, elements, loads in topologies:
         fam = family.lower()
@@ -274,7 +322,7 @@ def cross_family_cv(
         y_train = rng.permutation(y_train)
     model = RidgeSurrogate(alpha=ridge_alpha).fit(x_train, y_train)
 
-    rows: List[StateRow] = []
+    rows: list[StateRow] = []
     for name, scenario, t, x, y in test_states:
         pred = model.predict(x)
         rho = rank_correlation(
@@ -297,7 +345,7 @@ def cross_family_cv(
         )
     rhos = np.asarray([r.rho for r in rows], dtype=float)
     base = np.asarray([r.rho_force_baseline for r in rows], dtype=float)
-    by_family: Dict[str, float] = {}
+    by_family: dict[str, float] = {}
     for fam in test_families:
         sel = [r.rho for r in rows if _family_of(r.topology) == fam.lower()]
         if sel:

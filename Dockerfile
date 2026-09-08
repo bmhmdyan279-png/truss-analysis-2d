@@ -1,16 +1,17 @@
 # syntax=docker/dockerfile:1
 
 # ==========================================
-# Stage 1: Builder (Compile and install)
+# Stage 1: Builder (compile and install)
 # ==========================================
-FROM python:3.11-slim AS builder
+# Base image pinned by tag AND digest for reproducible builds.
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install build tools and git (required for setuptools_scm fallback)
+# Install build toolchain (git is required by setuptools_scm at build time)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -20,28 +21,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy all project files (respects .dockerignore)
-# We MUST copy 'src/' so setuptools can find the package
 COPY . .
 
-# Create a virtual environment and install dependencies
+# Create a virtual environment and install the package with plotting extras
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN pip install --upgrade pip && \
-    pip install . scienceplots
+    pip install ".[viz]"
 
 # ==========================================
-# Stage 2: Runtime (Headless execution)
+# Stage 2: Runtime (headless execution)
 # ==========================================
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS runtime
 
-# Critical for headless matplotlib execution in Docker
+# Headless matplotlib backend and the venv on PATH
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MPLBACKEND=Agg \
     PATH="/opt/venv/bin:$PATH"
 
-# Install runtime system dependencies for Matplotlib & Arabic Reshaper
+# Runtime system libraries for matplotlib and bidi text shaping
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
@@ -51,9 +51,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy the virtual environment and application code from builder
+# Copy the virtual environment and project files from the builder stage
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /app /app
 
-# Default command executes the Phase 8 H1 reproducibility test
-CMD ["python", "scripts/compute_phase8_h1_test.py"]
+# Default command: analyse the bundled example end to end (smoke test)
+CMD ["truss-analysis", "analyze", "examples/example1.json", "--check-buckling"]

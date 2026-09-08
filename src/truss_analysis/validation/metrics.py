@@ -20,9 +20,9 @@ NaN            treated as MODEL_REVIEW (a degenerate comparison carries no
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
 
 import numpy as np
 from scipy.stats import spearmanr
