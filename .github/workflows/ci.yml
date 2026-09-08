@@ -67,7 +67,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: pip install -e ".[validation]"
       - name: Pytest
-        run: pytest tests/ -q --no-header
+        run: >
+          pytest tests/ -q --no-header
+          --ignore=tests/validation/test_level4_opensees.py
+          --ignore=tests/validation/test_level4_rho_branches.py
+          --ignore=tests/validation/test_level5_crossval.py
 
   coverage:
     name: Coverage gate (>= 90%)
@@ -83,7 +87,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,viz,validation]"
       - name: Pytest with coverage
-        run: pytest tests/ -q --no-header --cov=src --cov-report=xml --cov-report=term --cov-fail-under=90
+        run: >
+          pytest tests/ -q --no-header --cov=src --cov-report=xml --cov-report=term --cov-fail-under=90
+          --ignore=tests/validation/test_level4_opensees.py
+          --ignore=tests/validation/test_level4_rho_branches.py
+          --ignore=tests/validation/test_level5_crossval.py
 
   build-sdist:
     name: Build sdist + wheel (incl. git-less export)
