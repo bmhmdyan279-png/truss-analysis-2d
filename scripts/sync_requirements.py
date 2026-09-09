@@ -20,7 +20,11 @@ import argparse
 import sys
 from pathlib import Path
 
-import tomllib
+# Python 3.10 compatibility: fallback to tomli if tomllib is not available
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
