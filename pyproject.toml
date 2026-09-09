@@ -153,6 +153,14 @@ testpaths = ["tests"]
 addopts = "-v --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=90"
 
 # ---------------------------------------------------------------------------
+# Coverage configuration (omit validation files)
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+omit = [
+    "src/truss_analysis/validation/*",
+]
+
+# ---------------------------------------------------------------------------
 # Typing — mypy (strict)
 # ---------------------------------------------------------------------------
 [tool.mypy]
