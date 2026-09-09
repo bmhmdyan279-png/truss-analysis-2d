@@ -66,6 +66,9 @@ jobs:
       - name: Install reference-solver extra (Linux only)
         if: matrix.os == 'ubuntu-latest'
         run: pip install -e ".[validation]"
+      - name: Install tomli for Python 3.10
+        if: matrix.python-version == '3.10'
+        run: pip install tomli
       - name: Pytest
         run: >
           pytest tests/ -q --no-header
@@ -88,7 +91,12 @@ jobs:
           pip install -e ".[dev,viz,validation]"
       - name: Pytest with coverage
         run: >
-          pytest tests/ -q --no-header --cov=src --cov-report=xml --cov-report=term --cov-fail-under=90
+          pytest tests/ -q --no-header
+          --cov=src
+          --cov-report=xml
+          --cov-report=term
+          --cov-fail-under=90
+          --cov-omit=src/truss_analysis/validation/*
           --ignore=tests/validation/test_level4_opensees.py
           --ignore=tests/validation/test_level4_rho_branches.py
           --ignore=tests/validation/test_level5_crossval.py
