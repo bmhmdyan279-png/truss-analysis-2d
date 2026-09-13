@@ -1,4 +1,3 @@
-```
 # Python
 __pycache__/
 *.pyc
@@ -12,6 +11,9 @@ __pycache__/
 .pytest_cache/
 .coverage
 coverage/
+.coverage.*
+htmlcov/
+coverage.xml
 
 # Environment
 .env
@@ -29,4 +31,3 @@ coverage/
 
 # Temp files
 *.tmp
-```

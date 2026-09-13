@@ -57,10 +57,13 @@ def test_heterogeneity_nan_handling() -> None:
         result = compute_heterogeneity(margins, scf, n_bootstrap=10, bootstrap_seed=42)
 
         runtime_warnings = [
-            warning for warning in w
+            warning
+            for warning in w
             if issubclass(warning.category, RuntimeWarning)
-            and ("Degrees of freedom" in str(warning.message)
-                 or "invalid value encountered" in str(warning.message))
+            and (
+                "Degrees of freedom" in str(warning.message)
+                or "invalid value encountered" in str(warning.message)
+            )
         ]
         msgs = [str(rw.message) for rw in runtime_warnings]
         assert len(runtime_warnings) == 0, f"Unexpected RuntimeWarnings: {msgs}"
