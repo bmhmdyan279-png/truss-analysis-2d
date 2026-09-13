@@ -36,15 +36,19 @@ def test_load_json_invalid_schema(tmp_path):
 def test_load_json_file_too_large(tmp_path):
     """Test that files exceeding MAX_INPUT_BYTES are rejected."""
     from truss_analysis.fileio import MAX_INPUT_BYTES
-    
+
     p = tmp_path / "large.json"
     # Create a file larger than MAX_INPUT_BYTES (10MB)
-    large_content = '{"nodes": [' + ','.join([f'{{"id": "n{i}", "x": 0, "y": 0}}' for i in range(500000)]) + ']}'
+    large_content = (
+        '{"nodes": ['
+        + ",".join([f'{{"id": "n{i}", "x": 0, "y": 0}}' for i in range(500000)])
+        + "]}"
+    )
     p.write_text(large_content, encoding="utf-8")
-    
+
     # Verify file is actually large enough
     assert p.stat().st_size > MAX_INPUT_BYTES
-    
+
     with pytest.raises(InputValidationError, match="File too large"):
         load_json(p)
 
@@ -77,8 +81,11 @@ def test_load_json_element_references_nonexistent_node(tmp_path):
     """Test that element referencing non-existent node is rejected."""
     p = tmp_path / "bad_ref.json"
     p.write_text(
-        '{"nodes": [{"id": "A", "x": 0, "y": 0}], "elements": [{"id": "e1", "node_i": "A", "node_j": "B"}]}',
-        encoding="utf-8"
+        (
+            '{"nodes": [{"id": "A", "x": 0, "y": 0}],'
+            ' "elements": [{"id": "e1", "node_i": "A", "node_j": "B"}]}'
+        ),
+        encoding="utf-8",
     )
     with pytest.raises(InputValidationError, match="references non-existent nodes"):
         load_json(p)

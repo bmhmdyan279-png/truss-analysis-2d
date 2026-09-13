@@ -1,50 +1,42 @@
 ```
-# Python
+# Version control
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-*.so
-*.egg-info/
-dist/
+
+# Build artifacts
 build/
-*.egg
-.coverage
-htmlcov/
-.mypy_cache/
-.pytest_cache/
+dist/
+*.egg-info/
 
-# Virtual environments
-venv/
+# Environment
 .venv/
-env/
-ENV/
+venv/
+.env
+.env.local
+*.env.*
 
-# IDE
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
-.DS_Store
-Thumbs.db
-
 # Logs
 *.log
 
-# Environment files
-.env
-.env.local
-*.env.*
-
 # Coverage
+.coverage
 coverage/
+htmlcov/
 
-# Temporary files
-*.tmp
+# Testing
+.pytest_cache/
+.mypy_cache/
 
-# Generated version file (setuptools_scm)
-src/truss_analysis/_version.py
+# Distribution
+*.tar.gz
+*.whl
+*.zip
 ```
