@@ -1,9 +1,9 @@
-```
 # Version control
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+src/truss_analysis/_version.py
 
 # Build artifacts
 build/
@@ -39,4 +39,3 @@ htmlcov/
 *.tar.gz
 *.whl
 *.zip
-```
