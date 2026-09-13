@@ -31,3 +31,6 @@ coverage.xml
 
 # Temp files
 *.tmp
+
+# setuptools_scm generated
+src/truss_analysis/_version.py
