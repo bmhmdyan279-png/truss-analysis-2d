@@ -61,8 +61,7 @@ def load_json(filepath: str | os.PathLike[str]) -> dict[str, Any]:
     node_ids = {n.get("id") for n in data["nodes"]}
     for elem in data["elements"]:
         if (  # pragma: no branch
-            elem.get("node_i") not in node_ids
-            or elem.get("node_j") not in node_ids
+            elem.get("node_i") not in node_ids or elem.get("node_j") not in node_ids
         ):
             raise InputValidationError(
                 f"Element {elem.get('id')} references non-existent nodes."

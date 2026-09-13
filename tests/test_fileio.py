@@ -94,10 +94,7 @@ def test_load_json_element_references_nonexistent_node(tmp_path):
 def test_load_json_loads_not_list(tmp_path):
     """Test that non-list 'loads' is rejected."""
     p = tmp_path / "loads_dict.json"
-    p.write_text(
-        '{"nodes": [], "elements": [], "loads": {}}',
-        encoding="utf-8"
-    )
+    p.write_text('{"nodes": [], "elements": [], "loads": {}}', encoding="utf-8")
     with pytest.raises(InputValidationError, match="'loads' must be a list"):
         load_json(p)
 
@@ -106,8 +103,7 @@ def test_load_json_load_item_not_dict(tmp_path):
     """Test that non-dict load item is rejected."""
     p = tmp_path / "loads_list.json"
     p.write_text(
-        '{"nodes": [], "elements": [], "loads": ["not_a_dict"]}',
-        encoding="utf-8"
+        '{"nodes": [], "elements": [], "loads": ["not_a_dict"]}', encoding="utf-8"
     )
     with pytest.raises(InputValidationError, match="Each load must be a dictionary"):
         load_json(p)
@@ -117,8 +113,7 @@ def test_load_json_load_missing_node_id_and_id(tmp_path):
     """Test that load missing both node_id and id is rejected."""
     p = tmp_path / "load_no_id.json"
     p.write_text(
-        '{"nodes": [], "elements": [], "loads": [{"Fx": 1, "Fy": 0}]}',
-        encoding="utf-8"
+        '{"nodes": [], "elements": [], "loads": [{"Fx": 1, "Fy": 0}]}', encoding="utf-8"
     )
     with pytest.raises(InputValidationError, match="Load missing 'node_id' or 'id'"):
         load_json(p)
@@ -128,9 +123,7 @@ def test_load_json_load_missing_fx_and_fy(tmp_path):
     """Test that load missing both Fx and Fy is rejected."""
     p = tmp_path / "load_no_force.json"
     p.write_text(
-        '{"nodes": [], "elements": [], "loads": [{"id": "L1"}]}',
-        encoding="utf-8"
+        '{"nodes": [], "elements": [], "loads": [{"id": "L1"}]}', encoding="utf-8"
     )
     with pytest.raises(InputValidationError, match="Load missing 'Fx' or 'Fy'"):
         load_json(p)
-

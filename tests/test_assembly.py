@@ -42,7 +42,7 @@ def test_assembly_element_references_nonexistent_node():
     elements = [Element("e1", "1", "nonexistent", E=200e9, A=0.01)]
 
     import pytest
+
     msg = "references non-existent nodes"
     with pytest.raises(AssemblyError, match=msg):
         assemble_global_matrices(nodes, elements)
-

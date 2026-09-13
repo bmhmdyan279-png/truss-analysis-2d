@@ -113,4 +113,3 @@ def test_validate_insufficient_constraints():
     nodes.append(Node("3", 2.0, 0.0))
     with pytest.raises(InputValidationError, match="Insufficient constraints"):
         validate_inputs(nodes, elements)
-
