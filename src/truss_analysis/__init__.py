@@ -15,7 +15,7 @@ from .topology_generator import TrussConfig, TrussFamily, generate_topology
 
 try:
     from ._version import version as __version__
-except ImportError:
+except ImportError:  # pragma: no cover
     __version__ = "2.5.0"
 
 solve_truss = solve

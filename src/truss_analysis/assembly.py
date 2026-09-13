@@ -47,7 +47,7 @@ def assemble_global_matrices(
     fixed_dofs = []
 
     # Build node index map
-    node_map = {node.id: i for i, node in enumerate(nodes)}
+    node_map: dict[str, int] = {node.id: i for i, node in enumerate(nodes)}
 
     # Assemble element contributions
     for elem in elements:
