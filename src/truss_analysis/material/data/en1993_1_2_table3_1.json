@@ -1,0 +1,375 @@
+{
+  "schema": "en1993-1-2/material-ssot/v1",
+  "source": "https://www.phd.eng.br/wp-content/uploads/2015/12/en.1993.1.2.2005.pdf",
+  "clause": "3.2.1(3)",
+  "standard": {
+    "code": "EN 1993-1-2",
+    "title": "Eurocode 3: Design of steel structures - Part 1-2: General rules - Structural fire design",
+    "edition": "EN 1993-1-2:2005 (April 2005)",
+    "corrigendum": "Incorporating Corrigendum December 2005",
+    "publisher": "CEN (English version, BS adopted cover)",
+    "primary_source_file": "en1993-1-2_2005.pdf (local archival copy of the standard)",
+    "primary_source_sha256": "058184ab18e680b9f14c4289e53a1f47ccd460825f8e28ebcbbc5557bd1e4e2e",
+    "primary_source_url": "https://www.phd.eng.br/wp-content/uploads/2015/12/en.1993.1.2.2005.pdf",
+    "primary_source_url_note": "The originally cited source URL (acefirm.ir) returned HTTP 404 on 2026-09-07; this mirror carries the identical filename cited by two independent papers (MDPI Buildings 16(1):215 ref list). Identity verified from the document itself: cover page 'EUROPEAN STANDARD EN 1993-1-2 ... April 2005 ... Incorporating Corrigendum December 2005'.",
+    "pages_total": 81
+  },
+  "table": {
+    "id": "3.1",
+    "title": "Reduction factors for stress-strain relationship of carbon steel at elevated temperatures",
+    "clause": "3.2.1(3)",
+    "clause_note": "Table 3.1 is introduced by clause 3.2.1(3) (printed standard page 22, PDF page index 23). Clause 3.2.2 of this standard is 'Unit mass', NOT the table location. Citations of 'Annex D' for this table are wrong: Annex D of EN 1993-1-2:2005 is 'Joints (informative)' (measured: TOC + clause 4.2.1(7) cross-reference).",
+    "printed_page": 22,
+    "pdf_page_index": 23,
+    "interpolation_note": "Table 3.1 NOTE: 'For intermediate values of the steel temperature, linear interpolation may be used.'",
+    "extraction_method": "pypdf text-layer extraction AND independent visual reading of a 130 dpi rendered page image; both readings agree on all 39 values.",
+    "column_definitions": {
+      "k_y": "k_y,theta = f_y,theta / f_y — reduction factor for effective yield strength, relative to yield strength at 20 C",
+      "k_p": "k_p,theta = f_p,theta / f_y — reduction factor for proportional limit, relative to yield strength at 20 C",
+      "k_E": "k_E,theta = E_a,theta / E_a — reduction factor for the slope of the linear elastic range, relative to slope at 20 C"
+    },
+    "k_s_note": "Table 3.1 defines exactly ONE elastic reduction factor: k_E,theta (slope of linear elastic range = E_a,theta/E_a), confirmed by figure 3.2 key ('Slope of linear elastic range k_E,theta = E_a,theta / E_a'). There is no separate k_s,theta column in EN 1993-1-2:2005 Table 3.1. The API exposes k_s() as a documented alias of k_E() for notation compatibility; the assumption that k_s and k_E are two different tabulated quantities is refuted by the document.",
+    "temperatures_c": [
+      20,
+      100,
+      200,
+      300,
+      400,
+      500,
+      600,
+      700,
+      800,
+      900,
+      1000,
+      1100,
+      1200
+    ],
+    "k_y": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.78,
+      0.47,
+      0.23,
+      0.11,
+      0.06,
+      0.04,
+      0.02,
+      0.0
+    ],
+    "k_p": [
+      1.0,
+      1.0,
+      0.807,
+      0.613,
+      0.42,
+      0.36,
+      0.18,
+      0.075,
+      0.05,
+      0.0375,
+      0.025,
+      0.0125,
+      0.0
+    ],
+    "k_E": [
+      1.0,
+      1.0,
+      0.9,
+      0.8,
+      0.7,
+      0.6,
+      0.31,
+      0.13,
+      0.09,
+      0.0675,
+      0.045,
+      0.0225,
+      0.0
+    ]
+  },
+  "strain_limits": {
+    "clause": "figure 3.1 (parameters row)",
+    "printed_page": 21,
+    "pdf_page_index": 22,
+    "values": {
+      "eps_y": 0.02,
+      "eps_t": 0.15,
+      "eps_u": 0.2
+    },
+    "note": "The strain limits of the stress-strain relationship are temperature-INDEPENDENT constants given in figure 3.1's parameter row (eps_y,theta = 0.02; eps_t,theta = 0.15; eps_u,theta = 0.20). They are NOT per-temperature columns of Table 3.1 (a common misreading, corrected here).",
+    "eps_p_definition": "eps_p,theta = f_p,theta / E_a,theta = (k_p,theta * f_y) / (k_E,theta * E_a) — temperature-dependent, derived"
+  },
+  "constitutive_law": {
+    "clause": "3.2.1(1)-(3) + figure 3.1",
+    "printed_page": 21,
+    "pdf_page_index": 22,
+    "branches": [
+      {
+        "range": "eps <= eps_p",
+        "sigma": "E_a_theta * eps",
+        "tangent": "E_a_theta"
+      },
+      {
+        "range": "eps_p < eps < eps_y",
+        "sigma": "f_p - c + (b/a) * sqrt(a^2 - (eps_y - eps)^2)",
+        "tangent": "b*(eps_y-eps) / (a * sqrt(a^2 - (eps_y-eps)^2))"
+      },
+      {
+        "range": "eps_y <= eps <= eps_t",
+        "sigma": "f_y",
+        "tangent": 0.0
+      },
+      {
+        "range": "eps_t < eps < eps_u",
+        "sigma": "f_y * (1 - (eps - eps_t)/(eps_u - eps_t))",
+        "tangent": null
+      },
+      {
+        "range": "eps == eps_u",
+        "sigma": 0.0,
+        "tangent": null
+      }
+    ],
+    "functions": {
+      "a_squared": "(eps_y - eps_p) * (eps_y - eps_p + c / E_a_theta)",
+      "b_squared": "c * (eps_y - eps_p) * E_a_theta + c^2",
+      "c": "(f_y - f_p)^2 / ((eps_y - eps_p) * E_a_theta - 2 * (f_y - f_p))"
+    },
+    "note": "The standard parameterises the elliptical branch with a single constant c (plus derived a, b), not 'c1, c2, c3' as sometimes assumed. Symbols f_y, f_p, E_a_theta here denote the temperature-dependent values f_y,theta = k_y*f_y(20C), f_p,theta = k_p*f_y(20C), E_a,theta = k_E*E_a(20C)."
+  },
+  "thermal": {
+    "thermal_elongation": {
+      "clause": "3.4.1.1",
+      "equations": "3.1a/3.1b/3.1c",
+      "printed_page": 23,
+      "pdf_page_index": 24,
+      "pieces": [
+        {
+          "range_c": [
+            20,
+            750
+          ],
+          "range_inclusive": [
+            true,
+            false
+          ],
+          "formula": "1.2e-5*T + 0.4e-8*T^2 - 2.416e-4",
+          "coeffs": {
+            "poly": [
+              -0.0002416,
+              1.2e-05,
+              4e-09
+            ]
+          }
+        },
+        {
+          "range_c": [
+            750,
+            860
+          ],
+          "range_inclusive": [
+            true,
+            true
+          ],
+          "formula": "1.1e-2",
+          "coeffs": {
+            "const": 0.011
+          }
+        },
+        {
+          "range_c": [
+            860,
+            1200
+          ],
+          "range_inclusive": [
+            false,
+            true
+          ],
+          "formula": "2.0e-5*T - 6.2e-3",
+          "coeffs": {
+            "poly": [
+              -0.0062,
+              2e-05
+            ]
+          }
+        }
+      ],
+      "api_note": "alpha(theta) in this module returns the relative thermal elongation dl/l per 3.1a-c (the quantity the standard defines); it is not a constant expansion coefficient."
+    },
+    "specific_heat": {
+      "clause": "3.4.1.2",
+      "equations": "3.2a/3.2b/3.2c/3.2d",
+      "printed_page": 25,
+      "pdf_page_index": 26,
+      "unit": "J/(kg*K)",
+      "pieces": [
+        {
+          "range_c": [
+            20,
+            600
+          ],
+          "range_inclusive": [
+            true,
+            false
+          ],
+          "formula": "425 + 7.73e-1*T - 1.69e-3*T^2 + 2.22e-6*T^3",
+          "coeffs": {
+            "poly": [
+              425.0,
+              0.773,
+              -0.00169,
+              2.22e-06
+            ]
+          }
+        },
+        {
+          "range_c": [
+            600,
+            735
+          ],
+          "range_inclusive": [
+            true,
+            false
+          ],
+          "formula": "666 + 13002/(738 - T)",
+          "coeffs": {
+            "c0": 666.0,
+            "num": 13002.0,
+            "den": [
+              738.0,
+              -1.0
+            ]
+          }
+        },
+        {
+          "range_c": [
+            735,
+            900
+          ],
+          "range_inclusive": [
+            true,
+            false
+          ],
+          "formula": "545 + 17820/(T - 731)",
+          "coeffs": {
+            "c0": 545.0,
+            "num": 17820.0,
+            "den": [
+              -731.0,
+              1.0
+            ]
+          }
+        },
+        {
+          "range_c": [
+            900,
+            1200
+          ],
+          "range_inclusive": [
+            true,
+            true
+          ],
+          "formula": "650",
+          "coeffs": {
+            "const": 650.0
+          }
+        }
+      ]
+    },
+    "thermal_conductivity": {
+      "clause": "3.4.1.3",
+      "equations": "3.3a/3.3b",
+      "printed_page": 26,
+      "pdf_page_index": 27,
+      "unit": "W/(m*K)",
+      "pieces": [
+        {
+          "range_c": [
+            20,
+            800
+          ],
+          "range_inclusive": [
+            true,
+            false
+          ],
+          "formula": "54 - 3.33e-2*T",
+          "coeffs": {
+            "poly": [
+              54.0,
+              -0.0333
+            ]
+          }
+        },
+        {
+          "range_c": [
+            800,
+            1200
+          ],
+          "range_inclusive": [
+            true,
+            true
+          ],
+          "formula": "27.3",
+          "coeffs": {
+            "const": 27.3
+          }
+        }
+      ]
+    },
+    "unit_mass": {
+      "clause": "3.2.2",
+      "printed_page": 20,
+      "pdf_page_index": 21,
+      "value_kg_m3": 7850.0,
+      "note": "rho_a may be considered independent of steel temperature."
+    },
+    "poisson_ratio": {
+      "in_this_standard": false,
+      "value": 0.3,
+      "provenance": "EN 1993-1-2:2005 contains NO occurrence of 'Poisson' (measured: full-text search of the extracted text). The engineering constant nu = 0.3 for steel is taken from EN 1993-1-1 (cross-checked via Fonseca 2024 Table 12, which cites EC3 Part 1-1: E = 210000 MPa, nu = 0.3). Provided for completeness of the material layer; clearly attributed, not fabricated into this standard.",
+      "youngs_modulus_20c_mpa": 210000.0,
+      "youngs_modulus_provenance": "EN 1993-1-1 (via Fonseca 2024 Table 12); used only as DEFAULT argument for derived quantities (eps_p, stress-strain), overridable by the caller."
+    }
+  },
+  "reference_constants_for_default_arguments": {
+    "f_y_s235_mpa": 235.0,
+    "E_a_20c_mpa": 210000.0,
+    "provenance": "S235 nominal yield strength (EN 10025-2, via Fonseca 2024 Table 13) and elastic modulus (EN 1993-1-1, via Fonseca 2024 Table 12). Defaults only; all API functions accept explicit f_y and E_a arguments."
+  },
+  "extracted_at": "2026-09-07",
+  "extracted_by": "automated pypdf extraction + visual verification of rendered pages (2026-09)",
+  "cross_checked_against": [
+    {
+      "name": "Fonseca, E.M.M. (2024), 'Brief Overview of the Thermal and Mechanical Properties of Wood, Steel, and Gypsum Board for Structural Connections', GeoStruct. Innov. 2(2):77-89, Table 14 + Section 3.2",
+      "url": "https://library.acadlore.com/GSI/2024/2/2/GSI_02.02_03.pdf",
+      "checked": "all 13 rows x 3 columns of reduction factors; thermal conductivity equations; specific heat equations; density 7850",
+      "agreement": "exact",
+      "verified_live": "2026-09-07"
+    },
+    {
+      "name": "ECCS Fire Design Course 2013 slide values (as recorded and verified in session 0)",
+      "url": "offline reference recorded in the extraction notes",
+      "checked": "600C: 0.470/0.180/0.310; 700C: 0.230/0.075/0.130; 800C: 0.110/0.050/0.090; 900C: 0.060/0.0375/0.0675; 1000C: 0.040/0.0250/0.0450; 1100C: 0.020/0.0125/0.0225",
+      "agreement": "exact",
+      "verified_live": "verified 2026-09-07; re-verified arithmetically against this fixture"
+    },
+    {
+      "name": "acadlore/TU-Eindhoven/MDPI secondary sources",
+      "url": "see extraction notes",
+      "checked": "NOT re-verified live: the MDPI URL (mdpi.com/2571-6255/9/6/254) now resolves to a DIFFERENT article (measured 2026-09-07); academia.edu is access-gated",
+      "agreement": "unverified-live",
+      "verified_live": null
+    }
+  ],
+  "misattribution_corrections": [
+    "Table 3.1 lives in clause 3.2.1(3), not 3.2.2 (3.2.2 = Unit mass).",
+    "The reduction curves are NOT in 'Annex D' (Annex D = Joints, informative); some secondary sources misattribute them to Annex D.",
+    "Table 3.1 has three reduction factors (k_y, k_p, k_E); no k_s column exists.",
+    "Strain limits are figure-3.1 constants (0.02/0.15/0.20), not Table 3.1 columns.",
+    "The elliptical-branch parameters are (a, b, c), not (c1, c2, c3).",
+    "Poisson's ratio is absent from EN 1993-1-2:2005."
+  ]
+}

@@ -1,0 +1,6 @@
+# AUTO-GENERATED from pyproject.toml - do not edit by hand.
+# Single source of truth for dependencies: pyproject.toml
+# Regenerate with: python scripts/sync_requirements.py
+numpy>=1.24.0
+scipy>=1.10.0
+PyYAML>=6.0

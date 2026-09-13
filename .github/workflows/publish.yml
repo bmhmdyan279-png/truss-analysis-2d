@@ -1,0 +1,21 @@
+name: Publish to PyPI
+on:
+  # Manual-only: publishing must be an explicit action (prevents accidental
+  # releases from tag pushes).
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write  # Mandatory for Trusted Publishing (OIDC)
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.10'}
+      - run: pip install build
+      - run: python -m build
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # NO user/password! Trusted Publishing handles auth via OIDC.
