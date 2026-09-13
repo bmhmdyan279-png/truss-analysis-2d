@@ -1,1 +1,32 @@
-Nothing needs to be added to the .gitignore file since the changes only include source code files (.py files) which should not be ignored.
+```
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.coverage
+coverage/
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+```

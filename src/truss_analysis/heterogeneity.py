@@ -187,10 +187,7 @@ def compute_heterogeneity(
             continue
 
         mu_g = float(np.mean(valid_gc))
-        if len(valid_gc) > 1:
-            std_g = float(np.std(valid_gc, ddof=1))
-        else:
-            std_g = 0.0
+        std_g = float(np.std(valid_gc, ddof=1)) if len(valid_gc) > 1 else 0.0
         if std_g > 1e-12:
             beta = float(mu_g / std_g)
         else:
@@ -213,15 +210,12 @@ def compute_heterogeneity(
                 "Using absolute values for SRC computation."
             )
             num = abs(mu_g)
-            # Avoid division by zero: replace zeros in den with nan
             den = np.where(np.abs(gc) > 1e-12, np.abs(gc), np.nan)
         else:
             num = mu_g
-            # Avoid division by zero: replace zeros in den with nan
             den = np.where(np.abs(gc) > 1e-12, gc, np.nan)
 
         src_k = scf * (num / den)
-        # Replace any remaining inf/nan from division with nan to avoid downstream warnings
         src_k = np.where(np.isfinite(src_k), src_k, np.nan)
         src_matrix[:, idx] = src_k
 

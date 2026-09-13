@@ -39,32 +39,31 @@ def test_heterogeneity_unstable_member() -> None:
 
 def test_heterogeneity_nan_handling() -> None:
     """Test that NaN values are handled gracefully without warnings.
-    
+
     Member 2 has all NaN values, which should be filtered out and reported
     in warnings. The computation should proceed without numpy RuntimeWarnings
     by using ddof=0 when fewer than 2 valid samples exist.
     """
     import warnings
-    
+
     margins = {
         "1": np.array([10.0, np.nan, 10.0]),
         "2": np.array([np.nan, np.nan, np.nan]),
     }
     scf = {"1": 1.0, "2": 1.0}
 
-    # Ensure no RuntimeWarnings are raised
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         result = compute_heterogeneity(margins, scf, n_bootstrap=10, bootstrap_seed=42)
-        
-        # Filter for numpy RuntimeWarnings that we want to avoid
+
         runtime_warnings = [
-            warning for warning in w 
-            if issubclass(warning.category, RuntimeWarning) 
-            and ("Degrees of freedom" in str(warning.message) 
+            warning for warning in w
+            if issubclass(warning.category, RuntimeWarning)
+            and ("Degrees of freedom" in str(warning.message)
                  or "invalid value encountered" in str(warning.message))
         ]
-        assert len(runtime_warnings) == 0, f"Unexpected RuntimeWarnings: {[str(rw.message) for rw in runtime_warnings]}"
+        msgs = [str(rw.message) for rw in runtime_warnings]
+        assert len(runtime_warnings) == 0, f"Unexpected RuntimeWarnings: {msgs}"
 
     assert "Member 2" in result.warnings[0]
     assert result.unstable_members == []
