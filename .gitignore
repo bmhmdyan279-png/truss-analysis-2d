@@ -1,50 +1,48 @@
-```
-# Python
-__pycache__/
+# Compiled and build artifacts
 *.pyc
-*.pyo
-*.pyd
-.Python
+__pycache__/
+*.o
+*.obj
 *.so
-*.egg-info/
-dist/
-build/
-*.egg
-.coverage
-htmlcov/
-.mypy_cache/
-.pytest_cache/
+*.dylib
+*.dll
+*.exe
+*.out
 
-# Virtual environments
-venv/
+# Dependencies
 .venv/
-env/
-ENV/
+venv/
+.env
+.env.local
+.env.*
 
-# IDE
-.vscode/
-.idea/
+# Logs and temp files
+*.log
+*.tmp
 *.swp
 *.swo
 
-# OS
+# Coverage reports
+.coverage
+coverage/
+htmlcov/
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# OS generated files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
-# Environment files
-.env
-.env.local
-*.env.*
-
-# Coverage
-coverage/
-
-# Temporary files
-*.tmp
-
-# Generated version file (setuptools_scm)
-src/truss_analysis/_version.py
-```
+# Editors
+.vscode/
+.idea/

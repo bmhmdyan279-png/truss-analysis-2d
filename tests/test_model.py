@@ -54,14 +54,15 @@ def test_element_e_must_be_positive():
     """Test that non-positive Young's modulus raises InputValidationError."""
     with pytest.raises(InputValidationError, match="E must be positive"):
         Element("e1", "1", "2", E=0, A=0.01)
-    
+
     with pytest.raises(InputValidationError, match="E must be positive"):
         Element("e2", "1", "2", E=-100, A=0.01)
 
 
 def test_element_nodes_cannot_be_same():
     """Test that element with same start and end node raises InputValidationError."""
-    with pytest.raises(InputValidationError, match="node_i and node_j cannot be the same"):
+    msg = "node_i and node_j cannot be the same"
+    with pytest.raises(InputValidationError, match=msg):
         Element("e1", "1", "1", E=200e9, A=0.01)
 
 
@@ -78,7 +79,7 @@ def test_validate_duplicate_element_ids():
     nodes = [Node("1", 0.0, 0.0), Node("2", 1.0, 0.0)]
     elements = [
         Element("e1", "1", "2", E=200e9, A=0.01),
-        Element("e1", "2", "1", E=200e9, A=0.01)
+        Element("e1", "2", "1", E=200e9, A=0.01),
     ]
     with pytest.raises(InputValidationError, match="Duplicate element IDs"):
         validate_inputs(nodes, elements)
@@ -104,7 +105,10 @@ def test_validate_insufficient_constraints():
     """Test that insufficient constraints for stability are rejected."""
     # Only 2 constraints (less than required 3)
     nodes = [Node("1", 0.0, 0.0, is_support=True, support_dx=True, support_dy=False)]
-    elements = [Element("e1", "1", "2", E=200e9, A=0.01), Element("e2", "2", "3", E=200e9, A=0.01)]
+    elements = [
+        Element("e1", "1", "2", E=200e9, A=0.01),
+        Element("e2", "2", "3", E=200e9, A=0.01),
+    ]
     nodes.append(Node("2", 1.0, 0.0))
     nodes.append(Node("3", 2.0, 0.0))
     with pytest.raises(InputValidationError, match="Insufficient constraints"):

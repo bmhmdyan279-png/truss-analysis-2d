@@ -35,13 +35,14 @@ def test_thermal_force_sign_convention():
 
 
 def test_assembly_element_references_nonexistent_node():
-    """Test that assembly raises AssemblyError for element referencing non-existent node."""
+    """Test AssemblyError for element referencing non-existent node."""
     from truss_analysis.exceptions import AssemblyError
-    
+
     nodes = [Node("1", 0.0, 0.0)]
     elements = [Element("e1", "1", "nonexistent", E=200e9, A=0.01)]
-    
+
     import pytest
-    with pytest.raises(AssemblyError, match="references non-existent nodes"):
+    msg = "references non-existent nodes"
+    with pytest.raises(AssemblyError, match=msg):
         assemble_global_matrices(nodes, elements)
 
