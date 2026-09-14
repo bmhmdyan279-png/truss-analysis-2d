@@ -67,7 +67,7 @@ from typing import Any
 import numpy as np
 
 from .assembly import assemble_global_matrices
-from .exceptions import InputIgnoredWarning, TrussError
+from .exceptions import InputIgnoredWarning, InputValidationError, TrussError
 from .fileio import load_json
 from .graph_validation import TopologyValidationError, structural_report
 from .model import Element, Node, validate_inputs
@@ -78,7 +78,7 @@ from .postprocess import (
     check_equilibrium,
     imposed_strain_energy,
 )
-from .solver import check_energy, solve
+from .solver import check_energy, solve, solve_penalty_with_energy
 from .topology_generator import generate_topology, model_to_json
 from .units import to_si
 
@@ -389,6 +389,76 @@ def _write_markdown(result: AnalysisResult, path: str) -> None:
     Path(path).write_text("\n".join(lines), encoding="utf-8")
 
 
+#: Option keys the pipeline understands. Anything else in the ``options``
+#: block is reported, so a typo cannot silently change nothing.
+_KNOWN_OPTION_KEYS = frozenset(
+    {"use_sparse", "bc_method", "penalty_value", "plot_results", "displacement_scale"}
+)
+
+#: ``options`` keys that control presentation rather than physics. They are
+#: consumed by the plotting layer, not by the solver, and saying so explicitly
+#: is better than leaving the user to guess whether they took effect.
+_PRESENTATION_OPTION_KEYS = frozenset({"plot_results", "displacement_scale"})
+
+
+def _resolve_options(
+    data: dict[str, Any],
+    use_sparse: bool | None,
+    bc_method: str | None,
+    penalty_value: float | None,
+) -> tuple[bool, str, float | None]:
+    """Merge the JSON ``options`` block with explicit arguments.
+
+    Explicit arguments win over the file, because a caller passing a value has
+    stated an intent more recently than whoever wrote the model. Unrecognised
+    keys in the block are reported: silently accepting a setting and then
+    ignoring it means the user believes they changed the physics when they did
+    not.
+
+    Returns
+    -------
+    tuple[bool, str, float or None]
+        ``(use_sparse, bc_method, penalty_value)`` where ``penalty_value`` is
+        an absolute stiffness in N/m, or ``None`` to let the solver derive a
+        scale-aware penalty from ``max(|diag(K)|)``.
+    """
+    block = _get(data, "options", {}) or {}
+    if not isinstance(block, dict):
+        block = {}
+    block = _normalize_dict(block)
+
+    for key in block:
+        if key not in _KNOWN_OPTION_KEYS:
+            warnings.warn(
+                f"unrecognised options key '{key}' ignored; known keys are "
+                f"{', '.join(sorted(_KNOWN_OPTION_KEYS))}",
+                InputIgnoredWarning,
+                stacklevel=4,
+            )
+
+    sparse = (
+        use_sparse if use_sparse is not None else bool(block.get("use_sparse", False))
+    )
+    method = (
+        bc_method
+        if bc_method is not None
+        else str(block.get("bc_method", "elimination"))
+    )
+    # `penalty_value` is an absolute stiffness in N/m -- that is what the
+    # shipped example models carry, and the conventional meaning of the name.
+    # Left as None when absent so the solver derives a scale-aware penalty.
+    raw_penalty = (
+        penalty_value if penalty_value is not None else block.get("penalty_value")
+    )
+    resolved_penalty: float | None = None if raw_penalty is None else float(raw_penalty)
+
+    if method not in ("elimination", "penalty"):
+        raise InputValidationError(
+            f"options.bc_method must be 'elimination' or 'penalty', got {method!r}"
+        )
+    return sparse, method, resolved_penalty
+
+
 def run(
     filepath: str | Path,
     unit_sys: str = "SI",
@@ -399,6 +469,9 @@ def run(
     report_path: str | Path | None = None,
     plot_path: str | Path | None = None,
     quiet: bool = False,
+    use_sparse: bool | None = None,
+    bc_method: str | None = None,
+    penalty_value: float | None = None,
 ) -> AnalysisResult:
     """Run the full analysis pipeline and return an AnalysisResult.
 
@@ -412,26 +485,65 @@ def run(
     plot : bool, optional
         Show an interactive plot (requires the ``viz`` extra).
     check_buckling : bool, optional
-        Also compute Euler buckling utilisation for compressed members.
+        Also compute buckling utilisation for compressed members.
     output, csv_path, report_path, plot_path : str, Path or None, optional
         Export destinations for the JSON result, a CSV force table, a
         Markdown report and a PNG plot respectively.
     quiet : bool, optional
         Suppress the human-readable summary on stdout.
+    use_sparse : bool or None, optional
+        Assemble and solve in CSR sparse storage. ``None`` (default) takes the
+        value from the model's ``options`` block, else ``False``.
+    bc_method : str or None, optional
+        ``"elimination"`` (default) or ``"penalty"``. ``None`` takes the value
+        from the model's ``options`` block.
+    penalty_value : float or None, optional
+        Absolute penalty stiffness [N/m], used only when
+        ``bc_method="penalty"``. ``None`` takes the value from the model's
+        ``options`` block; when absent there too, the solver derives a
+        scale-aware penalty of ``1e10 * max(|diag(K)|)``.
 
     Returns
     -------
     AnalysisResult
         Structured container with all outputs (see the module docstring
         for the JSON schema).
+
+    Raises
+    ------
+    InputValidationError
+        If ``bc_method`` is neither ``"elimination"`` nor ``"penalty"``.
+
+    Warns
+    -----
+    InputIgnoredWarning
+        If the model's ``options`` block contains an unrecognised key.
     """
     raw_data = load_json(filepath)
     # Normalize top-level keys (handle old JSON with trailing spaces)
     data = _normalize_dict(raw_data)
     nodes, elements, unit_sys = _parse_model(data, unit_sys)
     validate_inputs(nodes, elements)
+    use_sparse_eff, bc_method_eff, penalty_eff = _resolve_options(
+        data, use_sparse, bc_method, penalty_value
+    )
 
-    K, F_ext, F_mechanical, fixed_dofs = assemble_global_matrices(nodes, elements)
+    # The penalty method inflates the diagonal of the *full* system and solves
+    # it whole, so it is dense by construction. Resolve the storage layout here,
+    # before any load is accumulated into F_ext: reassembling later would throw
+    # those loads away and silently solve an unloaded model.
+    if use_sparse_eff and bc_method_eff == "penalty":
+        warnings.warn(
+            "options.bc_method='penalty' requires dense assembly; "
+            "ignoring use_sparse=true for this run",
+            InputIgnoredWarning,
+            stacklevel=2,
+        )
+        use_sparse_eff = False
+
+    K, F_ext, F_mechanical, fixed_dofs = assemble_global_matrices(
+        nodes, elements, sparse=use_sparse_eff
+    )
     node_map = {node.id: i for i, node in enumerate(nodes)}
     applied_loads: list[dict[str, Any]] = []
 
@@ -472,7 +584,13 @@ def run(
         F_mechanical[2 * idx + 1] -= weight
         applied_loads.append({"node_id": nodes[idx].id, "Fx": 0.0, "Fy": -weight})
 
-    U = solve(K, F_ext, fixed_dofs)
+    penalty_energy = 0.0
+    if bc_method_eff == "penalty":
+        U, penalty_energy = solve_penalty_with_energy(
+            K, F_ext, fixed_dofs, penalty_value=penalty_eff
+        )
+    else:
+        U = solve(K, F_ext, fixed_dofs)
     element_forces, strain_energy, prestress_work = calculate_element_forces(
         nodes, elements, U
     )
@@ -482,6 +600,7 @@ def run(
         strain_energy,
         prestress_work,
         energy_scale=imposed_strain_energy(nodes, elements),
+        penalty_energy=penalty_energy,
     )
     reactions = calculate_reactions(nodes, K, U, F_ext, fixed_dofs)
     equilibrium = check_equilibrium(nodes, reactions, applied_loads)

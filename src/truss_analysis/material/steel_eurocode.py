@@ -34,7 +34,7 @@ Notation notes (verified against the printed standard):
 from __future__ import annotations
 
 import json
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -99,13 +99,45 @@ def _clamped_theta(theta: FloatOrArray) -> NDArray[np.float64]:
     return clamped
 
 
-def _interp_column(theta: FloatOrArray, column: str) -> FloatOrArray:
+@cache
+def _column_arrays(column: str) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Return ``(temperatures, values)`` for one Table 3.1 column, built once.
+
+    The fixture is immutable for the lifetime of the process (:func:`_data` is
+    itself cached), so the float arrays derived from it can be cached too.
+    Without this, every scalar reduction-factor lookup rebuilt three numpy
+    arrays from the parsed JSON.
+    """
     temps = table_temperatures()
     raw: list[float] = _data()["table"][column]
     vals = np.asarray(raw, dtype=float)
+    return temps, vals
+
+
+@lru_cache(maxsize=8192)
+def _interp_scalar(theta: float, column: str) -> float:
+    """Memoised scalar interpolation of one Table 3.1 column.
+
+    Temperature sweeps dominate the runtime of the criticality and limit-state
+    paths: ``member_critical_temperature`` evaluates 48 grid points and
+    ``system_critical_temperature`` another 48, each touching ``k_E`` and
+    ``k_y`` per member. Those grids revisit the same handful of temperatures
+    constantly, and ``np.interp`` on a one-element array is pure overhead once
+    the answer is known. The cache is keyed on the exact float, so results are
+    bit-identical to the uncached path.
+    """
+    temps, vals = _column_arrays(column)
+    clamped = min(max(theta, float(temps[0])), float(temps[-1]))
+    return float(np.interp(clamped, temps, vals))
+
+
+def _interp_column(theta: FloatOrArray, column: str) -> FloatOrArray:
+    """Interpolate a Table 3.1 column at ``theta``, scalar or vectorised."""
+    if _is_scalar(theta):
+        return _interp_scalar(float(theta), column)
+    temps, vals = _column_arrays(column)
     arr = _clamped_theta(theta)
-    out = np.interp(arr, temps, vals)  # np.interp clamps outside the range
-    return float(out[0]) if _is_scalar(theta) else out
+    return np.interp(arr, temps, vals)  # np.interp clamps outside the range
 
 
 def k_y(theta: FloatOrArray) -> FloatOrArray:

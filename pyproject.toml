@@ -129,6 +129,7 @@ extend-ignore-names = [
     "K", "F", "U", "N", "L", "W", "R", "E", "A",
     "_K", "_F", "_U",
     "K_ff", "F_ext", "F_mech", "F_mechanical", "F_thermal", "F_f",
+    "K_pen", "F_pen", "U_raw",
     "F_imposed", "B", "L_arr", "K2",
     "U_f", "U_strain", "W_mech", "W_prestress", "A_mat", "Ry_sum",
     "baseline_U", "baseline_N", "expected_U_strain", "hand_N",

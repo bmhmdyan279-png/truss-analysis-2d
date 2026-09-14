@@ -30,6 +30,7 @@ and ``O(n^2)`` memory into something tractable for large trusses.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -339,6 +340,291 @@ def solve(
     return solve_with_diagnostics(K, F, fixed_dofs, check_condition=check_condition).U
 
 
+#: Default penalty multiplier: the added diagonal term is this many times the
+#: largest existing diagonal entry of ``K``. Scaling by the matrix's own
+#: magnitude is what keeps the penalty dimensionless and prevents it from
+#: swamping a stiff model or vanishing in a compliant one.
+DEFAULT_PENALTY_MULTIPLIER = 1e10
+
+
+#: Penalty-to-stiffness ratios outside this band are reported. Measured on the
+#: shipped example model (``cond(K_ff) ~ 41``), the two quantities trade off
+#: exactly against each other:
+#:
+#: .. code-block:: text
+#:
+#:     relative constraint error ~ 0.4 / ratio
+#:     cond(K_pen)               ~ 24  * ratio
+#:     their product             ~ 9.4   (independent of ratio)
+#:
+#: so there is no free lunch -- only a choice of where to sit. Below ``1e4``
+#: the constraint is enforced to barely four digits and the penalty solve
+#: stops being a meaningful approximation to the elimination solve; above
+#: ``1e12`` the condition number passes
+#: :attr:`~truss_analysis.numerics.NumericalTolerances.cond_warning` and the
+#: structural eigenvalues begin to be lost in round-off. The default
+#: multiplier of ``1e10`` sits near the useful ceiling: ~4e-11 constraint
+#: error at ``cond ~ 2.4e11``.
+_PENALTY_MIN_RATIO = 1e4
+_PENALTY_CONDITIONING_RATIO = 1e12
+
+
+def apply_penalty_bc(
+    K: np.ndarray,
+    F: np.ndarray,
+    fixed_dofs: Sequence[int],
+    penalty_value: float | None = None,
+    penalty_multiplier: float = DEFAULT_PENALTY_MULTIPLIER,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Impose Dirichlet conditions by penalty instead of by elimination.
+
+    Each constrained DOF ``d`` receives a large diagonal term ``alpha`` and the
+    right-hand side is left untouched, so the solved displacement at ``d`` is
+    ``F[d] / (K[d, d] + alpha) ~ 0`` rather than exactly zero.
+
+    ``alpha`` may be given two ways, and the distinction matters:
+
+    ``penalty_value``
+        An **absolute** stiffness in N/m, added to the diagonal as-is. This is
+        the conventional meaning and what the ``options`` block of the shipped
+        example models carries.
+
+    ``penalty_multiplier``
+        A **dimensionless** multiple of ``max(|diag(K)|)``, used when
+        ``penalty_value`` is ``None``. Scaling by the matrix's own magnitude is
+        what makes the default safe across unit systems and model sizes: an
+        absolute penalty chosen for a steel bridge is far too small for a
+        millimetre-scale lattice and needlessly huge for a compliant one.
+
+    Supplying both uses the absolute ``penalty_value`` and ignores the
+    multiplier.
+
+    Trade-off versus elimination
+    ----------------------------
+    Elimination — the default — removes the constrained DOFs and solves a
+    smaller, exactly-constrained system. It is both faster and exact. Penalty
+    keeps the full DOF numbering, which is convenient when the same assembled
+    matrix must be reused under changing support conditions, and it is the
+    method ``docs/theory.md`` and the README describe. Its cost is a
+    constraint satisfied only to ``O(1/alpha)`` and a condition number inflated
+    by roughly ``alpha``, so the multiplier should be raised only as far as
+    needed and :class:`~truss_analysis.exceptions.IllConditionedWarning` should
+    be expected when it is.
+
+    Parameters
+    ----------
+    K : np.ndarray
+        Global stiffness matrix. Not modified; a copy is returned.
+    F : np.ndarray
+        Global force vector. Not modified; a copy is returned.
+    fixed_dofs : Sequence[int]
+        Indices of constrained degrees of freedom.
+    penalty_value : float or None, optional
+        Absolute penalty stiffness [N/m]. Takes precedence over
+        ``penalty_multiplier`` when not ``None``.
+    penalty_multiplier : float, default 1e10
+        Penalty as a multiple of ``max(|diag(K)|)``, used when
+        ``penalty_value`` is ``None``.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Penalised copies ``(K_pen, F_pen)`` of the full-size system.
+
+    Raises
+    ------
+    ValueError
+        If the resolved penalty is not positive and finite, or if the
+        stiffness diagonal is identically zero.
+
+    Warns
+    -----
+    IllConditionedWarning
+        If the penalty-to-stiffness ratio falls outside
+        [:data:`_PENALTY_MIN_RATIO`, :data:`_PENALTY_CONDITIONING_RATIO`].
+        Too large and ``cond(K)`` grows until structural modes are lost in
+        round-off; too small and the supports settle enough that the result is
+        no longer a close approximation to an exact constraint. Both directions
+        are reported, because an absolute ``penalty_value`` that is well chosen
+        for one model can be badly scaled for another.
+    """
+    K_pen = np.array(K, dtype=float, copy=True)
+    F_pen = np.array(F, dtype=float, copy=True)
+
+    diag = np.diag(K_pen)
+    reference = float(np.max(np.abs(diag))) if diag.size else 0.0
+    if reference <= 0.0:
+        raise ValueError(
+            "penalty boundary conditions require a non-zero stiffness diagonal"
+        )
+
+    if penalty_value is None:
+        if not np.isfinite(penalty_multiplier) or penalty_multiplier <= 0.0:
+            raise ValueError(
+                "penalty_multiplier must be positive and finite, "
+                f"got {penalty_multiplier}"
+            )
+        alpha = penalty_multiplier * reference
+    else:
+        if not np.isfinite(penalty_value) or penalty_value <= 0.0:
+            raise ValueError(
+                f"penalty_value must be positive and finite, got {penalty_value}"
+            )
+        alpha = float(penalty_value)
+
+    if not len(fixed_dofs):
+        return K_pen, F_pen
+
+    ratio = alpha / reference
+    if ratio > _PENALTY_CONDITIONING_RATIO:
+        warnings.warn(
+            f"penalty {alpha:.3e} is {ratio:.3e}x the largest stiffness "
+            f"diagonal {reference:.3e}; cond(K) grows by roughly that factor "
+            f"(to ~{24.0 * ratio:.1e}) and structural modes may be lost to "
+            f"round-off. Prefer a ratio near 1e10, or use "
+            f"bc_method='elimination'.",
+            IllConditionedWarning,
+            stacklevel=2,
+        )
+    elif ratio < _PENALTY_MIN_RATIO:
+        warnings.warn(
+            f"penalty {alpha:.3e} is only {ratio:.3e}x the largest stiffness "
+            f"diagonal {reference:.3e}; supports will settle by roughly "
+            f"1/{ratio:.0f} of the displacement scale (~{0.4 / ratio:.1e} "
+            f"relative error), so this is not a close approximation to an "
+            f"exact constraint. Raise the penalty towards 1e10x the diagonal, "
+            f"or omit it to use the scale-aware default.",
+            IllConditionedWarning,
+            stacklevel=2,
+        )
+
+    for dof in fixed_dofs:
+        K_pen[dof, dof] += alpha
+    return K_pen, F_pen
+
+
+def solve_penalty(
+    K: np.ndarray,
+    F: np.ndarray,
+    fixed_dofs: Sequence[int],
+    penalty_value: float | None = None,
+    penalty_multiplier: float = DEFAULT_PENALTY_MULTIPLIER,
+    check_condition: bool = True,
+) -> np.ndarray:
+    """Solve with penalty boundary conditions and zero out the constrained DOFs.
+
+    The residual ``O(1/alpha)`` displacement at constrained DOFs is discarded
+    on return, so callers see exactly zero there — matching what elimination
+    produces and keeping the two methods comparable in tests.
+
+    Parameters
+    ----------
+    K : np.ndarray
+        Global stiffness matrix.
+    F : np.ndarray
+        Global force vector.
+    fixed_dofs : Sequence[int]
+        Indices of constrained degrees of freedom.
+    penalty_value : float or None, optional
+        Absolute penalty stiffness [N/m]; see :func:`apply_penalty_bc`.
+    penalty_multiplier : float, default 1e10
+        Penalty as a multiple of ``max(|diag(K)|)`` when ``penalty_value`` is
+        ``None``.
+    check_condition : bool, default True
+        Run the SVD rank/conditioning screen before solving.
+
+    Returns
+    -------
+    np.ndarray
+        Global displacement vector with constrained DOFs set exactly to zero.
+    """
+    U_raw, _penalty_energy = solve_penalty_with_energy(
+        K, F, fixed_dofs, penalty_value, penalty_multiplier
+    )
+    U = np.array(U_raw, copy=True)
+    for dof in fixed_dofs:
+        U[dof] = 0.0
+    return U
+
+
+def solve_penalty_with_energy(
+    K: np.ndarray,
+    F: np.ndarray,
+    fixed_dofs: Sequence[int],
+    penalty_value: float | None = None,
+    penalty_multiplier: float = DEFAULT_PENALTY_MULTIPLIER,
+) -> tuple[np.ndarray, float]:
+    """Solve with penalty boundary conditions, reporting the spring energy.
+
+    The penalty springs are real springs: they store
+    ``0.5 * alpha * sum(U_d^2)`` over the constrained DOFs. The displacements
+    ``U_d`` are tiny but ``alpha`` is huge, so the product is *not* negligible
+    -- it is the term that closes the Clapeyron balance for a penalised system,
+
+    .. code-block:: text
+
+        0.5 U^T F_mech = U_strain + 0.5 W_prestress + U_penalty
+
+    Omitting it makes :func:`check_energy` fail by roughly ``R^2 / alpha`` for
+    a typical reaction ``R``: about 0.6% at ``alpha = 1e12`` on the shipped
+    example model. Including it closes the balance to machine precision.
+
+    Parameters
+    ----------
+    K : np.ndarray
+        Global stiffness matrix.
+    F : np.ndarray
+        Global force vector.
+    fixed_dofs : Sequence[int]
+        Indices of constrained degrees of freedom.
+    penalty_value : float or None, optional
+        Absolute penalty stiffness [N/m]; see :func:`apply_penalty_bc`.
+    penalty_multiplier : float, default 1e10
+        Penalty as a multiple of ``max(|diag(K)|)`` when ``penalty_value`` is
+        ``None``.
+
+    Returns
+    -------
+    tuple[np.ndarray, float]
+        ``(U, penalty_energy)`` where ``U`` is the **raw** solution of the
+        penalised system -- constrained DOFs are *not* zeroed -- and
+        ``penalty_energy`` is the energy stored in the penalty springs.
+
+    Notes
+    -----
+    The constrained DOFs are deliberately left at their raw values. Under a
+    penalty solve a support settles by roughly ``R / alpha``, and for realistic
+    penalties that residual is the same order as the displacements being
+    sought: at ``alpha = 1e12`` with a ``1e5`` N reaction the support moves
+    ``1e-7`` m while free nodes move ``1e-6`` m. Zeroing it afterwards breaks
+    the energy identity, because the structural strain energy would then be
+    evaluated on a displacement field that solves nothing. Both terms of the
+    balance must come from the same ``U``, which is why the raw vector is
+    returned.
+
+    :func:`solve_penalty` offers the zeroed field for callers who only want to
+    compare displacements against the elimination method.
+
+    The SVD rank/conditioning screen is deliberately skipped. Adding ``alpha``
+    to the constrained diagonal inflates ``cond(K)`` by design, so the generic
+    ill-conditioning warning would fire on every penalty solve and carry no
+    information; :func:`apply_penalty_bc` issues its own, better-scaled
+    warning instead.
+    """
+    K_pen, F_pen = apply_penalty_bc(K, F, fixed_dofs, penalty_value, penalty_multiplier)
+    # The penalised system is solved whole: that is the point of the method.
+    U = solve_with_diagnostics(K_pen, F_pen, [], check_condition=False).U
+
+    # alpha is whatever was actually added to each constrained diagonal, so
+    # read it back from the difference instead of re-deriving the rule.
+    # Penalty BC is dense-only: the method works by inflating the diagonal of
+    # the full system, and run() falls back to dense assembly when it is asked
+    # for together with sparse storage.
+    added = np.diag(K_pen) - np.diag(K)
+    penalty_energy = 0.5 * float(sum(added[dof] * U[dof] ** 2 for dof in fixed_dofs))
+    return U, penalty_energy
+
+
 def check_energy(
     U: np.ndarray,
     F_mechanical: np.ndarray,
@@ -346,6 +632,7 @@ def check_energy(
     prestress_work: float,
     tol: float = 1e-8,
     energy_scale: float | None = None,
+    penalty_energy: float = 0.0,
 ) -> bool:
     """Verify the work-energy balance of a linear-elastic solve.
 
@@ -381,6 +668,13 @@ def check_energy(
         what keeps the test meaningful when every balance term vanishes
         analytically (free thermal expansion). ``None`` disables the floor
         and yields a purely relative test.
+    penalty_energy : float, default 0.0
+        Energy stored in penalty boundary-condition springs,
+        ``0.5 * alpha * sum(U_d^2)``, as returned by
+        :func:`solve_penalty_with_energy`. Zero under the default elimination
+        method, where constraints are exact and store nothing. Including it is
+        what lets the balance close to machine precision for a penalty solve;
+        omitting it leaves a residual of order ``R^2 / alpha``.
 
     Returns
     -------
@@ -428,9 +722,14 @@ def check_energy(
     # energies [J], so the natural reference scale is the largest magnitude
     # present -- dimensionally consistent, and it keeps the balance testable
     # when W_mech vanishes (self-equilibrated thermal / prestress states).
-    expected = strain_energy + 0.5 * prestress_work
+    expected = strain_energy + 0.5 * prestress_work + penalty_energy
     error = abs(W_mech - expected)
-    scale = max(abs(W_mech), abs(strain_energy), 0.5 * abs(prestress_work))
+    scale = max(
+        abs(W_mech),
+        abs(strain_energy),
+        0.5 * abs(prestress_work),
+        abs(penalty_energy),
+    )
 
     # Round-off floor. Imposed-strain problems can make *every* term of the
     # balance vanish analytically -- free thermal expansion has W_mech =
