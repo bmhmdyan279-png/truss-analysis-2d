@@ -37,10 +37,17 @@ from .criticality.engine import (
 from .material.steel_eurocode import k_E as eurocode_k_E
 from .material.steel_eurocode import k_y as eurocode_k_y
 from .model import Element, Node
-from .sections import euler_buckling_load
+from .sections import (
+    LAMBDA_BAR_BUCKLING_LIMIT,
+    buckling_reduction_factor,
+    euler_buckling_load,
+    non_dimensional_slenderness,
+)
 
 __all__ = [
+    "DEFAULT_BUCKLING_CURVE",
     "GAMMA_M_FIRE",
+    "BucklingModel",
     "ComponentCI",
     "Governing",
     "MemberLimitState",
@@ -59,6 +66,36 @@ GAMMA_M_FIRE = 1.0
 _DCR_BASE_TOL = 1e-12
 _TEMP_GRID = tuple(range(20, 1201, 25))
 
+#: Default flexural buckling curve. Curve ``c`` suits the thin-walled and
+#: cold-formed hollow sections this library idealises, and is the
+#: conservative choice among the common ones.
+DEFAULT_BUCKLING_CURVE = "c"
+
+
+class BucklingModel(str, Enum):
+    """Compression-member capacity model used by the fire limit state.
+
+    ``EUROCODE_CHI``
+        EN 1993-1-2:2005 4.2.3.1: ``N_b,fi,theta,Rd = chi A f_y,theta /
+        gamma_M,fi`` with ``chi`` from the buckling curve and the *fire*
+        slenderness ``lambda_bar_theta = sqrt(A f_y,theta / N_cr)``. This is
+        the default and the code-correct model. ``chi`` interpolates between
+        the two physical limits, so it is ``1`` for a stocky member (yield
+        governed) and tends to ``N_cr / (A f_y,theta)`` for a slender one
+        (Euler governed).
+
+    ``EULER_ONLY``
+        The historical model, ``capacity = min(P_cr, N_Rd)``. Retained only so
+        previously published numbers stay reproducible. It overestimates the
+        capacity of intermediate-slenderness members -- by roughly 15% at
+        ``lambda_bar ~ 2`` and far more near ``lambda_bar ~ 1`` -- because it
+        ignores residual stresses and initial out-of-straightness. That makes
+        the reported DCR and the critical temperature optimistic.
+    """
+
+    EUROCODE_CHI = "eurocode_chi"
+    EULER_ONLY = "euler_only"
+
 
 class Governing(str, Enum):
     """Which physical limit state produced the CI of a member."""
@@ -70,7 +107,29 @@ class Governing(str, Enum):
 
 @dataclass(frozen=True)
 class MemberLimitState:
-    """Force-based limit-state state of one member at one temperature."""
+    """Force-based limit-state state of one member at one temperature.
+
+    Attributes
+    ----------
+    p_cr : float or None
+        Euler elastic critical load ``N_cr = pi^2 E_theta I / (k L)^2`` [N],
+        or ``None`` for a tension member. This is an *input* to the
+        slenderness, not itself the design capacity.
+    n_rd : float
+        Yield (cross-section) resistance ``k_y,theta f_y A / gamma_M,fi`` [N].
+    capacity : float
+        The design resistance the DCR is actually formed against. Under
+        :attr:`BucklingModel.EUROCODE_CHI` this is ``chi A f_y,theta /
+        gamma_M,fi`` for compression and ``n_rd`` for tension.
+    chi : float or None
+        Flexural buckling reduction factor, or ``None`` for a tension member.
+    lambda_bar : float or None
+        Non-dimensional fire slenderness, or ``None`` for a tension member.
+    capacity_governing : Governing
+        ``YIELD`` when ``lambda_bar`` is at or below
+        :data:`~truss_analysis.sections.LAMBDA_BAR_BUCKLING_LIMIT` (0.2), so
+        buckling need not be considered; ``BUCKLING`` otherwise.
+    """
 
     member_id: str
     temperature: float
@@ -79,7 +138,12 @@ class MemberLimitState:
     p_cr: float | None
     n_rd: float
     dcr: float
-    capacity_governing: Governing  # buckling | yield (which capacity is smaller)
+    capacity_governing: Governing  # buckling | yield
+    capacity: float = 0.0
+    chi: float | None = None
+    lambda_bar: float | None = None
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE
 
 
 @dataclass(frozen=True)
@@ -132,17 +196,66 @@ def _member_limit_state(
     youngs: float,
     k_factor: float,
     f_y: float,
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> MemberLimitState:
+    """Build the fire limit state of one member at one temperature.
+
+    Under the default :attr:`BucklingModel.EUROCODE_CHI` a compression member
+    is checked against EN 1993-1-2:2005 4.2.3.1,
+
+    .. code-block:: text
+
+        lambda_bar_theta = sqrt(A * f_y,theta / N_cr),
+        N_cr             = pi^2 * E_theta * I / (k L)^2,
+        f_y,theta        = k_y,theta * f_y,      E_theta = k_E,theta * E,
+        N_b,fi,theta,Rd  = chi * A * f_y,theta / gamma_M,fi.
+
+    Because ``chi`` is derived from the same ``N_cr`` and the same
+    ``f_y,theta``, this single expression covers both limits: it reduces to
+    the yield resistance when the member is stocky and approaches the Euler
+    load when it is slender. It therefore replaces the previous
+    ``min(P_cr, N_Rd)`` approximation, which took the smaller of two
+    asymptotes and so overestimated the capacity everywhere in between.
+
+    ``lambda_bar_theta`` grows as the member heats, because ``k_E`` falls
+    faster than ``k_y``. A member that is comfortably stocky at 20 degC can
+    become buckling-governed at 600 degC, which the ``min()`` form could not
+    express.
+    """
     compression = axial_force < 0.0
     e_t = float(eurocode_k_E(temperature)) * youngs
-    p_cr: float | None = (
-        euler_buckling_load(i_sec, length, e_t, k_factor) if compression else None
-    )
     n_rd = yield_capacity(area, f_y, temperature)
-    capacity = min(p_cr, n_rd) if p_cr is not None else n_rd
-    cap_gov = (
-        Governing.BUCKLING if (p_cr is not None and p_cr <= n_rd) else Governing.YIELD
-    )
+
+    chi: float | None = None
+    lambda_bar: float | None = None
+    p_cr: float | None = None
+
+    if compression:
+        p_cr = euler_buckling_load(i_sec, length, e_t, k_factor)
+        # Recover f_y,theta = k_y,theta * f_y from the yield resistance, since
+        # n_rd = k_y,theta * f_y * A / gamma_M,fi by construction.
+        f_y_theta = n_rd * GAMMA_M_FIRE / area
+        lambda_bar = non_dimensional_slenderness(area, f_y_theta, p_cr)
+        if buckling_model is BucklingModel.EUROCODE_CHI:
+            chi = buckling_reduction_factor(lambda_bar, buckling_curve, fire=True)
+            # N_b,fi,theta,Rd = chi * A * f_y,theta / gamma_M,fi == chi * n_rd
+            capacity = chi * n_rd
+        else:
+            capacity = min(p_cr, n_rd)
+    else:
+        capacity = n_rd
+
+    # Buckling need not be considered below lambda_bar = 0.2
+    # (EN 1993-1-1:2005 6.3.1(4)); the member is yield-governed there.
+    stocky = lambda_bar is not None and lambda_bar <= LAMBDA_BAR_BUCKLING_LIMIT
+    if not compression or stocky:
+        cap_gov = Governing.YIELD
+    elif buckling_model is BucklingModel.EULER_ONLY and p_cr is not None:
+        cap_gov = Governing.BUCKLING if p_cr <= n_rd else Governing.YIELD
+    else:
+        cap_gov = Governing.BUCKLING
+
     dcr = abs(axial_force) / capacity if capacity > 0.0 else float("inf")
     return MemberLimitState(
         member_id=member_id,
@@ -153,6 +266,11 @@ def _member_limit_state(
         n_rd=n_rd,
         dcr=dcr,
         capacity_governing=cap_gov,
+        capacity=capacity,
+        chi=chi,
+        lambda_bar=lambda_bar,
+        buckling_model=buckling_model,
+        buckling_curve=buckling_curve,
     )
 
 
@@ -162,8 +280,26 @@ def dcr_field(
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
     f_y: float,
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> dict[str, MemberLimitState]:
-    """DCR state of every member at the given member temperatures."""
+    """DCR state of every member at the given member temperatures.
+
+    Parameters
+    ----------
+    nodes, elements, loads, temps, f_y
+        Model, loading, per-member temperature field [degC] and ambient yield
+        strength ``f_y`` [Pa].
+    buckling_model : BucklingModel, default EUROCODE_CHI
+        Compression capacity model; see :class:`BucklingModel`.
+    buckling_curve : str, default "c"
+        Flexural buckling curve, only used by ``EUROCODE_CHI``.
+
+    Returns
+    -------
+    dict[str, MemberLimitState]
+        Limit state per member id.
+    """
     forces = member_axial_forces(nodes, elements, loads, temps)
     out: dict[str, MemberLimitState] = {}
     for e in elements:
@@ -180,6 +316,8 @@ def dcr_field(
             e.E,
             e.effective_length_factor,
             f_y,
+            buckling_model,
+            buckling_curve,
         )
     return out
 
@@ -195,17 +333,31 @@ def member_critical_temperature(
     member_id: str,
     f_y: float,
     temp_grid: Sequence[float] = _TEMP_GRID,
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> float | None:
     """Smallest uniform temperature at which ``DCR_member >= 1``.
 
     Root-found by scanning the discrete reduction curves and linearly
     interpolating the DCR = 1 crossing between grid points.  ``None`` when the
     member never reaches DCR = 1 within [20, 1200] degC.
+
+    Because ``lambda_bar_theta`` grows as ``k_E`` falls faster than ``k_y``,
+    the reported critical temperature depends on the compression capacity
+    model; see :class:`BucklingModel`.
     """
     prev_t: float | None = None
     prev_dcr: float | None = None
     for t in temp_grid:
-        states = dcr_field(nodes, elements, loads, _uniform_temps(elements, t), f_y)
+        states = dcr_field(
+            nodes,
+            elements,
+            loads,
+            _uniform_temps(elements, t),
+            f_y,
+            buckling_model,
+            buckling_curve,
+        )
         dcr = states[member_id].dcr
         if dcr >= 1.0:
             if prev_t is None or prev_dcr is None:
@@ -223,6 +375,8 @@ def system_critical_temperature(
     loads: Mapping[str, Mapping[str, float]],
     f_y: float,
     temp_grid: Sequence[float] = _TEMP_GRID,
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> float:
     """Highest scanned uniform temperature with no member at DCR >= 1.
 
@@ -233,7 +387,15 @@ def system_critical_temperature(
     """
     last_safe = float(temp_grid[0])
     for t in temp_grid:
-        states = dcr_field(nodes, elements, loads, _uniform_temps(elements, t), f_y)
+        states = dcr_field(
+            nodes,
+            elements,
+            loads,
+            _uniform_temps(elements, t),
+            f_y,
+            buckling_model,
+            buckling_curve,
+        )
         if any(s.dcr >= 1.0 for s in states.values()):
             return last_safe
         last_safe = float(t)

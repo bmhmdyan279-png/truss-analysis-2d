@@ -32,13 +32,37 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 __all__ = [
+    "BUCKLING_CURVE_ALPHA",
+    "FIRE_IMPERFECTION_FACTOR",
+    "LAMBDA_BAR_BUCKLING_LIMIT",
     "SectionCatalog",
     "SquareHSS",
+    "buckling_reduction_factor",
     "euler_buckling_load",
     "idealised_square_hss",
+    "non_dimensional_slenderness",
 ]
 
 _MIN_THICKNESS_RATIO = 2.0  # r = b/t must keep (b - 2t) > 0
+
+#: Imperfection factors ``alpha`` of the five flexural buckling curves,
+#: EN 1993-1-1:2005 Table 6.1 / Table 6.2.
+BUCKLING_CURVE_ALPHA: dict[str, float] = {
+    "a0": 0.13,
+    "a": 0.21,
+    "b": 0.34,
+    "c": 0.49,
+    "d": 0.76,
+}
+
+#: EN 1993-1-2:2005 4.2.3.1(3) reduces the imperfection factor for the fire
+#: design situation, because residual stresses and geometric imperfections
+#: matter less once the material has softened: ``alpha_theta = 0.65 * alpha_c``.
+FIRE_IMPERFECTION_FACTOR = 0.65
+
+#: Below this non-dimensional slenderness buckling need not be checked at all
+#: (EN 1993-1-1:2005 6.3.1(4)); the member is yield-governed.
+LAMBDA_BAR_BUCKLING_LIMIT = 0.2
 
 
 @dataclass(frozen=True)
@@ -209,3 +233,113 @@ def euler_buckling_load(
         raise ValueError(msg)
     kl = effective_length_factor * length
     return math.pi**2 * youngs_modulus * i_sec / kl**2
+
+
+def non_dimensional_slenderness(
+    area: float, yield_strength: float, elastic_critical_load: float
+) -> float:
+    """Return the non-dimensional slenderness ``lambda_bar`` [-].
+
+    .. code-block:: text
+
+        lambda_bar = sqrt(A * f_y / N_cr)
+
+    ``N_cr`` is the Euler elastic critical load for the relevant buckling
+    length, from :func:`euler_buckling_load`. At elevated temperature both
+    ``f_y`` and ``E`` must be the temperature-reduced values, which is what
+    makes the fire slenderness differ from the ambient one: since ``k_E``
+    falls faster than ``k_y``, ``lambda_bar`` *grows* as the member heats, so
+    a stocky cold member can become slender in fire.
+
+    Parameters
+    ----------
+    area : float
+        Cross-sectional area ``A`` [m^2].
+    yield_strength : float
+        Yield strength ``f_y`` [Pa] at the temperature of interest.
+    elastic_critical_load : float
+        Euler critical load ``N_cr`` [N] at the temperature of interest.
+
+    Returns
+    -------
+    float
+        Non-dimensional slenderness. ``inf`` when ``elastic_critical_load``
+        is non-positive, which correctly reports an infinitely slender member.
+    """
+    if elastic_critical_load <= 0.0:
+        return math.inf
+    return math.sqrt(area * yield_strength / elastic_critical_load)
+
+
+def buckling_reduction_factor(
+    lambda_bar: float,
+    curve: str = "c",
+    *,
+    fire: bool = False,
+) -> float:
+    """Return the flexural buckling reduction factor ``chi`` [-].
+
+    Implements the Eurocode buckling curve,
+
+    .. code-block:: text
+
+        Phi   = 0.5 * [1 + alpha * (lambda_bar - 0.2) + lambda_bar**2]
+        chi   = 1 / (Phi + sqrt(Phi**2 - lambda_bar**2)),   chi <= 1
+
+    with ``alpha`` taken from :data:`BUCKLING_CURVE_ALPHA`, and scaled by
+    :data:`FIRE_IMPERFECTION_FACTOR` (0.65) when ``fire`` is set, per
+    EN 1993-1-2:2005 4.2.3.1(3).
+
+    Why this replaces a bare Euler load
+    -----------------------------------
+    The elastic critical load ``N_cr`` alone is only the asymptote of the
+    buckling curve for very slender members. At intermediate slenderness
+    (``lambda_bar`` roughly 0.5 to 1.5) it overestimates the true capacity
+    substantially, because it ignores residual stresses from rolling and
+    initial geometric out-of-straightness. Using ``chi`` interpolates
+    correctly between the two limits: ``chi -> 1`` as ``lambda_bar -> 0``
+    (yield governed) and ``chi -> 1 / lambda_bar**2`` as ``lambda_bar -> inf``
+    (Euler governed).
+
+    Parameters
+    ----------
+    lambda_bar : float
+        Non-dimensional slenderness from :func:`non_dimensional_slenderness`.
+    curve : str, default "c"
+        Buckling curve label, one of ``"a0"``, ``"a"``, ``"b"``, ``"c"``,
+        ``"d"``. Curve ``c`` is the usual choice for thin-walled and
+        cold-formed hollow sections and is the conservative default here.
+    fire : bool, default False
+        Apply the EN 1993-1-2 imperfection reduction ``alpha = 0.65 alpha_c``.
+
+    Returns
+    -------
+    float
+        Reduction factor in ``(0, 1]``. Returns ``1.0`` for a non-positive
+        slenderness, where buckling cannot occur.
+
+    Raises
+    ------
+    ValueError
+        If ``curve`` is not a recognised buckling curve label.
+    """
+    try:
+        alpha_c = BUCKLING_CURVE_ALPHA[curve]
+    except KeyError:
+        known = ", ".join(sorted(BUCKLING_CURVE_ALPHA))
+        msg = f"unknown buckling curve {curve!r}; expected one of {known}"
+        raise ValueError(msg) from None
+
+    if not math.isfinite(lambda_bar) or lambda_bar <= 0.0:
+        # An infinitely slender member has no capacity; a stocky one cannot
+        # buckle. Handle both ends explicitly rather than through the formula.
+        return 0.0 if math.isinf(lambda_bar) else 1.0
+
+    alpha = FIRE_IMPERFECTION_FACTOR * alpha_c if fire else alpha_c
+    phi = 0.5 * (1.0 + alpha * (lambda_bar - LAMBDA_BAR_BUCKLING_LIMIT) + lambda_bar**2)
+    discriminant = phi**2 - lambda_bar**2
+    # The discriminant is non-negative for alpha >= 0 by construction, but
+    # round-off near lambda_bar ~ 0 can make it marginally negative.
+    root = math.sqrt(discriminant) if discriminant > 0.0 else 0.0
+    chi = 1.0 / (phi + root)
+    return min(1.0, chi)

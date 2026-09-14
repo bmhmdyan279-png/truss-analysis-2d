@@ -21,7 +21,10 @@ A4  the A2 truss under a linear temperature-gradient scenario: the
     hand-computed temperature field, degraded moduli and virtual-work
     displacements; determinate forces must be unchanged by temperature.
 A5  Euler buckling P_cr = pi^2 E I / L^2 (cold and at 600 degC via the
-    reduction factor) on the idealised square HSS, plus the DCR assembly.
+    reduction factor) on the idealised square HSS, then the full
+    EN 1993-1-2 4.2.3.1 compression capacity chi(lambda_bar) * N_Rd and the
+    resulting DCR; plus a companion case pinning the legacy
+    min(P_cr, N_Rd) model so the two cannot silently converge.
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ from truss_analysis.criticality import (
     get_scenario_temperatures,
     load_vector,
 )
-from truss_analysis.limitstates import Governing, dcr_field
+from truss_analysis.limitstates import BucklingModel, Governing, dcr_field
 from truss_analysis.material import steel_eurocode as ec
 from truss_analysis.model import Element, Node
 from truss_analysis.postprocess import calculate_element_forces, calculate_reactions
@@ -265,8 +268,25 @@ def test_a5_idealised_section_and_euler_cold():
         assert _rel(p_cr, hand) < REL_TOL
 
 
-def test_a5_dcr_at_600_degrees_governing_yield():
-    """p_cr(600) = 0.31 * P_cr(20); N_Rd(600) = 0.47 * f_y * A; DCR = |N|/min."""
+def test_a5_dcr_at_600_degrees_with_buckling_reduction():
+    """Full EN 1993-1-2 4.2.3.1 hand line for a compression member at 600 degC.
+
+    Every quantity below is derived independently of the implementation:
+
+    .. code-block:: text
+
+        N_cr(600) = 0.31 * pi^2 E I / L^2           (k_E(600) = 0.31)
+        f_y,600   = 0.47 * f_y                      (k_y(600) = 0.47)
+        N_Rd(600) = f_y,600 * A / gamma_M,fi        (gamma_M,fi = 1.0)
+        lambda_bar = sqrt(A * f_y,600 / N_cr(600))
+        Phi       = 0.5 [1 + 0.65*0.49*(lambda_bar - 0.2) + lambda_bar^2]
+        chi       = 1 / (Phi + sqrt(Phi^2 - lambda_bar^2))
+        N_b,fi,Rd = chi * N_Rd(600)
+        DCR       = |N| / N_b,fi,Rd
+
+    The imperfection factor is curve c (alpha = 0.49) scaled by the fire
+    factor 0.65 required by 4.2.3.1(3).
+    """
     section = idealised_square_hss(0.01)
     nodes = _two_bar_nodes()
     elements = [
@@ -276,14 +296,66 @@ def test_a5_dcr_at_600_degrees_governing_yield():
     loads = {"3": {"Fx": 0.0, "Fy": -90.0e3}}
     temps = {"1": 600.0, "2": 600.0}
     states = dcr_field(nodes, elements, loads, temps, F_Y)
+    st = states["1"]
+
+    assert ec.k_E(600.0) == 0.31  # exact fixture values used by the hand line
+    assert ec.k_y(600.0) == 0.47
+
     p_cr_20 = math.pi**2 * E * section.i_sec / 25.0
     hand_p_cr = 0.31 * p_cr_20
-    hand_n_rd = 0.47 * F_Y * A  # gamma_M,fi = 1.0
-    st = states["1"]
+    hand_f_y_600 = 0.47 * F_Y
+    hand_n_rd = hand_f_y_600 * A  # gamma_M,fi = 1.0
+
+    hand_lambda = math.sqrt(A * hand_f_y_600 / hand_p_cr)
+    alpha_fire = 0.65 * 0.49  # curve c, scaled per 4.2.3.1(3)
+    phi = 0.5 * (1.0 + alpha_fire * (hand_lambda - 0.2) + hand_lambda**2)
+    hand_chi = 1.0 / (phi + math.sqrt(phi**2 - hand_lambda**2))
+    hand_capacity = hand_chi * hand_n_rd
+    hand_dcr = 75.0e3 / hand_capacity
+
     assert st.compression
     assert _rel(st.p_cr or 0.0, hand_p_cr) < REL_TOL
     assert _rel(st.n_rd, hand_n_rd) < REL_TOL
-    assert _rel(st.dcr, 75.0e3 / min(hand_p_cr, hand_n_rd)) < REL_TOL
-    assert st.capacity_governing is Governing.YIELD
-    assert ec.k_E(600.0) == 0.31  # exact fixture value used by the hand line
-    assert ec.k_y(600.0) == 0.47
+    assert _rel(st.lambda_bar or 0.0, hand_lambda) < REL_TOL
+    assert _rel(st.chi or 0.0, hand_chi) < REL_TOL
+    assert _rel(st.capacity, hand_capacity) < REL_TOL
+    assert _rel(st.dcr, hand_dcr) < REL_TOL
+    # lambda_bar ~ 0.655 is well above the 0.2 threshold, so buckling does
+    # reduce the capacity below the yield resistance and is the governing mode.
+    assert st.capacity_governing is Governing.BUCKLING
+    assert st.capacity < st.n_rd
+
+
+def test_a5_legacy_euler_only_capacity_still_reproducible():
+    """The historical ``min(P_cr, N_Rd)`` model must remain selectable.
+
+    It is not the default any more: at ``lambda_bar ~ 0.65`` it overestimates
+    the capacity by ~22% because it ignores residual stresses and initial
+    out-of-straightness, which made the reported DCR and critical temperature
+    optimistic. It is kept so previously published numbers stay reproducible,
+    and pinned here so the two models cannot silently converge.
+    """
+    section = idealised_square_hss(0.01)
+    nodes = _two_bar_nodes()
+    elements = [
+        Element("1", "1", "3", E, A, I_sec=section.i_sec),
+        Element("2", "2", "3", E, A, I_sec=section.i_sec),
+    ]
+    loads = {"3": {"Fx": 0.0, "Fy": -90.0e3}}
+    temps = {"1": 600.0, "2": 600.0}
+
+    legacy = dcr_field(nodes, elements, loads, temps, F_Y, BucklingModel.EULER_ONLY)[
+        "1"
+    ]
+    modern = dcr_field(nodes, elements, loads, temps, F_Y)["1"]
+
+    p_cr_20 = math.pi**2 * E * section.i_sec / 25.0
+    hand_p_cr = 0.31 * p_cr_20
+    hand_n_rd = 0.47 * F_Y * A
+
+    assert _rel(legacy.dcr, 75.0e3 / min(hand_p_cr, hand_n_rd)) < REL_TOL
+    assert legacy.chi is None
+    assert legacy.capacity_governing is Governing.YIELD
+    # The chi model is strictly more conservative for this member.
+    assert modern.dcr > legacy.dcr
+    assert modern.capacity < legacy.capacity
