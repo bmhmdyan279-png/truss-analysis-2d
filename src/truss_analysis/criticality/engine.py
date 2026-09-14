@@ -25,6 +25,35 @@ simultaneous multi-member perturbations (retrofit studies) use
 rank-1 formula member-by-member to a multi-member change is wrong and no
 public function here does it.
 
+Thermal / fabrication demand (equivalent forces)
+------------------------------------------------
+The temperature field does two physically distinct things to a member: it
+degrades its stiffness (``k_e(T) = k_E(T) E A / L``) and, through restrained
+expansion, it loads the structure.  The imposed elongation
+
+    dL_pre,e = alpha_e (T_e - T_AMBIENT) L_e + delta_L_free,e
+
+enters the right-hand side as the equivalent nodal force vector
+``B^T diag(k(T)) dL_pre`` — the same term :mod:`truss_analysis.assembly`
+builds for ``run()`` — and the member force is the *mechanical* one,
+
+    N_e = k_e(T) (b_e . u - dL_pre,e).
+
+Omitting either half made the whole DCR / theta_sys / CI / retrofit chain
+blind to thermal stress in redundant structures: ``run()`` heated a
+restrained member into real compression while the demand chain saw only the
+stiffness degradation.  With the equivalent forces on the RHS the rank-1
+numerator changes too.  Softening member ``i`` by ``alpha`` changes *both*
+``K`` and its thermal force ``k_i dL_i b_i``, so the perturbed solve is
+
+    u' = u - Delta_i (f_i - dL_i) / (1 + Delta_i d_i) * z_i
+       = u - Delta_i (N_i / k_i) / (1 + Delta_i d_i) * z_i,
+
+i.e. the numerator is the member's mechanical force, not its total
+elongation.  For ``dL_pre = 0`` (elements without ``alpha`` /
+``delta_L_free``) every formula reduces exactly to the previous one, so
+mechanical-only analyses are bit-for-bit unchanged.
+
 Numerical guard
 -------------------------------
 ``1 + Delta_i d_i -> 0`` means the perturbed structure is (near) a mechanism.
@@ -66,9 +95,13 @@ __all__ = [
     "build_engine",
     "ci_sweep",
     "compute_ci_for_topology",
+    "imposed_load_vector",
     "load_vector",
+    "member_forces",
     "member_matrices",
     "perturb_multi",
+    "prestress_lengths",
+    "total_load_vector",
 ]
 
 GUARD_TOL = 1e-8
@@ -108,6 +141,7 @@ class EngineSetup:
     k_axial: np.ndarray  # (nE,)
     z: np.ndarray  # (ndof_free, nE) = K_ff^-1 B
     d: np.ndarray  # (nE,) = b_i^T Z_i
+    dl_pre: np.ndarray  # (nE,) imposed elongation alpha*(T-T0)*L + delta_L_free
 
 
 @dataclass(frozen=True)
@@ -156,9 +190,61 @@ def member_matrices(
     return b, k
 
 
+def prestress_lengths(
+    nodes: Sequence[Node],
+    elements: Sequence[Element],
+    temps: Mapping[str, float] | None = None,
+) -> np.ndarray:
+    """Imposed (thermal + fabrication) elongation per member, shape ``(nE,)``.
+
+    .. code-block:: text
+
+        dL_pre,e = alpha_e * (T_e - T_AMBIENT) * L_e + delta_L_free,e
+
+    This is the same quantity :func:`truss_analysis.assembly._imposed_nodal_forces`
+    builds the equivalent nodal forces from, expressed on the temperature
+    *field* the engine works with: ``temps`` maps member id to absolute steel
+    temperature [degC] and ``T_e - T_AMBIENT`` is the temperature change from
+    the stress-free reference state (20 degC, :data:`scenarios.T_AMBIENT`).
+    ``Element.delta_T`` is deliberately NOT read here — in the fire chain the
+    ``temps`` mapping is the authoritative temperature input, and honouring
+    both would double-count the thermal strain.  When ``temps`` is ``None``
+    only the fabrication term survives.
+
+    Parameters
+    ----------
+    nodes : Sequence[Node]
+        Model nodes (supply the member lengths).
+    elements : Sequence[Element]
+        Model elements (supply ``alpha`` and ``delta_L_free``).
+    temps : Mapping[str, float] or None, optional
+        Member id -> steel temperature [degC].
+
+    Returns
+    -------
+    np.ndarray
+        ``dL_pre`` per member [m], in element order.
+    """
+    node_idx = {n.id: i for i, n in enumerate(nodes)}
+    out = np.zeros(len(elements))
+    for i, e in enumerate(elements):
+        ii = node_idx[e.node_i]
+        jj = node_idx[e.node_j]
+        length = float(np.hypot(nodes[jj].x - nodes[ii].x, nodes[jj].y - nodes[ii].y))
+        delta_t = 0.0 if temps is None else float(temps[e.id]) - T_AMBIENT
+        out[i] = e.alpha * delta_t * length + e.delta_L_free
+    return out
+
+
 def _check_lu(lu: tuple[np.ndarray, np.ndarray]) -> None:
     lu_mat, _piv = lu  # scipy packs L and U into one matrix; second item is pivots
     diag = np.abs(np.diag(lu_mat))
+    if diag.size == 0:
+        # No free DOFs at all (every node fully restrained): nothing to
+        # factorise, nothing that can be a mechanism among free DOFs. The
+        # member forces of such a model are pure imposed-strain forces,
+        # N = -k * dL_pre, which the engine still reports correctly.
+        return
     scale = max(float(np.max(diag)), 1.0)
     if float(np.min(diag)) < _SINGULAR_TOL * scale:
         msg = "stiffness matrix singular (mechanism) in base state"
@@ -175,10 +261,13 @@ def build_engine(
     """Factorise the (thermally degraded) base state for rank-1 sweeps.
 
     ``temps`` maps member id -> steel temperature [degC]; ``E_i`` is scaled by
-    ``k_e_func(T_i)`` (EN 1993-1-2 material model by default).  ``loads`` is
-    kept in the
-    signature for API symmetry but the force vector is built by
-    :func:`load_vector` at solve time.
+    ``k_e_func(T_i)`` (EN 1993-1-2 material model by default).  The imposed
+    elongation ``dl_pre`` (thermal expansion + fabrication) is computed from
+    the same field via :func:`prestress_lengths` and stored on the setup, so
+    every consumer — :func:`total_load_vector`, :func:`member_forces`,
+    :func:`ci_sweep` — sees one consistent demand state.  ``loads`` is kept in
+    the signature for API symmetry but the force vector is built by
+    :func:`total_load_vector` at solve time.
     """
     del loads  # force vector assembled at solve time
     k_scale = (
@@ -202,6 +291,7 @@ def build_engine(
         k_axial=k,
         z=z,
         d=d,
+        dl_pre=prestress_lengths(nodes, elements, temps),
     )
 
 
@@ -219,6 +309,51 @@ def load_vector(
     return f[list(free)]
 
 
+def imposed_load_vector(setup: EngineSetup) -> np.ndarray:
+    """Equivalent nodal forces from imposed strain, on the free DOFs.
+
+    ``F_th = B^T diag(k(T)) dL_pre`` — a member with imposed elongation
+    ``dL_pre`` and fixed nodes pushes on the structure with the self-
+    equilibrated pair ``k * dL_pre``; restricted here to the free DOFs the
+    engine solves on.  Identical physics to the ``F_ext`` term
+    :func:`truss_analysis.assembly.assemble_global_matrices` hands to
+    ``run()``, built from the same ``k_axial`` and ``dl_pre`` the setup
+    carries, so the fire chain and the static solver cannot drift apart.
+    """
+    imposed: np.ndarray = setup.b_free.T @ (setup.k_axial * setup.dl_pre)
+    return imposed
+
+
+def total_load_vector(
+    nodes: Sequence[Node],
+    loads: Mapping[str, Mapping[str, float]],
+    setup: EngineSetup,
+) -> np.ndarray:
+    """Full demand right-hand side (mechanical + imposed) on the free DOFs.
+
+    This — not :func:`load_vector` alone — is what every base-state solve in
+    the fire chain must use; see the module docstring.
+    """
+    total: np.ndarray = np.asarray(
+        load_vector(nodes, loads, setup.free_dofs) + imposed_load_vector(setup),
+        dtype=float,
+    )
+    return total
+
+
+def member_forces(setup: EngineSetup, u: np.ndarray) -> np.ndarray:
+    """Mechanical axial forces ``N_e = k_e (b_e . u - dL_pre,e)``, shape ``(nE,)``.
+
+    Tension positive.  The single definition of member force for the whole
+    criticality / limit-state chain: the elongation a member *stores
+    elastically* is its total elongation minus the imposed part, and only
+    that produces force.  With ``dL_pre = 0`` this is the previous
+    ``k * (b . u)``.
+    """
+    forces: np.ndarray = setup.k_axial * (setup.b_free @ u - setup.dl_pre)
+    return forces
+
+
 def base_displacement(setup: EngineSetup, f_free: np.ndarray) -> np.ndarray:
     """Return the base (unperturbed) displacement field on the free DOFs."""
     u: np.ndarray = lu_solve(setup.lu, f_free)
@@ -234,7 +369,12 @@ def _solve_perturbed_full(
     member_index: int,
     k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
 ) -> np.ndarray:
-    """Solve the reference system with one member additionally scaled by alpha."""
+    """Solve the reference system with one member additionally scaled by alpha.
+
+    Mirrors the rank-1 physics exactly: the perturbed member's stiffness is
+    scaled by ``alpha`` **and** its equivalent thermal force with it (the
+    imposed elongation itself is a geometric input and does not scale).
+    """
     k_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
     k_scale[elements[member_index].id] *= alpha
     b, k = member_matrices(nodes, elements, k_scale)
@@ -242,7 +382,10 @@ def _solve_perturbed_full(
     k_ff = np.einsum("i,ip,iq->pq", k, b, b)[np.ix_(free, free)]
     lu = lu_factor(k_ff)
     _check_lu(lu)
-    u_pert: np.ndarray = lu_solve(lu, load_vector(nodes, loads, free))
+    b_free = b[:, list(free)]
+    dl_pre = prestress_lengths(nodes, elements, temps)
+    f_free = load_vector(nodes, loads, free) + b_free.T @ (k * dl_pre)
+    u_pert: np.ndarray = lu_solve(lu, f_free)
     return u_pert
 
 
@@ -253,10 +396,18 @@ def ci_sweep(
     guard_tol: float = GUARD_TOL,
     brute_column: Callable[[int], np.ndarray] | None = None,
 ) -> CiSweep:
-    """Vectorised CI sweep: column i of ``u_pert`` = state with member i hit."""
+    """Vectorised CI sweep: column i of ``u_pert`` = state with member i hit.
+
+    The rank-1 numerator is the member's *mechanical* elongation
+    ``f_i - dL_pre,i = N_i / k_i``, not its total elongation: softening
+    member ``i`` scales its thermal equivalent force ``k_i dL_i b_i`` by the
+    same ``alpha`` as its stiffness, and the two effects combine into exactly
+    this form (derivation in the module docstring).  ``u`` must have been
+    solved against :func:`total_load_vector` for the same setup.
+    """
     delta = (alpha - 1.0) * setup.k_axial
     denom = 1.0 + delta * setup.d
-    f = setup.b_free @ u
+    f = setup.b_free @ u - setup.dl_pre
     coef = np.zeros_like(delta)
     ok = np.abs(denom) >= guard_tol
     coef[ok] = delta[ok] * f[ok] / denom[ok]
@@ -273,6 +424,16 @@ def ci_sweep(
         except MechanismError:
             flagged[eid] = "mechanism(singular)"
             u_pert[:, i] = np.inf
+    if u.size == 0:
+        # Every DOF restrained: no displacement response to rank, so every CI
+        # is exactly zero (the member forces are pure imposed-strain forces,
+        # which the force-based indices downstream still measure).
+        return CiSweep(
+            ci_values={eid: 0.0 for eid in setup.ids},
+            u_pert=u_pert,
+            flagged=flagged,
+            u_max_perturbed_max=0.0,
+        )
     u_max_base = float(np.max(np.abs(u)))
     finite = np.isfinite(u_pert).all(axis=0)
     col_max = np.where(
@@ -298,6 +459,10 @@ def perturb_multi(
 
     ``K_pert = K + B_S Delta B_S^T`` with diagonal ``Delta``; used for retrofit
     studies where the rank-1 formula does not apply (see module docstring).
+    The right-hand side carries the perturbed members' thermal equivalent
+    forces too, which — exactly as in the rank-1 case — replaces the total
+    elongation ``f_S`` with the mechanical one ``f_S - dL_S`` in the core
+    solve.  ``u`` must come from :func:`total_load_vector`.
     """
     idx = list(indices)
     deltas = (np.asarray(alphas, dtype=float) - 1.0) * setup.k_axial[idx]
@@ -307,7 +472,7 @@ def perturb_multi(
     z_s = setup.z[:, idx]
     g_ss = setup.b_free[idx] @ z_s
     core = np.diag(1.0 / deltas) + g_ss
-    f_s = setup.b_free[idx] @ u
+    f_s = setup.b_free[idx] @ u - setup.dl_pre[idx]
     perturbed: np.ndarray = u - z_s @ np.linalg.solve(core, f_s)
     return perturbed
 
@@ -335,8 +500,14 @@ def brute_force_ci(
     free = free_dof_indices(nodes)
     lu = lu_factor(np.einsum("i,ip,iq->pq", k, b, b)[np.ix_(free, free)])
     _check_lu(lu)
-    f_free = load_vector(nodes, loads, free)
+    b_free = b[:, list(free)]
+    dl_pre = prestress_lengths(nodes, elements, temps)
+    f_free = load_vector(nodes, loads, free) + b_free.T @ (k * dl_pre)
     u = lu_solve(lu, f_free)
+    if u.size == 0:
+        # Every DOF restrained: no displacement response, every CI is zero
+        # (same convention as ci_sweep).
+        return {e.id: 0.0 for e in elements}, 0.0, 0.0
     u_max_base = float(np.max(np.abs(u)))
     ci: dict[str, float] = {}
     u_max_pert = 0.0
@@ -371,7 +542,7 @@ def compute_ci_for_topology(
     del supports  # boundary conditions live on the Node flags
     temps = get_scenario_temperatures(nodes, elements, scenario, t_target)
     setup = build_engine(nodes, elements, loads, temps)
-    f_free = load_vector(nodes, loads, setup.free_dofs)
+    f_free = total_load_vector(nodes, loads, setup)
     u = base_displacement(setup, f_free)
     u_max_base = float(np.max(np.abs(u)))
 
@@ -402,7 +573,7 @@ def compute_ci_for_topology(
         else:
             temps_base = get_scenario_temperatures(nodes, elements, scenario, T_AMBIENT)
             setup0 = build_engine(nodes, elements, loads, temps_base)
-            u0 = base_displacement(setup0, load_vector(nodes, loads, setup0.free_dofs))
+            u0 = base_displacement(setup0, total_load_vector(nodes, loads, setup0))
             if float(np.max(np.abs(u0))) >= tol:
                 # the cold reference sweep takes the SAME guard routing as
                 # the hot one: with alpha near 0 on a determinate truss every

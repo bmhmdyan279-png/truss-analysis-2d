@@ -29,7 +29,7 @@ import numpy as np
 from ..criticality.engine import (
     base_displacement,
     build_engine,
-    load_vector,
+    total_load_vector,
 )
 from ..limitstates import dcr_field, system_critical_temperature
 from ..model import Element, Node
@@ -180,9 +180,7 @@ def evaluate(ctx: RetrofitContext, decision: Decision) -> RetrofitMetrics:
     temps = _scenario_temps(ctx)
     elements, temps = apply_decision(list(ctx.elements), temps, decision.as_map())
     setup = build_engine(list(ctx.nodes), elements, ctx.loads, temps)
-    u = base_displacement(
-        setup, load_vector(list(ctx.nodes), ctx.loads, setup.free_dofs)
-    )
+    u = base_displacement(setup, total_load_vector(list(ctx.nodes), ctx.loads, setup))
     u_max = float(np.max(np.abs(u)))
     theta_sys = system_critical_temperature(
         list(ctx.nodes), elements, ctx.loads, ctx.f_y, temp_grid=_SYS_TEMP_GRID
@@ -296,9 +294,7 @@ def redundant_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
     """
     temps = _scenario_temps(ctx)
     setup = build_engine(list(ctx.nodes), list(ctx.elements), ctx.loads, temps)
-    u0 = base_displacement(
-        setup, load_vector(list(ctx.nodes), ctx.loads, setup.free_dofs)
-    )
+    u0 = base_displacement(setup, total_load_vector(list(ctx.nodes), ctx.loads, setup))
     base_umax = float(np.max(np.abs(u0)))
     participation: dict[str, float] = {}
     for e in ctx.elements:
@@ -306,7 +302,7 @@ def redundant_strategy(ctx: RetrofitContext) -> RetrofitOutcome:
         try:
             s2 = build_engine(list(ctx.nodes), kept, ctx.loads, temps)
             u2 = base_displacement(
-                s2, load_vector(list(ctx.nodes), ctx.loads, s2.free_dofs)
+                s2, total_load_vector(list(ctx.nodes), ctx.loads, s2)
             )
             participation[e.id] = float(np.max(np.abs(u2))) - base_umax
         except Exception:  # removal causes a mechanism: maximal participation

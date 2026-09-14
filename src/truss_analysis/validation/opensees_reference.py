@@ -47,7 +47,10 @@ from ..criticality.engine import (
     base_displacement,
     build_engine,
     ci_sweep,
-    load_vector,
+    member_forces,
+    member_matrices,
+    prestress_lengths,
+    total_load_vector,
 )
 from ..material.steel_eurocode import FloatOrArray
 from ..material.steel_eurocode import k_E as eurocode_k_E
@@ -129,12 +132,22 @@ def solve_truss_in_opensees(
     elements: Sequence[Element],
     loads: Mapping[str, Mapping[str, float]],
     k_scale: Mapping[str, float] | None = None,
+    imposed_nodal_forces: NDArray[np.float64] | None = None,
 ) -> OpenseesSolution:
     """Build and solve the truss in OpenSeesPy (one fresh model per call).
 
     ``k_scale`` maps member id -> multiplier on its Young's modulus (use it
     to pass ``k_E(T_i)`` explicitly; OpenSees applies no thermal reduction
     by itself).
+
+    ``imposed_nodal_forces`` is an optional full-DOF vector of equivalent
+    nodal forces from imposed (thermal/fabrication) strain — the reference
+    side of what :func:`truss_analysis.criticality.engine.imposed_load_vector`
+    builds internally.  It is applied as ordinary nodal loads in the pattern.
+    Note the consequence for member forces: OpenSees then reports
+    ``basicForce = k * (b . u)``, the *total*-elongation force, while the
+    internal engine reports the mechanical one ``k * (b . u - dL_pre)``.
+    :func:`compare_state` applies exactly that offset when it compares.
     """
     ops = _require_ops()
     ops.wipe()
@@ -165,12 +178,17 @@ def solve_truss_in_opensees(
         )
     ops.timeSeries("Linear", 1)
     ops.pattern("Plain", 1, 1)
+    nodal = np.zeros(2 * len(nodes))
     for node_id, load in loads.items():
-        ops.load(
-            tag_of_node[str(node_id)],
-            float(load.get("Fx", 0.0)),
-            float(load.get("Fy", 0.0)),
-        )
+        i = tag_of_node[str(node_id)] - 1
+        nodal[2 * i] += float(load.get("Fx", 0.0))
+        nodal[2 * i + 1] += float(load.get("Fy", 0.0))
+    if imposed_nodal_forces is not None:
+        nodal = nodal + np.asarray(imposed_nodal_forces, dtype=float)
+    for pos, node in enumerate(nodes):
+        fx, fy = float(nodal[2 * pos]), float(nodal[2 * pos + 1])
+        if fx != 0.0 or fy != 0.0:
+            ops.load(tag_of_node[node.id], fx, fy)
     ops.system("BandSPD")
     ops.numberer("RCM")
     ops.constraints("Plain")
@@ -207,6 +225,26 @@ class OpenseesCiSweep:
     n_solves: int
 
 
+def _imposed_nodal_vector(
+    nodes: Sequence[Node],
+    elements: Sequence[Element],
+    temps: Mapping[str, float],
+    k_scale: Mapping[str, float],
+) -> NDArray[np.float64]:
+    """Full-DOF equivalent nodal forces ``B^T diag(k_scale*k0) dL_pre``.
+
+    The OpenSees-side mirror of the engine's ``imposed_load_vector``:
+    the same imposed elongations, the same (scaled) stiffnesses, assembled on
+    the full DOF map instead of the free one.  ``k_scale`` must be the field
+    the solve uses, so a perturbed member's thermal force scales with its
+    perturbed stiffness exactly as in the rank-1 formula.
+    """
+    b, k = member_matrices(nodes, elements, k_scale)
+    dl_pre = prestress_lengths(nodes, elements, temps)
+    imposed: NDArray[np.float64] = b.T @ (k * dl_pre)
+    return imposed
+
+
 def ci_sweep_in_opensees(
     nodes: Sequence[Node],
     elements: Sequence[Element],
@@ -217,7 +255,8 @@ def ci_sweep_in_opensees(
 ) -> OpenseesCiSweep:
     """Run the reference criticality sweep: baseline + one degraded member."""
     base_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
-    base = solve_truss_in_opensees(nodes, elements, loads, base_scale)
+    base_imposed = _imposed_nodal_vector(nodes, elements, temps, base_scale)
+    base = solve_truss_in_opensees(nodes, elements, loads, base_scale, base_imposed)
     u_max_base = float(np.max(np.abs(base.disp)))
     if u_max_base <= 0.0:
         msg = "zero baseline displacement: the CI ratio is undefined"
@@ -227,7 +266,8 @@ def ci_sweep_in_opensees(
     for elem in elements:
         scale = dict(base_scale)
         scale[elem.id] *= float(alpha)
-        pert = solve_truss_in_opensees(nodes, elements, loads, scale)
+        imposed = _imposed_nodal_vector(nodes, elements, temps, scale)
+        pert = solve_truss_in_opensees(nodes, elements, loads, scale, imposed)
         m = float(np.max(np.abs(pert.disp)))
         u_max_pert_max = max(u_max_pert_max, m)
         ci[elem.id] = m / u_max_base - 1.0
@@ -248,13 +288,17 @@ def _internal_state(
     silently solve the wrong (undegraded) state (found by the level-4 smoke
     test: u_max off by exactly 1/k_E, forces identical because a uniform
     E-scaling leaves forces of a loaded truss invariant).
+
+    The base state is solved against :func:`total_load_vector` (mechanical +
+    restrained-expansion equivalent forces) and the reported forces are the
+    mechanical ones from :func:`member_forces` — the same demand state the
+    DCR chain sees.
     """
     setup = build_engine(nodes, elements, loads, temps, k_e_func)
-    u_free = base_displacement(setup, load_vector(nodes, loads, setup.free_dofs))
+    u_free = base_displacement(setup, total_load_vector(nodes, loads, setup))
     u_full = np.zeros(2 * len(nodes))
     u_full[list(setup.free_dofs)] = u_free
-    strains = setup.b_free @ u_free
-    forces_arr = setup.k_axial * strains
+    forces_arr = member_forces(setup, u_free)
     forces = {eid: float(forces_arr[i]) for i, eid in enumerate(setup.ids)}
     return u_full, forces
 
@@ -283,16 +327,34 @@ def compare_state(
     temps: Mapping[str, float],
     k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
 ) -> StateComparison:
-    """Solve the identical degraded state in both solvers and compare."""
+    """Solve the identical degraded state in both solvers and compare.
+
+    Both sides carry the same physical demand: the OpenSees model receives
+    the restrained-expansion equivalent forces as nodal loads, and its
+    ``basicForce`` readings (total-elongation forces ``k b.u``) are converted
+    to the mechanical convention ``k (b.u - dL_pre)`` the internal engine
+    reports, so the force comparison is like-for-like even for heated
+    redundant structures.
+    """
     k_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
     u_int, f_int = _internal_state(nodes, elements, loads, temps, k_e_func)
-    sol = solve_truss_in_opensees(nodes, elements, loads, k_scale)
+    imposed = _imposed_nodal_vector(nodes, elements, temps, k_scale)
+    sol = solve_truss_in_opensees(nodes, elements, loads, k_scale, imposed)
+
+    # basicForce = k * (b . u) = N_mech + k * dL_pre  ->  subtract the offset.
+    _b, k_arr = member_matrices(nodes, elements, k_scale)
+    dl_pre = prestress_lengths(nodes, elements, temps)
+    forces_ops = {
+        e.id: float(sol.member_forces[e.id]) - float(k_arr[i] * dl_pre[i])
+        for i, e in enumerate(elements)
+    }
+
     u_scale = float(np.max(np.abs(u_int)))
     f_scale = max(abs(v) for v in f_int.values()) if f_int else 0.0
     abs_node_err = float(np.max(np.abs(u_int - sol.disp))) if len(u_int) else 0.0
     rel_node = abs_node_err / u_scale if u_scale > 0.0 else 0.0
     force_errs = [
-        abs(f_int[e.id] - sol.member_forces[e.id]) / f_scale if f_scale > 0.0 else 0.0
+        abs(f_int[e.id] - forces_ops[e.id]) / f_scale if f_scale > 0.0 else 0.0
         for e in elements
     ]
     u_max_ops = float(np.max(np.abs(sol.disp)))
@@ -313,7 +375,7 @@ def compare_state(
         nodal_disp_internal=disp_int,
         nodal_disp_opensees=disp_ops,
         forces_internal=f_int,
-        forces_opensees=dict(sol.member_forces),
+        forces_opensees=forces_ops,
     )
 
 
@@ -344,7 +406,7 @@ def compare_ci_ranking(
 ) -> CiRankingComparison:
     """Compare criticality fields and classify the rank correlation."""
     setup = build_engine(nodes, elements, loads, temps, k_e_func)
-    u_free = base_displacement(setup, load_vector(nodes, loads, setup.free_dofs))
+    u_free = base_displacement(setup, total_load_vector(nodes, loads, setup))
     sweep = ci_sweep(setup, u_free, alpha)
     u_max_int = float(np.max(np.abs(u_free)))
     ref = ci_sweep_in_opensees(nodes, elements, loads, temps, alpha, k_e_func)

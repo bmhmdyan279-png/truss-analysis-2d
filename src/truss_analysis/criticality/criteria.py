@@ -28,8 +28,10 @@ state rather than a displacement one.
 Perturbed forces need the perturbed stiffness
 ---------------------------------------------
 Softening member ``i`` changes the stiffness that member's own force is
-computed from. Writing ``e_j = b_j . u_pert[:, i]`` for the elongation of
-member ``j`` in the perturbed state,
+computed from. Writing ``e_j = b_j . u_pert[:, i] - dL_pre,j`` for the
+*mechanical* elongation of member ``j`` in the perturbed state (total
+elongation minus the imposed thermal/fabrication part — only the mechanical
+one carries force),
 
 .. code-block:: text
 
@@ -44,6 +46,11 @@ shows up as a spurious doubling of the force index even in a statically
 *determinate* truss, where softening a member cannot change any force at all.
 That determinate case is asserted in the test suite precisely because it
 catches this error.
+
+``CI_E`` is the change in **mechanical strain energy**
+``0.5 sum_e k_e (b_e . u - dL_pre,e)^2`` — the energy stored in elastic
+elongation, not the total thermomechanical potential; imposed strain that a
+member sheds into the structure is not "absorbed" by it.
 
 Indices
 -------
@@ -65,15 +72,20 @@ not really need.
 
 Reactions under a rank-1 perturbation
 -------------------------------------
-``R = (K U)[fixed]``, and the perturbed stiffness is
-``K + Delta_i b_i b_i^T`` with ``Delta_i = (alpha - 1) k_i``. So
+``R = (K U)[fixed] - F_ext[fixed]`` — the supports carry whatever the
+stiffness pulls minus what is applied directly at the constrained DOFs
+(mechanical loads placed on support nodes and the imposed thermal/fabrication
+equivalent forces; :class:`ReactionInfluence` carries that vector as
+``f_ext_fixed``). The perturbed stiffness is ``K + Delta_i b_i b_i^T`` with
+``Delta_i = (alpha - 1) k_i`` and the perturbed member's thermal force scales
+with it, so
 
 .. code-block:: text
 
-    R_pert[:, i] = K[fixed, free] u_pert[:, i]
-                 + Delta_i * b_i[fixed] * (b_i[free] . u_pert[:, i])
+    R_pert[:, i] = K[fixed, free] u_pert[:, i] - F_ext[fixed]
+                 + Delta_i * b_i[fixed] * (b_i[free] . u_pert[:, i] - dL_pre,i)
 
-The second term is the perturbed member's own contribution to the supports and
+The second line is the perturbed member's own contribution to the supports and
 must not be dropped; :class:`ReactionInfluence` carries ``b_i[fixed]`` for
 exactly that purpose.
 
@@ -131,12 +143,21 @@ class ReactionInfluence:
     fixed_dofs : tuple[int, ...]
         The constrained global DOF indices, in ascending order, so a caller can
         map a row of ``k_fixed_free`` back to a node and direction.
+    f_ext_fixed : np.ndarray or None
+        External force already applied *directly* on the constrained DOFs,
+        shape ``(n_fixed,)``: mechanical loads placed on support nodes plus
+        the imposed (thermal/fabrication) equivalent nodal forces. Reactions
+        are the residual ``R = (K u)[fixed] - f_ext_fixed``; omitting this
+        term is only correct when nothing loads the supports, which a heated
+        redundant structure violates by construction. ``None`` (the default
+        for callers that pass no loads/temps) is treated as zero.
     """
 
     k_fixed_free: np.ndarray
     b_fixed: np.ndarray
     k_axial: np.ndarray
     fixed_dofs: tuple[int, ...]
+    f_ext_fixed: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -214,12 +235,20 @@ def reaction_influence(
     nodes: Sequence[Node],
     elements: Sequence[Element],
     k_scale: Mapping[str, float] | None = None,
+    *,
+    loads: Mapping[str, Mapping[str, float]] | None = None,
+    temps: Mapping[str, float] | None = None,
 ) -> ReactionInfluence:
     """Build the constrained-DOF blocks needed for the reaction index.
 
     Assembled from the same rank-1 member dyads the engine uses,
     ``K = sum_e k_e b_e b_e^T``, so it cannot disagree with the stiffness the
-    sweep was computed against.
+    sweep was computed against.  ``K[fixed, free]`` is formed **directly** as
+    ``(b[fixed] * k)^T @ b[free]`` — an ``O(m * n_fixed * n_free)`` product —
+    instead of materialising the dense ``(2n, 2n)`` global matrix first and
+    slicing it: the dense intermediate is exactly the ``O(n^2)`` memory wall
+    the sparse assembly path exists to remove, and rebuilding it here would
+    negate that for every CI sweep with reactions.
 
     Parameters
     ----------
@@ -232,13 +261,23 @@ def reaction_influence(
         Must match what was passed to
         :func:`~truss_analysis.criticality.engine.build_engine`, or the
         reactions will not correspond to the sweep.
+    loads : Mapping or None, optional
+        Nodal mechanical loads; the part applied on *support* nodes enters
+        ``f_ext_fixed`` and must be subtracted from ``(K u)[fixed]`` to get
+        the true reactions.
+    temps : Mapping[str, float] or None, optional
+        Member temperature field the sweep was built with; together with the
+        element ``alpha`` / ``delta_L_free`` it defines the imposed equivalent
+        nodal forces whose fixed-DOF part also enters ``f_ext_fixed``.
 
     Returns
     -------
     ReactionInfluence
-        ``K[fixed, free]``, ``b[fixed]``, the axial stiffnesses and the
-        constrained DOF indices.
+        ``K[fixed, free]``, ``b[fixed]``, the axial stiffnesses, the
+        constrained DOF indices and the direct fixed-DOF load.
     """
+    from .engine import prestress_lengths
+
     b, k = member_matrices(nodes, elements, k_scale)
     fixed = fixed_dof_indices(list(nodes))
     free = list(free_dof_indices(nodes))
@@ -249,13 +288,28 @@ def reaction_influence(
             b_fixed=np.zeros((n_members, 0)),
             k_axial=k,
             fixed_dofs=(),
+            f_ext_fixed=np.zeros(0),
         )
-    k_full = np.einsum("i,ip,iq->pq", k, b, b)
+    b_fixed = b[:, fixed]  # (nE, n_fixed)
+    b_free = b[:, free]  # (nE, n_free)
+    # K[fixed, free] = sum_e k_e b_e[fixed] b_e[free]^T — no dense (2n, 2n).
+    k_fixed_free = (b_fixed * k[:, None]).T @ b_free
+
+    f_ext = np.zeros(2 * len(nodes))
+    if loads:
+        node_idx = {n.id: i for i, n in enumerate(nodes)}
+        for node_id, load in loads.items():
+            i = node_idx[str(node_id)]
+            f_ext[2 * i] += float(load.get("Fx", 0.0))
+            f_ext[2 * i + 1] += float(load.get("Fy", 0.0))
+    dl_pre = prestress_lengths(nodes, elements, temps)
+    imposed_fixed = b_fixed.T @ (k * dl_pre)
     return ReactionInfluence(
-        k_fixed_free=k_full[np.ix_(fixed, free)],
-        b_fixed=b[np.ix_(range(n_members), fixed)],
+        k_fixed_free=k_fixed_free,
+        b_fixed=b_fixed,
         k_axial=k,
         fixed_dofs=tuple(fixed),
+        f_ext_fixed=f_ext[fixed] + imposed_fixed,
     )
 
 
@@ -300,7 +354,10 @@ def multi_criteria_ci(
     k_axial = setup.k_axial
 
     # ---- base quantities, computed once for the whole sweep ---------------
-    elong_base = setup.b_free @ u_base  # (nE,)
+    # MECHANICAL elongation: total elongation minus the imposed (thermal /
+    # fabrication) part -- only the mechanical part carries force and stores
+    # strain energy, matching engine.member_forces and the assembler.
+    elong_base = setup.b_free @ u_base - setup.dl_pre  # (nE,)
     n_base = k_axial * elong_base
     n_base_max = float(np.max(np.abs(n_base))) if n_members else 0.0
     energy_base = float(0.5 * np.sum(k_axial * elong_base**2))
@@ -308,9 +365,15 @@ def multi_criteria_ci(
 
     want_reaction = reactions is not None and reactions.k_fixed_free.size > 0
     if want_reaction and reactions is not None:
-        r_base = reactions.k_fixed_free @ u_base
+        f_ext_fixed = (
+            reactions.f_ext_fixed
+            if reactions.f_ext_fixed is not None
+            else np.zeros(reactions.k_fixed_free.shape[0])
+        )
+        r_base = reactions.k_fixed_free @ u_base - f_ext_fixed
         reaction_base_max = float(np.max(np.abs(r_base)))
     else:
+        f_ext_fixed = np.zeros(0)
         reaction_base_max = 0.0
 
     results: dict[str, MultiCriteriaResult] = {}
@@ -325,7 +388,7 @@ def multi_criteria_ci(
         # finite; those columns are overwritten below and never reported.
         safe_block = np.where(np.isfinite(block), block, 0.0)
 
-        elong = setup.b_free @ safe_block  # (nE, width)
+        elong = setup.b_free @ safe_block - setup.dl_pre[:, None]  # (nE, width)
 
         # Per-column stiffness: identical to k_axial except in the diagonal
         # slot, where the perturbed member carries alpha * k_i.
@@ -339,8 +402,12 @@ def multi_criteria_ci(
         disp_max_col = np.max(np.abs(safe_block), axis=0)
 
         if want_reaction and reactions is not None:
-            # R_pert = K[fixed,free] u + Delta_i * b_i[fixed] * (b_i[free] . u)
-            r_pert = reactions.k_fixed_free @ safe_block  # (n_fixed, width)
+            # R_pert = K[fixed,free] u_pert - f_ext[fixed]
+            #          + Delta_i * b_i[fixed] * (b_i[free] . u_pert - dL_pre,i)
+            # (the rank-1 correction carries the MECHANICAL elongation of the
+            # perturbed member, because its thermal equivalent force scales by
+            # the same alpha as its stiffness -- see the engine docstring)
+            r_pert = reactions.k_fixed_free @ safe_block - f_ext_fixed[:, None]
             delta_i = (alpha - 1.0) * k_axial[start:stop]  # (width,)
             b_fixed_block = reactions.b_fixed[start:stop]  # (width, n_fixed)
             self_elong = elong[diagonal[start:stop], np.arange(width)]  # (width,)

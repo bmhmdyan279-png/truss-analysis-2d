@@ -33,7 +33,10 @@ from .criticality.engine import (
     build_engine,
     ci_sweep,
     load_vector,
+    member_forces,
+    total_load_vector,
 )
+from .criticality.scenarios import T_AMBIENT
 from .material.steel_eurocode import k_E as eurocode_k_E
 from .material.steel_eurocode import k_y as eurocode_k_y
 from .model import Element, Node
@@ -52,6 +55,7 @@ __all__ = [
     "Governing",
     "MemberLimitState",
     "TwoComponentResult",
+    "UniformForceScan",
     "ci_two_component",
     "dcr_field",
     "member_axial_forces",
@@ -173,12 +177,151 @@ def member_axial_forces(
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
 ) -> dict[str, float]:
-    """Member axial forces [N] (tension positive) at the given temperatures."""
+    """Member axial forces [N] (tension positive) at the given temperatures.
+
+    The solve carries the **full thermal demand**: the temperature field both
+    degrades stiffness (``k_e(T) = k_E(T) E A / L``) and, through restrained
+    expansion, loads the structure via the equivalent nodal forces
+    ``B^T diag(k(T)) dL_pre``.  The reported force is the mechanical one,
+    ``N_e = k_e(T) (b_e . u - dL_pre,e)``.  In a redundant structure a heated
+    member therefore develops real compression even under no external load —
+    the demand the DCR must see.  Elements without ``alpha`` /
+    ``delta_L_free`` reduce exactly to the previous stiffness-degradation-only
+    result.
+    """
     setup = build_engine(nodes, elements, loads, temps)
-    u = base_displacement(setup, load_vector(nodes, loads, setup.free_dofs))
-    strains = setup.b_free @ u
-    forces = setup.k_axial * strains
+    u = base_displacement(setup, total_load_vector(nodes, loads, setup))
+    forces = member_forces(setup, u)
     return {eid: float(forces[i]) for i, eid in enumerate(setup.ids)}
+
+
+@dataclass(frozen=True)
+class UniformForceScan:
+    """One factorisation serving a whole uniform-temperature force scan.
+
+    Under a **uniform** field every stiffness scales by the same factor,
+    ``K(T) = k_E(T) K_0``, and the thermal right-hand side is affine in
+    ``T``, so the member forces at any grid temperature follow from three
+    solves against the *ambient* factorisation:
+
+    .. code-block:: text
+
+        u(T)  = z_m / k_E(T) + (T - T_0) z_alpha + z_free
+        N_e(T) = k_E(T) k0_e ( b_e.u(T) - alpha_e (T - T_0) L_e - dL_free,e )
+
+    with ``z_m = K_0^-1 F_mech``, ``z_alpha = K_0^-1 B^T (k0 alpha L)`` and
+    ``z_free = K_0^-1 B^T (k0 dL_free)``.  Expanding gives the closed form
+    used in :meth:`forces_at`, which is exact — no interpolation, no
+    approximation — and identical to calling :func:`member_axial_forces` at
+    each temperature.  The critical-temperature scans
+    (:func:`member_critical_temperature`, :func:`system_critical_temperature`)
+    used to rebuild and refactorise the engine at all 48 grid points; they now
+    build this scan once and evaluate ``O(m)`` arithmetic per point, which is
+    the difference between ``O(grid * n^3)`` and ``O(n^3)`` on the hot paths
+    of the retrofit triage.
+
+    Attributes
+    ----------
+    ids : tuple[str, ...]
+        Member ids, in element order.
+    k0 : np.ndarray
+        Ambient axial stiffnesses ``E A / L`` [N/m], shape ``(m,)``.
+    el_mech : np.ndarray
+        ``b_e . z_m`` — mechanical elongation from external loads, ``(m,)``.
+    el_alpha : np.ndarray
+        ``b_e . z_alpha`` — elongation per unit ``(T - T_0)`` from restrained
+        thermal expansion, ``(m,)``.
+    el_free : np.ndarray
+        ``b_e . z_free`` — elongation from fabrication strains, ``(m,)``.
+    alpha_lengths : np.ndarray
+        ``alpha_e * L_e`` [m/degC], ``(m,)``.
+    delta_l_free : np.ndarray
+        Free length change ``delta_L_free,e`` [m], ``(m,)``.
+    """
+
+    ids: tuple[str, ...]
+    k0: np.ndarray
+    el_mech: np.ndarray
+    el_alpha: np.ndarray
+    el_free: np.ndarray
+    alpha_lengths: np.ndarray
+    delta_l_free: np.ndarray
+
+    @classmethod
+    def build(
+        cls,
+        nodes: Sequence[Node],
+        elements: Sequence[Element],
+        loads: Mapping[str, Mapping[str, float]],
+    ) -> UniformForceScan:
+        """Factorise the ambient state once and prepare the three solves."""
+        temps0 = {e.id: T_AMBIENT for e in elements}
+        setup = build_engine(nodes, elements, loads, temps0)
+        # At T_AMBIENT the Eurocode reduction is exactly 1, so k_axial is the
+        # ambient stiffness and dl_pre is the pure fabrication term.
+        f_mech = load_vector(nodes, loads, setup.free_dofs)
+        z_m = base_displacement(setup, f_mech)
+        el_mech = setup.b_free @ z_m
+
+        node_idx = {n.id: i for i, n in enumerate(nodes)}
+        lengths = np.array(
+            [
+                float(
+                    np.hypot(
+                        nodes[node_idx[e.node_j]].x - nodes[node_idx[e.node_i]].x,
+                        nodes[node_idx[e.node_j]].y - nodes[node_idx[e.node_i]].y,
+                    )
+                )
+                for e in elements
+            ]
+        )
+        alpha_arr = np.array([e.alpha for e in elements], dtype=float)
+        alpha_lengths = alpha_arr * lengths
+
+        q_alpha = setup.b_free.T @ (setup.k_axial * alpha_lengths)
+        el_alpha = setup.b_free @ base_displacement(setup, q_alpha)
+        q_free = setup.b_free.T @ (setup.k_axial * setup.dl_pre)
+        el_free = setup.b_free @ base_displacement(setup, q_free)
+        return cls(
+            ids=setup.ids,
+            k0=setup.k_axial.copy(),
+            el_mech=el_mech,
+            el_alpha=el_alpha,
+            el_free=el_free,
+            alpha_lengths=alpha_lengths,
+            delta_l_free=setup.dl_pre.copy(),
+        )
+
+    def forces_at(self, temperature: float) -> np.ndarray:
+        """Exact member forces [N] at a uniform temperature, shape ``(m,)``.
+
+        Raises
+        ------
+        MechanismError
+            If ``k_E(T) <= 0`` (the Eurocode table reaches 0 at 1200 degC):
+            the structure has no stiffness left, which the per-point engine
+            build reported the same way.
+        """
+        from .criticality.engine import MechanismError
+
+        s = float(eurocode_k_E(temperature))
+        if s <= 0.0:
+            msg = (
+                f"stiffness matrix singular (mechanism) in base state: "
+                f"k_E({temperature} degC) = {s}"
+            )
+            raise MechanismError(msg)
+        dt = float(temperature) - T_AMBIENT
+        # b.u(T) = el_mech / s + dt * el_alpha + el_free
+        elong = self.el_mech / s + dt * self.el_alpha + self.el_free
+        dl_pre = self.alpha_lengths * dt + self.delta_l_free
+        forces: np.ndarray = np.asarray(s * self.k0 * (elong - dl_pre), dtype=float)
+        return forces
+
+    def forces_dict_at(self, temperature: float) -> dict[str, float]:
+        """`forces_at` keyed by member id."""
+        forces = self.forces_at(temperature)
+        return {eid: float(forces[i]) for i, eid in enumerate(self.ids)}
 
 
 def yield_capacity(area: float, f_y: float, temperature: float) -> float:
@@ -274,33 +417,22 @@ def _member_limit_state(
     )
 
 
-def dcr_field(
+def _limit_states_from_forces(
     nodes: Sequence[Node],
     elements: Sequence[Element],
-    loads: Mapping[str, Mapping[str, float]],
+    forces: Mapping[str, float],
     temps: Mapping[str, float],
     f_y: float,
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> dict[str, MemberLimitState]:
-    """DCR state of every member at the given member temperatures.
+    """Per-member limit states from precomputed forces and temperatures.
 
-    Parameters
-    ----------
-    nodes, elements, loads, temps, f_y
-        Model, loading, per-member temperature field [degC] and ambient yield
-        strength ``f_y`` [Pa].
-    buckling_model : BucklingModel, default EUROCODE_CHI
-        Compression capacity model; see :class:`BucklingModel`.
-    buckling_curve : str, default "c"
-        Flexural buckling curve, only used by ``EUROCODE_CHI``.
-
-    Returns
-    -------
-    dict[str, MemberLimitState]
-        Limit state per member id.
+    The capacity side of :func:`dcr_field` factored out, so the uniform-
+    temperature scans can reuse it with forces from a
+    :class:`UniformForceScan` (one factorisation for the whole grid) instead
+    of rebuilding the engine at every grid point.
     """
-    forces = member_axial_forces(nodes, elements, loads, temps)
     out: dict[str, MemberLimitState] = {}
     for e in elements:
         ni = next(n for n in nodes if n.id == e.node_i)
@@ -322,8 +454,41 @@ def dcr_field(
     return out
 
 
-def _uniform_temps(elements: Sequence[Element], temperature: float) -> dict[str, float]:
-    return {e.id: float(temperature) for e in elements}
+def dcr_field(
+    nodes: Sequence[Node],
+    elements: Sequence[Element],
+    loads: Mapping[str, Mapping[str, float]],
+    temps: Mapping[str, float],
+    f_y: float,
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+) -> dict[str, MemberLimitState]:
+    """DCR state of every member at the given member temperatures.
+
+    The demand forces include restrained thermal expansion (see
+    :func:`member_axial_forces`), so a heated member of a redundant truss is
+    checked against the compression it really develops, not only against the
+    redistribution of the mechanical loads.
+
+    Parameters
+    ----------
+    nodes, elements, loads, temps, f_y
+        Model, loading, per-member temperature field [degC] and ambient yield
+        strength ``f_y`` [Pa].
+    buckling_model : BucklingModel, default EUROCODE_CHI
+        Compression capacity model; see :class:`BucklingModel`.
+    buckling_curve : str, default "c"
+        Flexural buckling curve, only used by ``EUROCODE_CHI``.
+
+    Returns
+    -------
+    dict[str, MemberLimitState]
+        Limit state per member id.
+    """
+    forces = member_axial_forces(nodes, elements, loads, temps)
+    return _limit_states_from_forces(
+        nodes, elements, forces, temps, f_y, buckling_model, buckling_curve
+    )
 
 
 def member_critical_temperature(
@@ -345,20 +510,31 @@ def member_critical_temperature(
     Because ``lambda_bar_theta`` grows as ``k_E`` falls faster than ``k_y``,
     the reported critical temperature depends on the compression capacity
     model; see :class:`BucklingModel`.
+
+    The whole grid is served by ONE ambient factorisation through
+    :class:`UniformForceScan`: at each grid point the exact member forces
+    (including restrained thermal expansion) are ``O(m)`` arithmetic, not a
+    fresh ``O(n^3)`` engine build.
     """
+    scan = UniformForceScan.build(nodes, elements, loads)
+    if member_id not in scan.ids:
+        msg = f"member_critical_temperature: unknown member {member_id!r}"
+        raise KeyError(msg)
     prev_t: float | None = None
     prev_dcr: float | None = None
     for t in temp_grid:
-        states = dcr_field(
+        forces = scan.forces_at(t)
+        temps_t = {eid: float(t) for eid in scan.ids}
+        state = _limit_states_from_forces(
             nodes,
             elements,
-            loads,
-            _uniform_temps(elements, t),
+            {eid: float(forces[i]) for i, eid in enumerate(scan.ids)},
+            temps_t,
             f_y,
             buckling_model,
             buckling_curve,
-        )
-        dcr = states[member_id].dcr
+        )[member_id]
+        dcr = state.dcr
         if dcr >= 1.0:
             if prev_t is None or prev_dcr is None:
                 return float(t)
@@ -384,14 +560,21 @@ def system_critical_temperature(
     redistribute as stiffnesses degrade); the resolution is the grid step.
     Returns ``temp_grid[0]`` when even the coldest scan already fails and
     ``temp_grid[-1]`` when nothing fails within the range.
+
+    Like :func:`member_critical_temperature`, the grid is evaluated from a
+    single :class:`UniformForceScan` factorisation, which is what keeps the
+    retrofit triage (a ``theta_sys`` per candidate decision) affordable.
     """
+    scan = UniformForceScan.build(nodes, elements, loads)
     last_safe = float(temp_grid[0])
     for t in temp_grid:
-        states = dcr_field(
+        forces = scan.forces_at(t)
+        temps_t = {eid: float(t) for eid in scan.ids}
+        states = _limit_states_from_forces(
             nodes,
             elements,
-            loads,
-            _uniform_temps(elements, t),
+            {eid: float(forces[i]) for i, eid in enumerate(scan.ids)},
+            temps_t,
             f_y,
             buckling_model,
             buckling_curve,
@@ -416,9 +599,15 @@ def ci_two_component(
     component compares the perturbed member force (member i softened by
     ``alpha``) against the temperature-dependent capacity.  Both components
     and the governing limit state are reported separately.
+
+    The base state carries the full thermal demand (equivalent nodal forces
+    from restrained expansion), and the perturbed force is the *mechanical*
+    one, ``N = alpha k_i (b_i . u_pert - dL_pre,i)`` — consistent with
+    :func:`member_axial_forces` and with the rank-1 numerator in
+    :func:`~truss_analysis.criticality.engine.ci_sweep`.
     """
     setup = build_engine(nodes, elements, loads, temps)
-    f_free = load_vector(nodes, loads, setup.free_dofs)
+    f_free = total_load_vector(nodes, loads, setup)
     u = base_displacement(setup, f_free)
     u_max_base = float(np.max(np.abs(u)))
     sweep = ci_sweep(setup, u, alpha)
@@ -449,9 +638,13 @@ def ci_two_component(
             elem.effective_length_factor,
             f_y,
         )
-        # perturbed axial force in member i: softened stiffness x compatibility
+        # perturbed axial force in member i: softened stiffness x the
+        # MECHANICAL elongation (total minus imposed), matching the rank-1
+        # numerator convention of the engine
         k_pert = alpha * setup.k_axial[i]
-        n_pert = float(k_pert * float(setup.b_free[i] @ sweep.u_pert[:, i]))
+        n_pert = float(
+            k_pert * (float(setup.b_free[i] @ sweep.u_pert[:, i]) - setup.dl_pre[i])
+        )
         state_pert = _member_limit_state(
             eid,
             float(temps[eid]),

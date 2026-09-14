@@ -5,7 +5,10 @@ Public API:
 * :func:`compute_ci_for_topology` — full CI pipeline on the exact rank-1
   engine (Sherman-Morrison), uniform scenario included with no special case.
 * :mod:`.engine` — ``build_engine``, ``ci_sweep``, ``brute_force_ci``
-  (reference), ``perturb_multi`` (Woodbury rank-r), ``MechanismError``.
+  (reference), ``perturb_multi`` (Woodbury rank-r), ``MechanismError``, and
+  the demand-state helpers ``prestress_lengths`` / ``imposed_load_vector`` /
+  ``total_load_vector`` / ``member_forces`` that carry restrained thermal
+  expansion through the fire chain.
 * :mod:`.scenarios` — centroid-based partition ``left|mid|right`` plus
   ``uniform`` and ``linear_gradient``; ``get_scenario_temperatures``.
 * :mod:`.ranking` — ``rank_members`` (natural-sort tie-break), ``tau_b``
@@ -37,9 +40,13 @@ from .engine import (
     build_engine,
     ci_sweep,
     compute_ci_for_topology,
+    imposed_load_vector,
     load_vector,
+    member_forces,
     member_matrices,
     perturb_multi,
+    prestress_lengths,
+    total_load_vector,
 )
 from .indices import NciResult, compute_nci
 from .ranking import TauResult, natural_sort_key, rank_members, tau_b
@@ -73,16 +80,20 @@ __all__ = [
     "compute_ci_for_topology",
     "compute_nci",
     "get_scenario_temperatures",
+    "imposed_load_vector",
     "load_vector",
     "member_centroids",
+    "member_forces",
     "member_matrices",
     "multi_criteria_ci",
     "natural_sort_key",
     "perturb_multi",
+    "prestress_lengths",
     "rank_members",
     "reaction_influence",
     "relative_eps",
     "scenario_partition",
     "span_bounds",
     "tau_b",
+    "total_load_vector",
 ]

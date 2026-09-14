@@ -510,3 +510,67 @@ def test_block_size_does_not_change_results(monkeypatch: pytest.MonkeyPatch) -> 
                 f"{eid}.{key}"
             )
         assert a.governing == b.governing
+
+
+# ---------------------------------------------------------------------
+# reaction_influence: sparse construction of K[fixed, free] and the
+# direct fixed-DOF load (audit round 2, findings 1 & 3)
+# ---------------------------------------------------------------------
+
+
+def test_reaction_influence_matches_dense_slice_without_dense_k() -> None:
+    """k_fixed_free equals the dense einsum slice, built without the O(n^2) wall."""
+    from truss_analysis.criticality import member_matrices
+
+    nodes, elements, _loads = _indeterminate_frame()
+    infl = reaction_influence(nodes, elements)
+    b, k = member_matrices(nodes, elements)
+    k_full = np.einsum("i,ip,iq->pq", k, b, b)
+    from truss_analysis.criticality.engine import free_dof_indices
+    from truss_analysis.model import fixed_dof_indices
+
+    fixed = fixed_dof_indices(nodes)
+    free = list(free_dof_indices(nodes))
+    assert infl.k_fixed_free.shape == (len(fixed), len(free))
+    assert np.allclose(infl.k_fixed_free, k_full[np.ix_(fixed, free)], rtol=0, atol=0)
+
+
+def test_reaction_influence_carries_support_loads_and_thermal_forces() -> None:
+    """f_ext_fixed = mechanical load on supports + imposed equivalent forces."""
+    from truss_analysis.criticality import prestress_lengths
+
+    nodes, elements, _loads = _indeterminate_frame()
+    # a mechanical load applied directly on support node "a"
+    loads = {"a": {"Fx": 5e3, "Fy": -2e3}}
+    # heat one member: its equivalent pair pushes on the supports too
+    elements_t = [
+        Element(
+            id=e.id,
+            node_i=e.node_i,
+            node_j=e.node_j,
+            E=e.E,
+            A=e.A,
+            I_sec=e.I_sec,
+            alpha=1.2e-5 if e.id == "ab" else 0.0,
+        )
+        for e in elements
+    ]
+    temps = {e.id: (620.0 if e.id == "ab" else 20.0) for e in elements}
+    k_scale = {"ab": 0.31, **{e.id: 1.0 for e in elements if e.id != "ab"}}
+
+    infl = reaction_influence(nodes, elements_t, k_scale, loads=loads, temps=temps)
+    assert infl.f_ext_fixed is not None
+
+    # independent construction of the same vector
+    from truss_analysis.criticality import member_matrices
+    from truss_analysis.model import fixed_dof_indices
+
+    b, k = member_matrices(nodes, elements_t, k_scale)
+    fixed = fixed_dof_indices(nodes)
+    dl = prestress_lengths(nodes, elements_t, temps)
+    f_ext = np.zeros(2 * len(nodes))
+    f_ext[0] += 5e3  # node "a" is index 0: DOFs 0 (x) and 1 (y)
+    f_ext[1] += -2e3
+    expected = f_ext[fixed] + (b[:, fixed].T @ (k * dl))
+    assert np.allclose(infl.f_ext_fixed, expected, rtol=1e-12, atol=1e-9)
+    assert np.any(np.abs(expected) > 0.0)  # the case is not vacuous
