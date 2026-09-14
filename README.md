@@ -63,10 +63,10 @@ of the input unit system.
 
 | Area | What you get |
 |---|---|
-| Solver | Direct stiffness method; elimination (default) or penalty boundary conditions; sparse or dense assembly; mechanism/singularity detection |
+| Solver | Direct stiffness method; elimination (default) or penalty boundary conditions; sparse (CSR + SuperLU) or dense assembly; Cholesky-first factorisation for the SPD system; mechanism/singularity detection with rank, condition number and a `stable`/`ill_conditioned`/`singular` status |
 | Thermal | Per-member temperature change `delta_T`, free-length changes `delta_L_free` (fabrication fit); prestress work tracked separately |
-| Fire engineering | EN 1993-1-2 reduction factors `k_E(T)`, `k_y(T)`, `k_s(T)`, `k_p(T)`, strain limits and the full stress–strain law; design resistance and demand–capacity ratio (DCR) fields; system critical temperature `theta_sys` by DCR sweep |
-| Criticality | Exact rank-1 (Sherman–Morrison) perturbation engine: per-member CI / normalised CI, ranks, top-5 sets, Kendall tau-b rank stability against the ambient-temperature baseline |
+| Fire engineering | EN 1993-1-2 reduction factors `k_E(T)`, `k_y(T)`, `k_s(T)`, `k_p(T)`, strain limits and the full stress–strain law; compression capacity per §4.2.3.1 with the buckling reduction factor `chi` (not bare Euler); design resistance and demand–capacity ratio (DCR) fields; system critical temperature `theta_sys` by DCR sweep |
+| Criticality | Exact rank-1 (Sherman–Morrison) perturbation engine: per-member CI / normalised CI, ranks, top-5 sets, Kendall tau-b rank stability against the ambient-temperature baseline; **multi-criteria indices** — displacement, peak member force, the member's own force, strain energy and support reaction — from the same perturbed field |
 | Uncertainty | Random-variable table (Gumbel live load, lognormal yield strength, truncated-normal fire intensity, deterministic E) with documented citation status; LHS + Monte Carlo; Gaussian copula correlation; streaming statistics; probabilistic ranking |
 | Retrofit | Budgeted member upgrading; greedy / exhaustive / robust / redundant strategies; linear, quadratic and step cost scenarios; metric set: cost, `u_max`, `theta_sys`, members with DCR ≥ 1 |
 | Validation | Graph checks (orphans, duplicates, self-loops, connectivity, rank, condition); energy validation via the generalized Clapeyron theorem; equilibrium residuals; optional OpenSeesPy reference bridge (`validation` extra) |
@@ -453,7 +453,7 @@ Top-level object:
 | `elements` | array | **yes** | see below; `E > 0`, `A > 0`; node references must exist |
 | `loads` | array | no | nodal forces; unknown node ids are ignored |
 | `temperature_change` | float | no | part of the canonical generator format; the analysis pipeline drives thermal effects from each element's `delta_T` |
-| `options` | object | no | accepted for compatibility with generated models (`use_sparse`, `bc_method`, `penalty_value`, `plot_results`, `displacement_scale`); the current pipeline takes these settings from the API/CLI instead |
+| `options` | object | no | `use_sparse` (CSR assembly + SuperLU solve), `bc_method` (`"elimination"` default \| `"penalty"`), `penalty_value` (absolute N/m; omit to derive `1e10 × max\|diag K\|`) are **applied**. `plot_results` / `displacement_scale` are presentation-only and consumed by the plotting layer. An unrecognised key raises `InputIgnoredWarning` rather than being swallowed. Equivalent `run()` kwargs override the file |
 
 `nodes[i]`:
 
@@ -461,8 +461,16 @@ Top-level object:
 |---|---|---|---|
 | `id` | int \| string | **yes** | normalised to string; must be unique |
 | `x`, `y` | float | **yes** | coordinates [m] (converted from ft in Imperial) |
-| `is_support` | bool | no (default `false`) | |
+| `is_support` | bool | no (default `false`) | must agree with the restraints — see below |
 | `support_dx`, `support_dy` | bool | no (default `false`) | constrained DOFs; pinned = both true, roller = one true |
+
+A DOF is constrained only when `is_support` **and** the matching restraint are
+both set. Because a restraint without the flag is silently ignored — producing a
+*different structure* from the one described — both inconsistent combinations
+are rejected by `validate_inputs`. Note also that "at least 3 constraints in
+total" is a **sanity check, not a stability proof**: three parallel rollers in a
+line satisfy the count and are still a mechanism. Stability is decided
+numerically from `rank(K_ff)`; see `docs/theory.md` §3.1.
 
 `elements[i]`:
 
@@ -476,8 +484,10 @@ Top-level object:
 | `alpha` | float | no (default `0`) | thermal expansion coefficient [1/°C] |
 | `delta_T` | float | no (default `0`) | member temperature change [°C] (°F differences converted with 5/9 in Imperial) |
 | `delta_L_free` (alias `delta_L0`) | float | no (default `0`) | imposed free length change (fabrication error) [m] |
-| `rho` | float | no (default `0`) | material density [kg/m³]; when > 0, self-weight is applied as half the member weight per end node |
-| `section_type`, `effective_length_factor`, `properties` | — | no | part of the canonical generator format; tolerated on input — buckling currently uses the effective-length factor default `K = 1.0` |
+| `density` (alias `rho`) | float | no (default `0`) | mass density [kg/m³]; when > 0, self-weight is applied as half the member weight per end node. In Imperial input this is read as **slug/ft³** (steel = 15.23), *not* lbf/ft³ — see below |
+| `effective_length_factor` (alias `k_factor`) | float | no (default `1.0`) | buckling effective-length factor $K$; must be > 0. Applied as $P_{cr} = \pi^2 E I / (KL)^2$ by the buckling check **and** the fire limit state |
+| `properties` | object | no | nested fallback for `I_sec` / `density` / `effective_length_factor`. The **top level wins**; a disagreement raises `InputIgnoredWarning` naming both values instead of being resolved silently |
+| `section_type` | string | no | descriptive metadata from the canonical generator format; not used by the solver |
 
 `loads[i]`:
 
@@ -488,6 +498,37 @@ Top-level object:
 
 Legacy tolerance: keys with stray surrounding spaces are accepted and
 normalised (`"E "` → `"E"`), matching files produced by older tooling.
+
+### Imperial input units, field by field
+
+The Imperial system in everyday structural use is **mixed** — lengths in feet,
+moduli in psi, forces in lbf — and those choices are not self-consistent for
+mass. The density convention therefore has to be stated explicitly, because
+guessing produces a silent factor-of-32 error in self-weight.
+
+| Input field | Imperial unit read | SI produced | Factor |
+|---|---|---|---|
+| `x`, `y` | ft | m | 0.3048 |
+| `A` | ft² | m² | 0.092903 |
+| `I_sec` | ft⁴ | m⁴ | 0.0086309 |
+| `E` | psi (lbf/in²) | Pa | 6894.757 |
+| `Fx`, `Fy` | lbf | N | 4.44822 |
+| `delta_T` | °F **difference** | K difference | 5/9 |
+| `alpha` | 1/°F | 1/K | 1.8 |
+| `density` | **slug/ft³** | kg/m³ | 515.379 |
+| `weight_density` | lbf/ft³ (pcf) | kg/m³ (mass) | 16.0185 |
+
+`density` is read as **slug/ft³** — the mass unit coherent with
+`force = lbf`, `length = ft`. Structural steel is `15.23 slug/ft³`, *not* `490`.
+`490` is its specific weight in lbf/ft³ (pcf), and the two differ by exactly
+standard gravity, `32.174 ft/s²`. If you work in pcf, use the
+`weight_density` quantity, which divides through by *g* in both unit systems.
+
+Supplying `490` as `density` is detected: the converted value falls outside the
+plausible range for matter and raises `UnitAmbiguityWarning` naming both
+conventions. `delta_T` is a temperature *difference*, so no 32 °F offset is
+applied — a 100 °F rise is a 55.56 K rise. Absolute temperatures are always
+degrees Celsius and are never converted.
 
 ## Output JSON schema
 
@@ -506,12 +547,22 @@ dataclass; all values SI):
                   "is_valid": true},
   "buckling": [{"id": "<element_id>", "N": 0.0, "length": 0.0,
                 "P_cr": 0.0, "ratio": 0.0, "slenderness": 0.0,
-                "safe": true}]
+                "k_factor": 1.0, "status": "checked", "safe": true}]
 }
 ```
 
-`buckling` is empty unless `--check-buckling` is passed; `P_cr` is `null`
-for members without a usable `I_sec`.
+`buckling` is empty unless `--check-buckling` is passed. `status` is one of
+`"checked"`, `"tension"`, `"zero_force"` or `"unknown"`.
+
+> **`safe` defaults to `false`, not `true`.** A compressed member with no usable
+> `I_sec` returns `status="unknown"`, `safe=false` and raises
+> `BucklingCheckWarning`. It previously returned `safe=true` — missing data was
+> being interpreted as safety.
+
+`equilibrium` additionally reports the scales its verdict was reached with
+(`ref_force`, `ref_moment`, `length_char`, `force_limit`, `moment_limit`). Force
+and moment residuals have different dimensions and are tested against separate
+bounds; the moment bound is the force scale times the bounding-box diagonal.
 
 ## Built-in checks
 

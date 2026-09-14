@@ -12,6 +12,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   truss_analysis.criticality.criteria
    truss_analysis.criticality.engine
    truss_analysis.criticality.indices
    truss_analysis.criticality.ranking

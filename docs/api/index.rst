@@ -51,6 +51,7 @@ Criticality & Limit States
    :recursive:
 
    truss_analysis.criticality.engine
+   truss_analysis.criticality.criteria
    truss_analysis.criticality.indices
    truss_analysis.criticality.ranking
    truss_analysis.criticality.scenarios
@@ -94,6 +95,7 @@ Utilities & Helpers
    :toctree: generated
    :recursive:
 
+   truss_analysis.numerics
    truss_analysis.topology_generator
    truss_analysis.graph_validation
    truss_analysis.visualization
