@@ -15,7 +15,6 @@ are used to corroborate ranking-based tools elsewhere in the library.
 
 from __future__ import annotations
 
-import contextlib
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -113,10 +112,30 @@ class IndependentValidator:
 
         The DDM uses a rank-1 formulation: one LU factorisation of ``K_ff``
         plus one triangular solve for the whole compatibility matrix ``B``
-        replaces any explicit inverse. With ``dU/dk_i = -Z_i (b_i^T U_f)``
-        and ``dk_i/dA = E/L``:
+        replaces any explicit inverse. The area ``A_i`` enters the solved
+        system through **two** channels: the stiffness ``k_i = E_i A_i / L_i``
+        *and* the imposed-force term ``F_pre,i = k_i dL_pre,i b_i`` that
+        ``assemble_global_matrices`` puts on the right-hand side whenever the
+        member carries thermal/fabrication strain. Differentiating
+        ``K U = F_mech + F_pre`` gives
 
-        ``dU/dA_i = -(E_i / L_i) * Z_i * (b_i^T U_f)``
+        .. code-block:: text
+
+            K dU/dA_i = (E_i/L_i) dL_pre,i b_i - (E_i/L_i) b_i (b_i^T U_f)
+
+        so with ``Z_i = K_ff^-1 b_i``:
+
+        ``dU/dA_i = -(E_i / L_i) * Z_i * (b_i^T U_f - dL_pre,i)``
+
+        The numerator is the member's **mechanical** elongation
+        (``N_i / k_i``), not its total elongation — the same convention as
+        the rank-1 numerator in :func:`truss_analysis.criticality.engine.ci_sweep`.
+        Using the total elongation is wrong whenever ``dL_pre,i != 0``: for a
+        nearly fully restrained heated member the total elongation is almost
+        pure imposed strain, and the sensitivity came out with the wrong
+        sign and two orders of magnitude too large (pinned against central
+        finite differences in ``tests/test_sensitivity.py``). For members
+        without imposed strain the formula reduces to the previous one.
 
         Returns
         -------
@@ -135,7 +154,13 @@ class IndependentValidator:
         # whole compatibility matrix B; no explicit inverse, and singularity
         # is caught up-front by the rank check inside solve().
         node_idx = {nd.id: i for i, nd in enumerate(self.nodes)}
+        # DOF -> column position in the free-DOF ordering. list.index() here
+        # would be an O(n_free) linear search inside a 4M-iteration loop,
+        # i.e. O(M * n_free) wasted comparisons on top of the O(n^3)
+        # factorisation; the dict makes every lookup O(1).
+        free_pos = {dof: pos for pos, dof in enumerate(free_dofs)}
         b_free = np.zeros((len(self.elements), len(free_dofs)))
+        elem_rows: list[tuple[float, float, float]] = []  # (c, s, L) per element
         for e_i, elem in enumerate(self.elements):
             i_idx = node_idx[elem.node_i]
             j_idx = node_idx[elem.node_j]
@@ -143,10 +168,12 @@ class IndependentValidator:
             dy = self.nodes[j_idx].y - self.nodes[i_idx].y
             length = math.hypot(dx, dy)
             c, s = dx / length, dy / length
+            elem_rows.append((c, s, length))
             dofs = [2 * i_idx, 2 * i_idx + 1, 2 * j_idx, 2 * j_idx + 1]
             for k, dof in enumerate(dofs):
-                with contextlib.suppress(ValueError):
-                    b_free[e_i, free_dofs.index(dof)] = (-c, -s, c, s)[k]
+                pos = free_pos.get(dof)
+                if pos is not None:
+                    b_free[e_i, pos] = (-c, -s, c, s)[k]
         z_mat = lu_solve(lu_factor(K_ff), b_free.T)
 
         # Find critical node for max displacement
@@ -159,6 +186,10 @@ class IndependentValidator:
 
         crit_dof_x = 2 * crit_node_idx
         crit_dof_y = 2 * crit_node_idx + 1
+        # Positions of the critical node's DOFs in the free-DOF ordering,
+        # resolved once (they do not depend on the member being differentiated).
+        crit_pos_x = free_pos.get(crit_dof_x)
+        crit_pos_y = free_pos.get(crit_dof_y)
 
         results: list[SensitivityResult] = []
 
@@ -166,11 +197,7 @@ class IndependentValidator:
             i_idx = self.node_map[elem.node_i]
             j_idx = self.node_map[elem.node_j]
 
-            dx = self.nodes[j_idx].x - self.nodes[i_idx].x
-            dy = self.nodes[j_idx].y - self.nodes[i_idx].y
-            L = math.hypot(dx, dy)
-            c = dx / L
-            s = dy / L
+            c, s, L = elem_rows[e_i]
 
             # 1. Strain energy. Two routes are computed and cross-checked:
             #
@@ -222,21 +249,16 @@ class IndependentValidator:
             strain_energy_total = max(0.0, 0.5 * quad_total)
 
             # 2. DDM (adjoint formulation on free DOFs), with dK/dA = K_i / A
+            # and dF_pre/dA = (E_i/L_i) dL_pre,i b_i: the numerator is the
+            # MECHANICAL elongation (total minus imposed), matching the
+            # derivation in compute_all's docstring and the rank-1 numerator
+            # convention of the criticality engine.
             z_i = z_mat[:, e_i]
-            b_i_u = float(b_free[e_i] @ U_f)
+            b_i_u = float(b_free[e_i] @ U_f) - delta_L_prestress
             dU_f_dA = -(elem.E / L) * z_i * b_i_u
 
-            try:
-                idx_x = free_dofs.index(crit_dof_x)
-                du_x_dA = dU_f_dA[idx_x]
-            except ValueError:
-                du_x_dA = 0.0
-
-            try:
-                idx_y = free_dofs.index(crit_dof_y)
-                du_y_dA = dU_f_dA[idx_y]
-            except ValueError:
-                du_y_dA = 0.0
+            du_x_dA = float(dU_f_dA[crit_pos_x]) if crit_pos_x is not None else 0.0
+            du_y_dA = float(dU_f_dA[crit_pos_y]) if crit_pos_y is not None else 0.0
 
             u_x = U[crit_dof_x]
             u_y = U[crit_dof_y]

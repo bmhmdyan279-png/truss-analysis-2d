@@ -1,8 +1,10 @@
 """Tests for the independent validator (sensitivity checks)."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from truss_analysis.model import Element, Node
@@ -110,3 +112,70 @@ def test_independent_validator_with_reference_problem() -> None:
     for res in results:
         assert isinstance(res.ddm_sensitivity, float)
         assert res.strain_energy >= 0.0
+
+
+def _three_bar_indeterminate(alpha: float, delta_T: float):
+    """Statically indeterminate three-bar truss (both supports fully fixed).
+
+    With ``alpha > 0`` on member 1 the baseline carries restrained thermal
+    expansion, so the DDM numerator must be the MECHANICAL elongation
+    ``b_i^T U_f - dL_pre,i``: the area enters both ``K`` and the imposed
+    force ``k_i dL_pre,i b_i``.
+    """
+    nodes = [
+        Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="2", x=4.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="3", x=2.0, y=1.5, is_support=False),
+    ]
+    elements = [
+        Element(
+            id="1",
+            node_i="1",
+            node_j="3",
+            E=210e9,
+            A=0.005,
+            alpha=alpha,
+            delta_T=delta_T,
+        ),
+        Element(id="2", node_i="2", node_j="3", E=210e9, A=0.008),
+        Element(id="3", node_i="1", node_j="2", E=210e9, A=0.006),
+    ]
+    loads = [NodalLoad(node_id="3", fx=20e3, fy=-50e3)]
+    return nodes, elements, loads
+
+
+def _max_nodal_magnitude(nodes, elements, loads) -> float:
+    validator = IndependentValidator(nodes, elements, loads)
+    U, _ = validator.compute_baseline()
+    return float(np.max(np.hypot(U[0::2], U[1::2])))
+
+
+def _fd_sensitivity(nodes, elements, loads, i: int, d_area: float) -> float:
+    """Central difference of the max nodal magnitude w.r.t. member area i."""
+    plus = [replace(e, A=e.A + d_area) if j == i else e for j, e in enumerate(elements)]
+    minus = [
+        replace(e, A=e.A - d_area) if j == i else e for j, e in enumerate(elements)
+    ]
+    return (
+        _max_nodal_magnitude(nodes, plus, loads)
+        - _max_nodal_magnitude(nodes, minus, loads)
+    ) / (2 * d_area)
+
+
+@pytest.mark.parametrize(("alpha", "delta_T"), [(1.2e-5, 400.0), (0.0, 0.0)])
+def test_ddm_matches_central_finite_difference(alpha: float, delta_T: float) -> None:
+    """DDM == central difference of max nodal magnitude, prestress or not.
+
+    The heated case pins the mechanical-elongation numerator: with the total
+    elongation the member-1 sensitivity came out with the wrong sign and two
+    orders of magnitude too large (round-4 audit, critic 5 finding 1).
+    """
+    nodes, elements, loads = _three_bar_indeterminate(alpha, delta_T)
+    results = IndependentValidator(nodes, elements, loads).compute_all()
+    for i, res in enumerate(results):
+        d_area = 1e-5 * elements[i].A
+        fd = _fd_sensitivity(nodes, elements, loads, i, d_area)
+        scale = max(abs(fd), 1e-12)
+        assert abs(res.ddm_sensitivity - fd) <= 1e-5 * scale + 1e-12, (
+            f"member {res.member_id}: DDM={res.ddm_sensitivity!r} FD={fd!r}"
+        )
