@@ -30,14 +30,26 @@ def _sample_ci_batch(cm, live, fy, temps, alpha=0.7):
             for nid, ld in _loads_of(cm).items()
         }
         temps_i = {e.id: float(tk) for e in cm.elements}
-        # two-component CI: the displacement-only CI is invariant to load
-        # scale (linearity) and to uniform temperature (invariance property
-        # of the rank-1 engine), so the MC statistic must include the DCR
-        # component to depend on the RVs
+        # combined triage statistic, max(u_component, dcr_combined), built
+        # EXPLICITLY: the pure damage CI (res.ci_values) is invariant to load
+        # scale (linearity) and, for uniform fields without imposed strain,
+        # to temperature (theory 5.4), so an MC statistic that must respond
+        # to the fire RV combines damage sensitivity with fire severity
+        # through dcr_combined -- since 2.7 the composite ci deliberately no
+        # longer smuggles the fire term in (round-4 audit, critic 3 P0)
         res = ci_two_component(cm.nodes, cm.elements, loads, temps_i, alpha, 235.0e6)
-        # spatial MEAN of the two-component CI: a smooth MC statistic
-        # (the max has a heavy tail from near-capacity DCR spikes)
-        out.append(float(np.mean(list(res.ci_values.values()))))
+        # spatial MEAN: a smooth MC statistic (the max has a heavy tail from
+        # near-capacity DCR spikes)
+        out.append(
+            float(
+                np.mean(
+                    [
+                        max(c.u_component, c.dcr_combined)
+                        for c in res.components.values()
+                    ]
+                )
+            )
+        )
     return np.asarray(out)
 
 
@@ -115,15 +127,19 @@ def test_probabilistic_ranking_four_steps(campaign) -> None:
         }
         temps_i = {e.id: float(samples["fire_intensity"][i]) for e in cm.elements}
         res = ci_two_component(cm.nodes, cm.elements, loads, temps_i, 0.7, 235.0e6)
-        for mid, v in res.ci_values.items():
-            per_member[mid].append(v)
+        for mid, comp in res.components.items():
+            # combined triage metric (see _sample_ci_batch): fire-responsive
+            per_member[mid].append(max(comp.u_component, comp.dcr_combined))
     ci_per_sample = {k: np.asarray(v) for k, v in per_member.items()}
     # step 4: deterministic CI at mean inputs (uniform 600, mean load factor 1)
     loads_mean = cm.loads
     temps_mean = {e.id: 600.0 for e in cm.elements}
-    ci_mean_inputs = ci_two_component(
-        cm.nodes, cm.elements, loads_mean, temps_mean, 0.7, 235.0e6
-    ).ci_values
+    ci_mean_inputs = {
+        mid: max(comp.u_component, comp.dcr_combined)
+        for mid, comp in ci_two_component(
+            cm.nodes, cm.elements, loads_mean, temps_mean, 0.7, 235.0e6
+        ).components.items()
+    }
 
     ranking = probabilistic_ranking(ci_per_sample, ci_mean_inputs)
     ids = {e.id for e in cm.elements}

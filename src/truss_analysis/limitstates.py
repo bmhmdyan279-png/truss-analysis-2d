@@ -152,13 +152,46 @@ class MemberLimitState:
 
 @dataclass(frozen=True)
 class ComponentCI:
-    """Two-component criticality index with both components exposed."""
+    """Two-component criticality index with both components exposed.
+
+    Attributes
+    ----------
+    ci : float
+        Composite criticality ``max(u_component, dcr_component)`` — the pure
+        damage counterfactual of ``docs/theory.md`` §5.1-5.2, deliberately
+        independent of how hot the fire is.
+    u_component : float
+        ``max|u_pert| / max|u_base| - 1`` at the *same* temperature field.
+    dcr_component : float
+        Damage-conditional DCR ratio at the *same* temperature field,
+        ``DCR_pert(T) / DCR_base(T) - 1``. The baseline is the undamaged
+        structure in the given temperature field (``docs/theory.md`` §5.2),
+        so this is exactly ``0`` for ``alpha = 1`` — no perturbation, no
+        criticality, at any temperature.
+    fire_component : float
+        Fire-severity ratio for this member,
+        ``DCR_base(T) / DCR_base(20 degC) - 1``, independent of ``alpha``.
+        Reported explicitly so thermal degradation stays visible without
+        being smuggled into the perturbation criticality.
+    dcr_combined : float
+        The explicit combination
+        ``(1 + dcr_component)(1 + fire_component) - 1
+        = DCR_pert(T) / DCR_base(20 degC) - 1`` — identical to the legacy
+        (<= 2.6.0) ``dcr_component``, which referenced the COLD state and
+        therefore reported undamaged members as critical at temperature.
+        For triage contexts that want fire severity and damage sensitivity
+        in one number, combine through this field, never through ``ci``.
+    governing : Governing
+        Limit state that produced the larger of the two *damage* components.
+    """
 
     member_id: str
     ci: float
     u_component: float
     dcr_component: float
     governing: Governing
+    fire_component: float = 0.0
+    dcr_combined: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -596,9 +629,24 @@ def ci_two_component(
     """Two-component CI: ``max(u_ratio - 1, DCR_ratio - 1)`` per member.
 
     The displacement component comes from the rank-1 engine sweep; the DCR
-    component compares the perturbed member force (member i softened by
-    ``alpha``) against the temperature-dependent capacity.  Both components
-    and the governing limit state are reported separately.
+    component is the *damage-conditional* ratio against the undamaged
+    structure **in the same temperature field** (``docs/theory.md`` §5.2):
+
+    .. code-block:: text
+
+        dcr_component = DCR_pert(T) / DCR_base(T) - 1
+
+    Both states share temperature, geometry and loads, so the component is
+    exactly ``0`` at ``alpha = 1`` — the exposing test of the round-4 audit:
+    an unperturbed member carries no perturbation criticality, however hot
+    the fire is. Fire severity (degradation of the DCR of the *undamaged*
+    member relative to the cold structure) is reported separately as
+    ``fire_component = DCR_base(T) / DCR_base(20 degC) - 1``, and the
+    explicit product ``dcr_combined = (1 + dcr)(1 + fire) - 1`` reproduces
+    the legacy (<= 2.6.0) cold-referenced ``dcr_component`` for triage
+    contexts that want the two effects in one number. The pre-2.7 composite
+    hid the fire term inside the perturbation criticality, which made
+    ``governing`` and the ranking respond to the fire even at ``alpha = 1``.
 
     The base state carries the full thermal demand (equivalent nodal forces
     from restrained expansion), and the perturbed force is the *mechanical*
@@ -611,13 +659,13 @@ def ci_two_component(
     u = base_displacement(setup, f_free)
     u_max_base = float(np.max(np.abs(u)))
     sweep = ci_sweep(setup, u, alpha)
-    # Cold reference state (20 degC, same geometry/loads): the DCR component
-    # compares against the COLD capacity-demand state so that temperature
-    # degradation does NOT cancel out of the ratio. This reference is the
-    # only reading under which the governing component can switch with
-    # temperature; see docs/theory.md for the limit-state definitions.
+    forces_base = member_forces(setup, u)
+    # Cold reference state (20 degC, same geometry/loads) for the EXPLICIT
+    # fire-severity component only. The damage component below references
+    # the undamaged structure in the same temperature field, so temperature
+    # degradation can never leak into the perturbation criticality.
     forces_cold = member_axial_forces(
-        nodes, elements, loads, {e.id: 20.0 for e in elements}
+        nodes, elements, loads, {e.id: T_AMBIENT for e in elements}
     )
 
     components: dict[str, ComponentCI] = {}
@@ -627,9 +675,21 @@ def ci_two_component(
         u_comp = sweep.ci_values[eid]
         elem = elements[i]
         length = _length(nodes, elem)
+        t_e = float(temps[eid])
+        state_base = _member_limit_state(
+            eid,
+            t_e,
+            float(forces_base[i]),
+            elem.A,
+            elem.I_sec,
+            length,
+            elem.E,
+            elem.effective_length_factor,
+            f_y,
+        )
         state_cold = _member_limit_state(
             eid,
-            20.0,
+            T_AMBIENT,
             forces_cold[eid],
             elem.A,
             elem.I_sec,
@@ -647,7 +707,7 @@ def ci_two_component(
         )
         state_pert = _member_limit_state(
             eid,
-            float(temps[eid]),
+            t_e,
             n_pert,
             elem.A,
             elem.I_sec,
@@ -656,10 +716,19 @@ def ci_two_component(
             elem.effective_length_factor,
             f_y,
         )
-        if state_cold.dcr > _DCR_BASE_TOL:
-            dcr_comp = state_pert.dcr / state_cold.dcr - 1.0
+        # Damage component: same-temperature DCR ratio. Zero-capacity states
+        # (k_y/k_E collapsed at extreme T) give base DCR = inf; the ratio is
+        # then undefined and reported as 0 — the fire component already says
+        # "capacity gone", and a mechanism shows up through u_comp = inf.
+        if _DCR_BASE_TOL < state_base.dcr < float("inf"):
+            dcr_comp = state_pert.dcr / state_base.dcr - 1.0
         else:
             dcr_comp = 0.0
+        if state_cold.dcr > _DCR_BASE_TOL:
+            fire_comp = state_base.dcr / state_cold.dcr - 1.0
+        else:
+            fire_comp = 0.0
+        combined = (1.0 + dcr_comp) * (1.0 + fire_comp) - 1.0
         ci = max(u_comp, dcr_comp)
         if dcr_comp > u_comp:
             gov = state_pert.capacity_governing
@@ -671,6 +740,8 @@ def ci_two_component(
             u_component=u_comp,
             dcr_component=dcr_comp,
             governing=gov,
+            fire_component=fire_comp,
+            dcr_combined=combined,
         )
         ci_values[eid] = ci
         governing[eid] = gov.value

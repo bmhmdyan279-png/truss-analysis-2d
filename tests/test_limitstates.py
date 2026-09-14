@@ -157,13 +157,109 @@ def test_axial_forces_sign_convention() -> None:
     assert forces["t"] == pytest.approx(80.0e3, rel=1e-9)  # tension positive
 
 
-def test_governing_switches_displacement_to_buckling() -> None:
+def test_alpha_one_exposes_no_damage_criticality_at_any_temperature() -> None:
+    """The round-4 audit's exposing test: alpha = 1 perturbed NOTHING.
+
+    An unperturbed member must report zero perturbation criticality at any
+    temperature. Pre-2.7 the DCR component referenced the COLD state, so at
+    600 degC this returned dcr_component ~ +2.1 and governing = buckling for
+    a member that was not perturbed at all -- fire degradation masquerading
+    as damage criticality.
+    """
+    nodes, elements, loads = _column()
+    for t in (20.0, 600.0, 800.0):
+        res = ci_two_component(nodes, elements, loads, _uniform(elements, t), 1.0, F_Y)
+        comp = res.components["c"]
+        assert comp.u_component == pytest.approx(0.0, abs=1e-12)
+        assert comp.dcr_component == pytest.approx(0.0, abs=1e-12)
+        assert comp.ci == pytest.approx(0.0, abs=1e-12)
+        assert res.ci_values["c"] == pytest.approx(0.0, abs=1e-12)
+
+
+def test_fire_component_isolated_from_damage_component() -> None:
+    """Fire severity is explicit; the damage component stays same-temperature.
+
+    The determinate column's force cannot redistribute, so softening it
+    leaves the DCR ratio at 1 (dcr_component = 0) at every temperature; all
+    temperature response lives in fire_component. ``governing`` follows the
+    damage components only -- the pre-2.7 "switch to buckling at 800 degC"
+    was the fire term leaking into the perturbation criticality.
+    """
     nodes, elements, loads = _column()
     cold = ci_two_component(nodes, elements, loads, _uniform(elements, 20.0), 0.7, F_Y)
     hot = ci_two_component(nodes, elements, loads, _uniform(elements, 800.0), 0.7, F_Y)
+    cc, hc = cold.components["c"], hot.components["c"]
+    # determinate: force ratio 1 -> no damage-driven DCR change, ever
+    assert cc.dcr_component == pytest.approx(0.0, abs=1e-12)
+    assert hc.dcr_component == pytest.approx(0.0, abs=1e-12)
+    # displacement component: temperature-invariant under a uniform field
+    assert hc.u_component == pytest.approx(cc.u_component, rel=1e-9)
+    assert hc.u_component == pytest.approx(1.0 / 0.7 - 1.0, rel=1e-9)
     assert cold.governing["c"] == "displacement"
-    assert hot.governing["c"] == "buckling"
-    assert hot.components["c"].dcr_component > hot.components["c"].u_component
+    assert hot.governing["c"] == "displacement"
+    # the fire severity is where the temperature response lives
+    assert cc.fire_component == pytest.approx(0.0, abs=1e-12)
+    assert hc.fire_component > 1.0  # capacity collapses toward 800 degC
+    # combined == the explicit product == the legacy cold-referenced ratio
+    assert hc.dcr_combined == pytest.approx(
+        (1.0 + hc.dcr_component) * (1.0 + hc.fire_component) - 1.0, rel=1e-12
+    )
+
+
+def test_dcr_component_same_temperature_baseline_on_redundant_frame() -> None:
+    """On a redundant heated frame the damage component is a genuine ratio.
+
+    alpha = 1 must still give exactly zero (base state == perturbed state),
+    while alpha < 1 measures the redistribution AT temperature T, not the
+    fire degradation -- the two effects are separately reported.
+    """
+    nodes = [
+        Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="2", x=4.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="3", x=2.0, y=1.5, is_support=False),
+    ]
+    elements = [
+        Element(
+            id="1", node_i="1", node_j="3", E=210e9, A=0.005, I_sec=1e-6, alpha=1.2e-5
+        ),
+        Element(
+            id="2", node_i="2", node_j="3", E=210e9, A=0.008, I_sec=1e-6, alpha=1.2e-5
+        ),
+        Element(
+            id="3", node_i="1", node_j="2", E=210e9, A=0.006, I_sec=1e-6, alpha=1.2e-5
+        ),
+    ]
+    loads = {"3": {"Fx": 20e3, "Fy": -50e3}}
+    temps = _uniform(elements, 600.0)
+
+    untouched = ci_two_component(nodes, elements, loads, temps, 1.0, F_Y)
+    for comp in untouched.components.values():
+        assert comp.dcr_component == pytest.approx(0.0, abs=1e-12)
+        assert comp.u_component == pytest.approx(0.0, abs=1e-12)
+    # the fire severity is nonzero and reported where it belongs -- except
+    # for member 3, which is stress-free when cold (it spans two fixed
+    # supports): a 0 -> X ratio is undefined and follows the same
+    # near-zero-baseline convention as the legacy cold-referenced component
+    assert untouched.components["1"].fire_component > 0.0
+    assert untouched.components["2"].fire_component > 0.0
+    assert untouched.components["3"].fire_component == 0.0
+
+    damaged = ci_two_component(nodes, elements, loads, temps, 0.7, F_Y)
+    # redundant structure: softening member 1 must redistribute forces and
+    # show up as a nonzero same-temperature DCR ratio somewhere. (Member 1
+    # itself happens to be the sole load path in its own direction here --
+    # k_1 d_1 ~ 1 -- so ITS force ratio stays at 1 like a determinate bar;
+    # the redistribution lands on the other members.)
+    assert max(abs(comp.dcr_component) for comp in damaged.components.values()) > 1e-9
+    # and the composite never mixes the fire term in
+    for comp in damaged.components.values():
+        assert comp.ci == pytest.approx(
+            max(comp.u_component, comp.dcr_component), rel=1e-12, abs=1e-15
+        )
+        assert comp.dcr_combined == pytest.approx(
+            (1.0 + comp.dcr_component) * (1.0 + comp.fire_component) - 1.0,
+            rel=1e-12,
+        )
 
 
 def test_member_and_system_critical_temperatures_consistent() -> None:

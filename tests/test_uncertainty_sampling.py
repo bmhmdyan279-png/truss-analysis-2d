@@ -162,3 +162,27 @@ def test_running_stat_matches_batch_stats() -> None:
         rs2.add_batch(x[perm[i : i + 500]])
     assert rs2.mean == pytest.approx(rs.mean, rel=1e-9)
     assert rs2.std == pytest.approx(rs.std, rel=1e-6)
+
+
+def test_latin_hypercube_rejects_degenerate_shapes() -> None:
+    with pytest.raises(ValueError, match="require n,dim >= 1"):
+        latin_hypercube(0, 2, seed=1)
+    with pytest.raises(ValueError, match="require n,dim >= 1"):
+        latin_hypercube(10, 0, seed=1)
+
+
+def test_sample_spec_matrix_honours_correlation_and_deterministic_specs() -> None:
+    """The spec-level coupling path: correlation + a deterministic member."""
+    specs = default_rv_specs(fire_scenario_temperature=400.0)
+    names = [s.name for s in specs]
+    means = {"live_load": 1.0, "f_y": 235e6, "fire_intensity": 400.0, "E": 210e9}
+    corr = np.eye(len(specs))
+    i_ll, i_fy = names.index("live_load"), names.index("f_y")
+    corr[i_ll, i_fy] = corr[i_fy, i_ll] = 0.6
+    out = sample_spec_matrix(specs, means, 20000, seed=17, correlation=corr)
+    # deterministic specs ignore the coupling and return their spec value
+    det = next(s for s in specs if s.family == "deterministic")
+    assert np.all(out[det.name] == det.parameters["value"])
+    # the correlated pair realises its target rank correlation
+    rho = float(spearmanr(out["live_load"], out["f_y"]).statistic)
+    assert abs(rho - 0.6) < 0.02, rho

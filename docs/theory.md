@@ -451,6 +451,39 @@ of the fire damage is due to member $i$" is wrong; it is "how much additional
 degradation occurs if member $i$ is further weakened, given the fire state
 already in place".
 
+Two DCR ratios must be kept apart, and since 2.7 `ci_two_component` reports
+both explicitly instead of collapsing them into one cold-referenced number:
+
+$$
+CI_{\text{damage}\mid T}
+= \frac{DCR_{\text{pert}}(T)}{DCR_{\text{base}}(T)} - 1,
+\qquad
+CI_{\text{fire}}
+= \frac{DCR_{\text{base}}(T)}{DCR_{\text{base}}(20^\circ C)} - 1 .
+$$
+
+$CI_{\text{damage}\mid T}$ is the force-limit-state half of the
+counterfactual above: both states share the temperature field, so it is
+**exactly zero at $\alpha = 1$** — an unperturbed member carries no
+perturbation criticality, however hot the fire. $CI_{\text{fire}}$ is the
+fire-severity of the *undamaged* member and is independent of $\alpha$.
+The composite is $CI_i = \max(CI_u,\ CI_{\text{damage}\mid T})$; the fire
+term never enters it. Where a single triage number that folds both effects
+in is wanted (retrofit shortlists, MC ladders), the library exposes the
+explicit product
+
+$$
+CI_{\text{combined}}
+= (1 + CI_{\text{damage}\mid T})(1 + CI_{\text{fire}}) - 1
+= \frac{DCR_{\text{pert}}(T)}{DCR_{\text{base}}(20^\circ C)} - 1 ,
+$$
+
+which is bit-for-bit the pre-2.7 cold-referenced `dcr_component`. The
+pre-2.7 composite hid that product *inside* the criticality: at $\alpha=1$
+and 600 °C an untouched redundant truss reported `dcr_component ≈ +2.1`
+with `governing = buckling`, i.e. fire degradation masquerading as damage
+criticality, contaminating `governing` and every ranking built on it.
+
 ### 5.3 Why the displacement definition is not enough
 
 $CI_i$ is a scalar summary of a vector field, and summaries lose information.

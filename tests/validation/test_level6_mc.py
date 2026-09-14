@@ -1,10 +1,13 @@
 """Level 6 — Monte-Carlo convergence ladder 100 -> 250 -> 500 -> 1000 -> 2000.
 
-Estimand (fixed before measurement): the spatial MEAN of the two-component
-criticality index per sample — the displacement-only CI is invariant to load
-scale (linearity) and to uniform temperature (uniform-field invariance), so
-the two-component statistic is the one that actually responds to the random
-variables.  The ladder uses a single deterministic LHS draw of 2000 samples
+Estimand (fixed before measurement): the spatial MEAN of the combined
+triage metric per sample, ``max(u_component, dcr_combined)`` — the
+displacement-only CI is invariant to load scale (linearity) and to uniform
+temperature (uniform-field invariance), and since 2.7 the pure damage CI is
+deliberately free of the fire-severity term, so the statistic that responds
+to the random variables combines the damage and fire components explicitly
+(numerically the pre-2.7 composite; see round-4 audit, critic 3 P0).
+The ladder uses a single deterministic LHS draw of 2000 samples
 (seed 20260907) truncated at each rung: rungs are nested prefixes of the
 same sample set, so differences between rungs are pure sample-size effects.
 
@@ -72,9 +75,16 @@ def test_mc_convergence_ladder_gates_and_rank_stability(campaign) -> None:
         loads = _loads_of(cm, float(live[k]))
         temps_i = {e.id: float(temps[k]) for e in cm.elements}
         res = ci_two_component(cm.nodes, cm.elements, loads, temps_i, ALPHA, F_Y)
+        # combined triage metric per member, max(u_component, dcr_combined):
+        # since 2.7 the pure damage ci_values are invariant to load scale and
+        # (uniform field, no imposed strain) to temperature, so the ladder's
+        # fire-responsive estimand is built EXPLICITLY from the combined
+        # ratio -- numerically the pre-2.7 composite, semantically two
+        # separated effects (round-4 audit, critic 3 P0)
         for mid in ids:
-            per_member[mid][k] = res.ci_values[mid]
-        s = float(np.mean([res.ci_values[mid] for mid in ids]))
+            comp = res.components[mid]
+            per_member[mid][k] = max(comp.u_component, comp.dcr_combined)
+        s = float(np.mean([per_member[mid][k] for mid in ids]))
         ci_stat.add(s)
         u_stat.add(res.u_max_base)
         ci_raw[k] = s
