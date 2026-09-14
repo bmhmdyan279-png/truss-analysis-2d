@@ -141,6 +141,21 @@ $$
 The energy check (next section) needs $\mathbf{F}_{mechanical}$ **alone**; using
 $\mathbf{F}_{ext}$ there would silently double-count the imposed strain.
 
+**The fire chain obeys the same split.** The DCR / $\theta_{sys}$ / CI /
+retrofit pipeline works on a temperature *field* $T_e$ rather than on
+`delta_T`, so it derives the imposed elongation as
+$\Delta L_{pre,e} = \alpha_e (T_e - 20\,°\mathrm{C}) L_e + \Delta L_{free,e}$
+(`engine.prestress_lengths`), solves against the total right-hand side
+$\mathbf{F}_{mech} + \mathbf{B}^T\operatorname{diag}(k(T))\Delta L_{pre}$
+(`engine.total_load_vector`) and reports the mechanical force
+$N_e = k_e(T)(\mathbf{b}_e^T\mathbf{u} - \Delta L_{pre,e})$
+(`engine.member_forces`). Before this was made explicit, that chain degraded
+$E(T)$ but solved against the mechanical right-hand side only, so a heated
+restrained member developed real compression in `run()` while the DCR chain
+saw none of it — non-conservative exactly in the local-fire scenarios the
+library targets. `tests/test_thermal_demand.py` pins the two paths
+(engine vs assembler) against each other and against closed forms.
+
 ### 1.4 Generalized Clapeyron Theorem
 
 With $\Delta L = \Delta L_{mech} + \Delta L_{prestress}$, and defining
@@ -421,12 +436,14 @@ changes nothing, and unbounded above.
 
 The baseline is the **undamaged structure at the same temperature field**. This
 matters and is easy to misread. In `ci_two_component` the temperature first
-scales every $E_i$ by $k_E(T)$, and *then* the perturbation is applied on top.
-The reported index therefore describes
+scales every $E_i$ by $k_E(T)$ *and* loads the structure through the
+restrained-expansion equivalent forces (§1.3), and *then* the perturbation is
+applied on top. The reported index therefore describes
 
 ```text
-baseline  ->  thermal degradation  ->  member perturbation  ->  damaged state
-                (already applied)        (what CI measures)
+baseline  ->  thermal state          ->  member perturbation  ->  damaged state
+              (degradation + demand,      (what CI measures)
+               already applied)
 ```
 
 and is **not** a damage index for the fire itself. Reading $CI_i$ as "how much
@@ -472,7 +489,9 @@ understates an individual effect and is the right default for triage.
 ### 5.4 Temperature invariance of the ranking
 
 Under a **uniform** temperature field every stiffness is scaled by the same
-factor: $\mathbf{K}(\theta) = k_E(\theta)\,\mathbf{K}_0$. With unchanged loads,
+factor: $\mathbf{K}(\theta) = k_E(\theta)\,\mathbf{K}_0$. **When the
+right-hand side does not change with temperature** — i.e. when no member
+carries an imposed strain ($\alpha \Delta T = 0$ and $\Delta L_{free} = 0$) —
 
 $$
 \mathbf{U}(\theta) = \frac{\mathbf{U}_0}{k_E(\theta)}, \qquad
@@ -484,14 +503,47 @@ $CI_i$ is a *ratio* of two states at the same temperature, so the common factor
 cancels and the ranking is invariant: Kendall $\tau_b = 1$ against the ambient
 baseline.
 
-This is a mathematical property of the uniform case, and it is worth being
-honest about its limits: real fire fields are never exactly uniform, and under a
-gradient $k_E$ differs per member, the factor does not cancel, and the ranking
-can and does change. The invariance test in `test_uniform_invariance.py` is
-therefore a *regression guard on the machinery*, not evidence that criticality
-is temperature-independent in general. It is validated with "antifake"
-providers — constant or drifting fake $k_E$ functions must be **rejected** by
-the same test the real one passes.
+**The precondition matters, because the demand chain now carries the thermal
+equivalent forces (§1.3).** With $\alpha > 0$ a uniform field also scales the
+restrained-expansion right-hand side, and the base state becomes
+
+$$
+\mathbf{u}(\theta) = \frac{\mathbf{z}_m}{k_E(\theta)}
++ (\theta - \theta_0)\, \mathbf{z}_\alpha,
+\qquad
+N_e(\theta) = N_{e,0} + k_E(\theta)\,(\theta - \theta_0)\, k_{0,e}\,
+\bigl(\mathbf{b}_e^T \mathbf{z}_\alpha - \alpha_e L_e\bigr),
+$$
+
+where $\mathbf{z}_m = \mathbf{K}_0^{-1}\mathbf{F}_{mech}$ and
+$\mathbf{z}_\alpha = \mathbf{K}_0^{-1}\mathbf{B}^T(k_0\,\alpha L)$.
+Two honest consequences:
+
+* **Forces** stay invariant ($N(\theta) = N_0$) when the free-expansion
+  (dilation) field is kinematically admissible — the usual pin–roller truss —
+  because then $\mathbf{b}_e^T \mathbf{z}_\alpha = \alpha_e L_e$ and the
+  second term vanishes. Under restrained supports (e.g. pin–pin) it does not:
+  uniform heating pumps real compression into the restrained members, growing
+  with $k_E(\theta)(\theta - \theta_0)$.
+* **Displacement-based CIs are no longer temperature-invariant in general**,
+  because $\mathbf{u}(\theta)$ mixes a $1/k_E$ term with a linear-in-$\theta$
+  term and the ratio of two such states does not collapse. Absolute CI values
+  drift with $\theta$ — which is physically right: the same member loss hurts
+  more when the structure is also fighting thermal thrust.
+
+The invariance test in `test_uniform_invariance.py` (campaign fixtures built
+without `alpha`) is therefore a *regression guard on the machinery* under the
+theorem's precondition, not evidence that criticality is temperature-independent
+in general. `tests/test_thermal_demand.py` pins both sides of the refined
+claim: **exact** invariance (< 1e-12 drift) with $\alpha = 0$, and a
+**measured, non-zero** drift for a restrained $\alpha > 0$ structure. The
+antifake providers stay: constant or drifting fake $k_E$ functions must be
+**rejected** by the same test the real one passes.
+
+This is also the precise sense in which a uniform field can reorder *nothing*
+while changing *everything about magnitude*: ranking invariance under uniform
+heating (where it holds) says nothing about absolute risk, which grows with
+temperature through both capacity reduction and — now — thermal demand.
 
 ### 5.5 Validity limit (explicit)
 
@@ -523,7 +575,7 @@ member's perturbed state in one vectorised pass:
 
 $$
 d_i = \mathbf{b}_i^T \mathbf{Z}_i, \quad
-f_i = \mathbf{b}_i^T \mathbf{u}, \quad
+f_i = \mathbf{b}_i^T \mathbf{u} - \Delta L_{pre,i}, \quad
 \text{coef}_i = \frac{\Delta_i f_i}{1 + \Delta_i d_i}, \quad
 \mathbf{U}_{pert} = \mathbf{u} - \mathbf{Z}\,\operatorname{diag}(\text{coef})
 $$
@@ -531,6 +583,17 @@ $$
 Column $i$ of $\mathbf{U}_{pert}$ is the complete perturbed state for member $i$.
 The cost is one factorisation plus $O(n_E \cdot n_{dof})$ work, instead of one
 factorisation per member.
+
+**The numerator is the mechanical elongation, not the total one.** Softening
+member $i$ scales its thermal equivalent force $k_i \Delta L_{pre,i}
+\mathbf{b}_i$ by the same $\alpha$ as its stiffness, so the perturbed system
+is $(\mathbf{K} + \Delta_i \mathbf{b}_i\mathbf{b}_i^T)\mathbf{u}' =
+\mathbf{F} + \Delta_i \Delta L_{pre,i}\mathbf{b}_i$, and solving it gives
+exactly the form above with $f_i = \mathbf{b}_i^T\mathbf{u} - \Delta L_{pre,i}
+= N_i / k_i$. In words: **the rank-1 coefficient is driven by the force the
+member carries, not by how much it stretched** — a stress-free hot member of a
+determinate truss contributes nothing to redistribute. With $\Delta L_{pre} = 0$
+the formula reduces to the classical one.
 
 **Numerical guard.** $1 + \Delta_i d_i \to 0$ means the perturbed structure is
 (near) a mechanism. Such members are flagged and routed to a full brute-force
@@ -547,16 +610,26 @@ as a spurious doubling of the force index even in a statically **determinate**
 truss, where softening a member cannot change any force at all. That determinate
 case is asserted precisely because it catches the error.
 
-**Reactions need a rank-one correction.** With
-$\mathbf{R} = (\mathbf{K}\mathbf{U})[\text{fixed}]$ and the constrained DOFs zero,
+**Reactions need a rank-one correction — and the direct support load.** With
+$\mathbf{R} = (\mathbf{K}\mathbf{U})[\text{fixed}] -
+\mathbf{F}_{ext}[\text{fixed}]$ (the supports carry what the stiffness pulls
+*minus* whatever is applied directly at the constrained DOFs: mechanical loads
+placed on support nodes and the imposed equivalent forces),
 
 $$
 \mathbf{R}_{pert} = \mathbf{K}[\text{fixed}, \text{free}]\,\mathbf{u}_{pert}
-+ \Delta_i\, \mathbf{b}_i[\text{fixed}]\,(\mathbf{b}_i[\text{free}]^T \mathbf{u}_{pert})
+- \mathbf{F}_{ext}[\text{fixed}]
++ \Delta_i\, \mathbf{b}_i[\text{fixed}]\,
+(\mathbf{b}_i[\text{free}]^T \mathbf{u}_{pert} - \Delta L_{pre,i})
 $$
 
-The second term is the perturbed member's own contribution to the supports and
-must not be dropped.
+The last term is the perturbed member's own contribution to the supports and
+must not be dropped; it carries the *mechanical* elongation because the
+member's thermal force scales with its perturbed stiffness.
+$\mathbf{F}_{ext}[\text{fixed}]$ is exactly zero for the common case of
+mechanical loads on free nodes and no imposed strain — and exactly *not* zero
+for a heated restrained structure, which is why `ReactionInfluence` carries it
+as `f_ext_fixed`.
 
 ---
 
@@ -612,7 +685,9 @@ verifies.
 | Rank-1 CI | — | ✓ (full re-solve) | ✓ | ✓ (equivalence) | ✓ |
 | Woodbury rank-$r$ | — | ✓ | — | ✓ | ✓ |
 | Multi-criteria CI | — | ✓ (all 5 indices) | ✓ (determinate ⇒ $CI_N = 0$) | ✓ | ✓ |
-| Uniform-$T$ ranking invariance | ✓ (proved) | — | ✓ + antifake providers | — | ✓ |
+| Thermal demand in the fire chain | ✓ closed forms (restrained bar, free expansion) | ✓ (engine ≡ assembler path) | ✓ ($\alpha = 0$ reduction is exact) | ✓ (rank-1 ≡ re-solve, heated) | ✓ |
+| Uniform-force scan (`UniformForceScan`) | — | ✓ (≡ per-point `member_axial_forces`) | ✓ (one factorisation per scan, counted) | — | ✓ |
+| Uniform-$T$ ranking invariance | ✓ (proved, with the §5.4 precondition) | — | ✓ + antifake providers | — | ✓ |
 | OpenSeesPy cross-check | — | ✓ (optional extra) | — | — | ✓ |
 
 Gaps that are honestly open: no experimental benchmark (e.g. the Cardington

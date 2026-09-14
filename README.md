@@ -378,7 +378,10 @@ print(k_E(600.0), k_y(600.0))  # 0.31 0.47   (EN 1993-1-2 Table 3.1)
 
 res = compute_ci_for_topology(nodes, elements, loads, {}, "uniform", 600.0)
 print(res.top_5)  # ['6', '2', '3', '5', '7']
-# a uniform temperature field provably does not reorder members:
+# a uniform temperature field provably does not reorder members *when no
+# member carries an imposed thermal strain* (alpha = 0 here; with alpha > 0
+# on a restrained structure the base state itself becomes temperature-
+# dependent -- see docs/theory.md 5.4):
 print(res.tau_vs_base)  # 1.0
 ```
 
@@ -575,8 +578,10 @@ bounds; the moment bound is the force scale times the bounding-box diagonal.
   tolerance on every solve (`EnergyValidationError` otherwise).
 * **Equilibrium** — ΣFx, ΣFy, ΣM residuals of reactions vs. applied loads.
 * **Uniform-temperature invariance** — scaling every member's stiffness
-  identically cannot reorder the criticality ranking; the engine measures
-  this property (Kendall tau-b = 1) instead of assuming it.
+  identically cannot reorder the criticality ranking *while no member carries
+  an imposed thermal strain*; the engine measures this property (Kendall
+  tau-b = 1) instead of assuming it, and `tests/test_thermal_demand.py` pins
+  the refined claim for heated restrained structures (docs/theory.md 5.4).
 * **Reference bridge (optional)** — `pip install "truss-analysis[validation]"`
   adds comparison utilities against the OpenSees finite-element framework
   (`truss_analysis.validation`).
