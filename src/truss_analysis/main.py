@@ -75,6 +75,7 @@ from .postprocess import (
     calculate_element_forces,
     calculate_reactions,
     check_equilibrium,
+    imposed_strain_energy,
 )
 from .solver import check_energy, solve
 from .topology_generator import generate_topology, model_to_json
@@ -328,7 +329,13 @@ def run(
     element_forces, strain_energy, prestress_work = calculate_element_forces(
         nodes, elements, U
     )
-    check_energy(U, F_mechanical, strain_energy, prestress_work)
+    check_energy(
+        U,
+        F_mechanical,
+        strain_energy,
+        prestress_work,
+        energy_scale=imposed_strain_energy(nodes, elements),
+    )
     reactions = calculate_reactions(nodes, K, U, F_ext, fixed_dofs)
     equilibrium = check_equilibrium(nodes, reactions, applied_loads)
     buckling = (

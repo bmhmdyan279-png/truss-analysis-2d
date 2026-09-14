@@ -8,6 +8,18 @@ import numpy as np
 
 from .model import Element, Node
 
+#: Geometric zero-length threshold [m]. Members shorter than this cannot
+#: carry a meaningful axial stiffness (``k = EA/L`` diverges) and are skipped
+#: rather than divided by.
+_ZERO_LENGTH_TOL = 1e-12
+
+#: Relative band used to classify an axial force as ``"Zero"``. The force is
+#: compared against the member's own yield-scale reference ``E*A`` so the
+#: classification is invariant to the unit system and to model size; an
+#: absolute newton threshold would call a 1e-6 N force "Tension" in a
+#: kilonewton model and a 1e3 N force "Zero" in a giganewton one.
+_FORCE_ZERO_REL = 1e-12
+
 
 def calculate_element_forces(
     nodes: list[Node],
@@ -59,7 +71,7 @@ def calculate_element_forces(
         dy = nodes[j].y - nodes[i].y
         L = np.sqrt(dx**2 + dy**2)
 
-        if L < 1e-12:
+        if L < _ZERO_LENGTH_TOL:
             results.append({"id": elem.id, "N": 0.0, "status": "ZERO_LENGTH"})
             continue
 
@@ -92,7 +104,18 @@ def calculate_element_forces(
         # Prestress work
         prestress_work += k * delta_L_prestress * delta_L_mech
 
-        status = "Tension" if N > 1e-9 else ("Compression" if N < -1e-9 else "Zero")
+        # Sign classification via the *axial strain* N/(E*A) rather than an
+        # absolute newton cut-off, so the verdict is invariant to unit system
+        # and model size: a 1e-6 N force is "Tension" in a millinewton model
+        # and indistinguishable from zero in a giganewton one.
+        ea = elem.E * elem.A
+        axial_strain = N / ea if ea > 0.0 else 0.0
+        if axial_strain > _FORCE_ZERO_REL:
+            status = "Tension"
+        elif axial_strain < -_FORCE_ZERO_REL:
+            status = "Compression"
+        else:
+            status = "Zero"
         results.append(
             {
                 "id": elem.id,
@@ -104,6 +127,57 @@ def calculate_element_forces(
         )
 
     return results, float(strain_energy), float(prestress_work)
+
+
+def imposed_strain_energy(nodes: list[Node], elements: list[Element]) -> float:
+    """Characteristic elastic energy of the imposed (eigen) strain field.
+
+    Returns ``sum(0.5 * k * delta_L_prestress**2)`` over all elements, where
+    ``delta_L_prestress = alpha * delta_T * L + delta_L_free`` is the imposed
+    elongation and ``k = E A / L`` the axial stiffness.
+
+    This quantity is *not* an energy the structure necessarily stores: for a
+    freely expanding bar it is entirely relieved and the stored strain energy
+    is zero. Its role here is to provide a physically meaningful **reference
+    scale** for the energy balance in :func:`truss_analysis.solver.check_energy`.
+
+    Motivation
+    ----------
+    Imposed-strain problems can make every term of the Clapeyron balance
+    vanish analytically (free thermal expansion: ``W_mech = U_strain =
+    W_prestress = 0``). A purely *relative* residual test then divides
+    round-off by round-off and reports a 100% error. An *absolute* joule
+    threshold would be dimensionally arbitrary and would behave differently
+    for millimetre and kilometre models. Anchoring the round-off floor to
+    this characteristic energy keeps the test scale-free and unit-agnostic.
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes (ordering defines the DOF map).
+    elements : list[Element]
+        Model elements.
+
+    Returns
+    -------
+    float
+        Non-negative characteristic energy in joules. Zero when the model
+        carries no imposed strain.
+    """
+    node_map = {node.id: i for i, node in enumerate(nodes)}
+    total = 0.0
+    for elem in elements:
+        i = node_map[elem.node_i]
+        j = node_map[elem.node_j]
+        dx = nodes[j].x - nodes[i].x
+        dy = nodes[j].y - nodes[i].y
+        L = float(np.sqrt(dx**2 + dy**2))
+        if L < _ZERO_LENGTH_TOL:
+            continue
+        delta_L_prestress = elem.alpha * elem.delta_T * L + elem.delta_L_free
+        k = elem.E * elem.A / L
+        total += 0.5 * k * delta_L_prestress**2
+    return float(total)
 
 
 def calculate_reactions(
