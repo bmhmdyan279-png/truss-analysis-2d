@@ -22,24 +22,24 @@ Basic usage example:
 .. code-block:: python
 
    from truss_analysis import run, Node, Element
-   
+
    # Define nodes
    nodes = [
        Node(id="N1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
        Node(id="N2", x=3.0, y=0.0, is_support=True, support_dy=True),
        Node(id="N3", x=1.5, y=2.0),
    ]
-   
+
    # Define elements
    elements = [
        Element(id="E1", node_i="N1", node_j="N3", E=210e9, A=0.01),
        Element(id="E2", node_i="N2", node_j="N3", E=210e9, A=0.01),
        Element(id="E3", node_i="N1", node_j="N2", E=210e9, A=0.01),
    ]
-   
+
    # Define loads
    loads = [{"node_id": "N3", "Fx": 0.0, "Fy": -10000.0}]
-   
+
    # Run analysis
    result = run(nodes, elements, loads)
    print(result.summary())
@@ -61,20 +61,20 @@ Documentation Structure
 .. toctree::
    :maxdepth: 2
    :caption: User Guide
-   
+
    theory.md
    error_codes.md
 
 .. toctree::
    :maxdepth: 3
    :caption: API Reference
-   
+
    api/modules
 
 .. toctree::
    :maxdepth: 2
    :caption: Development
-   
+
    CONTRIBUTING.md
 
 Core Modules

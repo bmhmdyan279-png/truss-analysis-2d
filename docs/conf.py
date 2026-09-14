@@ -154,7 +154,13 @@ html_title = f"Truss Analysis 2D v{version}"
 # -----------------------------------------------------------------------------
 latex_engine = "xelatex"
 latex_documents = [
-    (master_doc, "truss_analysis.tex", "Truss Analysis 2D Documentation", author, "manual")
+    (
+        master_doc,
+        "truss_analysis.tex",
+        "Truss Analysis 2D Documentation",
+        author,
+        "manual",
+    )
 ]
 
 # -----------------------------------------------------------------------------
@@ -196,6 +202,7 @@ nitpicky = False  # Set to True for strict reference checking
 suppress_warnings = [
     "ref.python",  # Suppress warnings about missing Python references
 ]
+
 
 # -----------------------------------------------------------------------------
 # Custom CSS overrides
