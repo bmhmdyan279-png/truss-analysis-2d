@@ -39,6 +39,7 @@ release = _version
 extensions = [
     # Core Sphinx extensions
     "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
@@ -72,6 +73,7 @@ autodoc_default_options = {
     "members": True,
     "undoc-members": True,
     "show-inheritance": True,
+    "inherited-members": True,
     "special-members": "__init__",
     "exclude-members": "__weakref__",
     "member-order": "bysource",
@@ -80,8 +82,13 @@ autodoc_default_options = {
 # Preserve order of members as defined in source
 autodoc_member_order = "bysource"
 
-# Don't skip classes that only have inherited members
-autodoc_default_flags = ["members", "undoc-members", "inherited-members"]
+# Mock modules that cannot be imported on Windows (e.g., openseespy DLL issue)
+autodoc_mock_imports = ["openseespy"]
+
+# -----------------------------------------------------------------------------
+# Autosummary configuration
+# -----------------------------------------------------------------------------
+autosummary_generate = True
 
 # -----------------------------------------------------------------------------
 # Napoleon configuration (NumPy/Google style docstrings)
