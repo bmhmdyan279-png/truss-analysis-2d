@@ -195,3 +195,7 @@ instance/
 # setuptools_scm generated file
 # -----------------------------------------------------------------------------
 src/truss_analysis/_version.py
+
+docs/api/generated/
+docs/_build/
+docs/.doctrees/
