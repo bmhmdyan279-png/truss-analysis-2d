@@ -59,7 +59,14 @@ Numerical guard
 ``1 + Delta_i d_i -> 0`` means the perturbed structure is (near) a mechanism.
 Such members are flagged and routed to a full brute-force solve; if that
 solve is singular the member CI is ``+inf`` with a ``mechanism`` flag.  The
-engine never emits a silent finite number for a guarded member.
+engine never emits a silent finite number for a guarded member.  The guard
+threshold is **condition-scaled**: ``denom`` inherits a round-off level of
+about ``cond(K_ff) * eps`` from ``z = K_ff^-1 b``, so a fixed ``1e-8`` would
+misjudge healthy but ill-conditioned structures (``cond ~ 1e10`` has round-off
+``~ 2e-6``).  :func:`build_engine` therefore measures ``cond`` from the LU
+factors it already computed (LAPACK ``dgecon``, ``O(n^2)``) and stores
+``guard_tol = min(max(1e-8, 100 * cond * eps), 1e-4)`` on the setup;
+:func:`ci_sweep` uses it unless the caller overrides it.
 
 No deep copying of element containers anywhere in this package:
 perturbed states are built from the rank-1/rank-r formulas
@@ -73,7 +80,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.linalg import lu_factor, lu_solve
+from scipy.linalg import lapack, lu_factor, lu_solve
 
 from ..material.steel_eurocode import FloatOrArray
 from ..material.steel_eurocode import k_E as eurocode_k_E
@@ -85,7 +92,9 @@ from .scenarios import T_AMBIENT, get_scenario_temperatures
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "GUARD_COND_COEF",
     "GUARD_TOL",
+    "GUARD_TOL_MAX",
     "CiSweep",
     "EngineSetup",
     "MechanismError",
@@ -105,6 +114,13 @@ __all__ = [
 ]
 
 GUARD_TOL = 1e-8
+#: Coefficient of the condition-scaled part of the adaptive guard tolerance
+#: (``GUARD_COND_COEF * cond(K_ff) * eps``); see :func:`_guard_tolerance`.
+GUARD_COND_COEF = 100.0
+#: Hard cap on the adaptive guard tolerance. Members below the tol are routed
+#: to an exact brute-force solve, so a loose tol costs time, never accuracy;
+#: the cap keeps an extreme ``cond`` estimate from routing the whole sweep.
+GUARD_TOL_MAX = 1e-4
 _SINGULAR_TOL = 1e-12
 
 
@@ -142,6 +158,12 @@ class EngineSetup:
     z: np.ndarray  # (ndof_free, nE) = K_ff^-1 B
     d: np.ndarray  # (nE,) = b_i^T Z_i
     dl_pre: np.ndarray  # (nE,) imposed elongation alpha*(T-T0)*L + delta_L_free
+    guard_tol: float = GUARD_TOL
+    """float: condition-scaled guard tolerance for the rank-1 denominator.
+
+    Computed by :func:`_guard_tolerance` from the LU factors at build time;
+    :func:`ci_sweep` uses it when the caller does not override ``guard_tol``.
+    """
 
 
 @dataclass(frozen=True)
@@ -251,6 +273,53 @@ def _check_lu(lu: tuple[np.ndarray, np.ndarray]) -> None:
         raise MechanismError(msg)
 
 
+def _guard_tolerance(k_ff: np.ndarray, lu: tuple[np.ndarray, np.ndarray]) -> float:
+    """Condition-scaled tolerance for the rank-1 denominator guard.
+
+    The guarded quantity ``denom = 1 + Delta_i d_i`` is formed from
+    ``z = K_ff^-1 b``; its floating-point error level is roughly
+    ``cond(K_ff) * eps``. A *fixed* threshold of ``GUARD_TOL = 1e-8`` is far
+    below that error level for ill-conditioned-but-healthy structures (at
+    ``cond ~ 1e10`` the round-off alone is ``~ 2e-6``), so such a structure
+    can have perfectly sound members routed to the brute-force fallback — or,
+    with no fallback given, wrongly reported as mechanisms. The tolerance
+    therefore scales with a reciprocal-condition estimate obtained from the
+    LU factors that already exist (LAPACK ``dgecon``, ``O(n^2)``, no extra
+    factorisation):
+
+    .. code-block:: text
+
+        tol = min(max(GUARD_TOL, GUARD_COND_COEF * cond_est * eps), GUARD_TOL_MAX)
+
+    Two safety nets bound the estimate:
+
+    * ``GUARD_TOL_MAX`` caps the routing damage of an extreme ``cond_est``:
+      a member below the tol is re-solved exactly, so the cap trades a little
+      brute-force work against guard thrashing, never accuracy.
+    * ``denom`` is mathematically bounded below by ``alpha`` (since
+      ``0 < k_i d_i <= 1``), so for any ``alpha >= GUARD_TOL_MAX`` no healthy
+      member can ever be flagged, whatever the conditioning.
+    """
+    n = k_ff.shape[0]
+    if n == 0:
+        return GUARD_TOL
+    try:
+        anorm = float(np.abs(k_ff).sum(axis=0).max())
+        if not np.isfinite(anorm) or anorm <= 0.0:
+            return GUARD_TOL
+        rcond, info = lapack.dgecon(lu[0], anorm, "1")
+        rcond = float(rcond)
+        if info != 0 or not np.isfinite(rcond) or rcond <= 0.0:
+            # rcond == 0 means "singular to working precision"; _check_lu has
+            # already rejected that case, so treat it as maximally guarded.
+            return GUARD_TOL_MAX if rcond == 0.0 else GUARD_TOL
+        cond_est = min(1.0 / rcond, 1.0 / float(np.finfo(float).eps) ** 2)
+    except (ValueError, TypeError, OverflowError, lapack.LapackError):
+        return GUARD_TOL
+    tol = GUARD_COND_COEF * cond_est * float(np.finfo(float).eps)
+    return float(min(max(GUARD_TOL, tol), GUARD_TOL_MAX))
+
+
 def build_engine(
     nodes: Sequence[Node],
     elements: Sequence[Element],
@@ -292,6 +361,7 @@ def build_engine(
         z=z,
         d=d,
         dl_pre=prestress_lengths(nodes, elements, temps),
+        guard_tol=_guard_tolerance(k_ff, lu),
     )
 
 
@@ -393,7 +463,7 @@ def ci_sweep(
     setup: EngineSetup,
     u: np.ndarray,
     alpha: float,
-    guard_tol: float = GUARD_TOL,
+    guard_tol: float | None = None,
     brute_column: Callable[[int], np.ndarray] | None = None,
 ) -> CiSweep:
     """Vectorised CI sweep: column i of ``u_pert`` = state with member i hit.
@@ -404,12 +474,19 @@ def ci_sweep(
     same ``alpha`` as its stiffness, and the two effects combine into exactly
     this form (derivation in the module docstring).  ``u`` must have been
     solved against :func:`total_load_vector` for the same setup.
+
+    ``guard_tol`` defaults to ``setup.guard_tol`` — the condition-scaled
+    tolerance measured from this setup's LU factors (see
+    :func:`_guard_tolerance`); passing a float overrides it.
     """
     delta = (alpha - 1.0) * setup.k_axial
     denom = 1.0 + delta * setup.d
     f = setup.b_free @ u - setup.dl_pre
     coef = np.zeros_like(delta)
-    ok = np.abs(denom) >= guard_tol
+    # None -> the condition-scaled tolerance measured on this setup's LU
+    # factors; an explicit float still overrides (tests, sensitivity studies).
+    tol = setup.guard_tol if guard_tol is None else float(guard_tol)
+    ok = np.abs(denom) >= tol
     coef[ok] = delta[ok] * f[ok] / denom[ok]
     u_pert = u[:, None] - setup.z * coef[None, :]
     flagged: dict[str, str] = {}
