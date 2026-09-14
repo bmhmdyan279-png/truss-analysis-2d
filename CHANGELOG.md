@@ -7,13 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-09-15
+
 This release is the outcome of a nine-part external technical audit of the
-computational core. Every defect listed below was reproduced against the code
-before being fixed; nothing here is a speculative change. Several items
-**alter reported numbers** — they are marked ⚠ and collected at the end under
-*Behaviour changes*.
+computational core, followed by a second judging round that reproduced the
+first round's fixes against the exact commit and surfaced six further
+findings; all six are closed here. Every defect listed below was reproduced
+against the code before being fixed; nothing here is a speculative change.
+Several items **alter reported numbers** — they are marked ⚠ and collected at
+the end under *Behaviour changes*.
 
 ### Fixed
+
+- ⚠ **The fire demand chain was blind to restrained thermal expansion**
+  (second-round finding 1, the audit's top priority). `DCR`, `theta_sys`, the
+  CI engine and the retrofit triage degraded `E(T)` but solved against the
+  *mechanical* right-hand side only, while `run()` applied the same
+  temperature through the equivalent nodal forces of restrained expansion. On
+  a redundant structure a heated member developed real compression that the
+  whole demand chain never saw — non-conservative exactly in the local-fire
+  scenarios the library targets. The engine now carries the imposed
+  elongation `dL_pre = alpha (T - 20) L + delta_L_free` end to end:
+  `total_load_vector` solves against `F_mech + B^T diag(k(T)) dL_pre`,
+  `member_forces` reports `N = k(T)(b.u - dL_pre)`, the rank-1 numerator
+  becomes the member's *mechanical* elongation (softening a member scales its
+  thermal force with its stiffness — derivation in the engine docstring and
+  `docs/theory.md` §6), and reaction indices subtract the direct fixed-DOF
+  load (`ReactionInfluence.f_ext_fixed`). The brute-force reference and the
+  OpenSeesPy bridge carry the identical physics. Elements without
+  `alpha`/`delta_L_free` reproduce every previous number bit-for-bit; heated
+  models are pinned against closed forms and against the independent
+  assembler path in `tests/test_thermal_demand.py` (18 tests).
+- **A fully restrained model (zero free DOFs) crashed the criticality
+  engine** on empty-array reductions. It now reports the pure imposed-strain
+  state `N = -k dL_pre` that such a model physically has.
+- **`_solve_sparse` leaked a raw SciPy `RuntimeError`** when SuperLU failed
+  after the SVD screen had passed, breaking the library's documented error
+  contract (second-round finding 4). Every factorisation failure now raises
+  `SingularMatrixError ... from exc`, with the screened case saying so.
+- **`buckling_reduction_factor` glued the 0.65 fire imperfection reduction
+  onto any buckling curve** (second-round finding 5). EN 1993-1-2 4.2.3.1(3)
+  defines `alpha = 0.65 alpha_c` for curve `c` only; `fire=True` with another
+  curve now raises `BucklingCheckWarning` naming the combination an
+  extrapolation beyond the code.
+- **`graph_validation` kept a dead private copy of the fixed-DOF rule**,
+  contradicting the "exactly one place" guarantee in `model.py`
+  (second-round finding 6). Removed; `model.fixed_dof_indices` is now the
+  single definition in fact as well as in documentation.
 
 - ⚠ **`check_energy` rejected the textbook thermal-stress problem.** The
   generalized Clapeyron identity is `W_mech = U_strain + ½·W_prestress`; setting
@@ -97,6 +137,29 @@ before being fixed; nothing here is a speculative change. Several items
 - **`postprocess.imposed_strain_energy`** — the characteristic energy
   `Σ ½·k·ΔL_prestress²` used to place a unit-agnostic round-off floor under the
   energy balance.
+- **`UniformForceScan`** (second-round finding 2) — one ambient
+  factorisation serving an entire uniform-temperature force grid, exact by
+  algebra (`u(T) = z_m/k_E(T) + (T-T0) z_alpha + z_free`): under a uniform
+  field `K(T) = k_E(T) K_0` and the thermal right-hand side is affine in `T`,
+  so `member_critical_temperature` / `system_critical_temperature` went from
+  one `O(n^3)` engine build per grid point (48 points by default, 13 per
+  retrofit decision) to one build per scan plus `O(m)` arithmetic per point.
+  A counted-factorisation test pins "exactly one `lu_factor` per scan"; an
+  exactness test pins the scan against per-point `member_axial_forces`
+  including fabrication strain.
+- **Demand-state primitives in `criticality.engine`** — `prestress_lengths`,
+  `imposed_load_vector`, `total_load_vector`, `member_forces`: one public
+  definition of the fire chain's right-hand side and member force, consumed
+  by the engine, `limitstates`, the retrofit strategies and the OpenSeesPy
+  bridge, so the paths cannot drift apart again.
+- **`run(..., check_condition=False)`** — exposes the repeated-solve
+  recommendation the `solve` docstring already made (temperature sweeps,
+  Monte Carlo, retrofit triage); the SVD screen is the dominant cost there.
+- **`ReactionInfluence.f_ext_fixed`** and `reaction_influence(..., loads=,
+  temps=)` — reactions are the residual `(K u)[fixed] - F_ext[fixed]`, which
+  is only equal to `(K u)[fixed]` when nothing loads the supports; a heated
+  restrained structure always does.
+
 - **`docs/theory.md`** expanded from 32 lines into a full reference: model scope
   and what is *not* included, the rank-one identity everything rests on, thermal
   limits, numerical scaling policy, the penalty trade-off, three-level buckling
@@ -114,6 +177,11 @@ before being fixed; nothing here is a speculative change. Several items
   replacing independent recomputation in five modules.
 - Dense assembly scatter uses `np.ix_` instead of a nested 16-iteration Python
   loop per member.
+- `reaction_influence` builds `K[fixed, free]` directly as
+  `(b[fixed] * k)^T @ b[free]` — `O(m n_fixed n_free)` — instead of
+  materialising the dense `(2n, 2n)` global matrix and slicing it
+  (second-round finding 3): the reaction index no longer rebuilds the exact
+  memory wall the sparse assembly exists to remove.
 - The node → constrained-DOF map is defined once in `model.fixed_dof_indices`
   and consumed by both the assembler and the criticality engine, which
   previously carried private copies.
@@ -132,7 +200,8 @@ before being fixed; nothing here is a speculative change. Several items
 
 ### Tests
 
-357 → **488 passing**, coverage 94.6 %.
+357 → 488 → **517 passing** (499 under the CI ignore list for the three
+OpenSees-dependent validation files), coverage ≥ 94 %.
 
 - `test_self_equilibrated_energy.py` — both thermal limits against closed forms,
   the scale-invariance of the balance, and an explicit pin on the known
@@ -150,6 +219,14 @@ before being fixed; nothing here is a speculative change. Several items
   for the sparse+penalty path discarding applied loads.
 - `test_units.py` — every conversion factor against its documented value, the
   slug/pcf invariant (`g = 32.174 ft/s²`), and `delta_T` as a difference.
+- `test_thermal_demand.py` (second round) — restrained bar against the closed
+  form `-k_E(T) E A alpha (T-20)`, engine ≡ assembler path on a heated
+  redundant frame (base *and* rank-1-perturbed columns), all five
+  multi-criteria indices against direct measurement with a load on a support
+  node, determinate free expansion ⇒ zero force ⇒ CI exactly 0, `theta_sys`
+  and member critical temperature *falling* when expansion is restrained, the
+  uniform-scan exactness and single-factorisation guards, and both sides of
+  the refined §5.4 invariance claim.
 
 ### Behaviour changes ⚠
 
@@ -172,6 +249,19 @@ a warning.
 5. **Contradictory input now warns or errors** rather than being silently
    dropped: conflicting `I_sec`, unrecognised element or `options` keys,
    inconsistent support declarations, badly scaled penalties.
+6. **DCR, `theta_sys`, CI and retrofit metrics now include restrained thermal
+   expansion demand** for models whose elements carry `alpha > 0` or
+   `delta_L_free ≠ 0`. Direction: heated restrained members carry *more*
+   compression than the old chain reported, so DCR rises and `theta_sys`
+   falls — the old numbers were non-conservative. Models built without
+   imposed strain (including every campaign fixture and the uniform-T
+   invariance theorem's precondition) reproduce all previous values exactly.
+7. **`CI_E` is the change in mechanical strain energy**
+   `½ Σ k (b.u − dL_pre)²` — the naming the audit asked for; it equals the
+   previous quantity whenever no imposed strain is present.
+8. **`fire=True` off curve `c` now warns** (`BucklingCheckWarning`): the 0.65
+   imperfection reduction is a curve-`c` clause of EN 1993-1-2, and combining
+   it with another curve is reported as the extrapolation it is.
 
 ### Removed
 

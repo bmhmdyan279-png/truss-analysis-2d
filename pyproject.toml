@@ -94,7 +94,7 @@ where = ["src"]
 # carry no .git metadata (e.g. sdist rebuilds).
 [tool.setuptools_scm]
 write_to = "src/truss_analysis/_version.py"
-fallback_version = "2.5.0"
+fallback_version = "2.6.0"
 
 # ---------------------------------------------------------------------------
 # Linting / formatting — ruff
