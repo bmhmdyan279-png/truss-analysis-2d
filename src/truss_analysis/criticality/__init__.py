@@ -12,10 +12,20 @@ Public API:
   returning :class:`ranking.TauResult` (``tau=None`` + ``is_degenerate``
   instead of silent numbers).
 * :mod:`.indices` — the single ``compute_nci`` (degenerate -> ``None``).
+* :mod:`.criteria` — ``multi_criteria_ci``: displacement, force, strain-energy
+  and reaction indices from one rank-1 sweep, for the cases where a single
+  displacement-based scalar ranks the wrong member.
 """
 
 from __future__ import annotations
 
+from .criteria import (
+    FORCE_BLOCK_SIZE,
+    MultiCriteriaResult,
+    ReactionInfluence,
+    multi_criteria_ci,
+    reaction_influence,
+)
 from .engine import (
     GUARD_TOL,
     CiSweep,
@@ -44,13 +54,16 @@ from .scenarios import (
 )
 
 __all__ = [
+    "FORCE_BLOCK_SIZE",
     "GUARD_TOL",
     "SCENARIOS",
     "T_AMBIENT",
     "CiSweep",
     "EngineSetup",
     "MechanismError",
+    "MultiCriteriaResult",
     "NciResult",
+    "ReactionInfluence",
     "TauResult",
     "TopologyResult",
     "base_displacement",
@@ -63,9 +76,11 @@ __all__ = [
     "load_vector",
     "member_centroids",
     "member_matrices",
+    "multi_criteria_ci",
     "natural_sort_key",
     "perturb_multi",
     "rank_members",
+    "reaction_influence",
     "relative_eps",
     "scenario_partition",
     "span_bounds",
