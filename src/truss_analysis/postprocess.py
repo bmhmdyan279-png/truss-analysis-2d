@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import math
+import warnings
 from typing import Any
 
 import numpy as np
 
+from .exceptions import BucklingCheckWarning
 from .model import Element, Node
+from .sections import euler_buckling_load
 
 #: Geometric zero-length threshold [m]. Members shorter than this cannot
 #: carry a meaningful axial stiffness (``k = EA/L`` diverges) and are skipped
@@ -230,22 +234,36 @@ def check_equilibrium(
 ) -> dict[str, Any]:
     """Check global static equilibrium: sum(Fx) = sum(Fy) = sum(M) = 0.
 
+    Force and moment residuals are tested against **separate** scales. They
+    have different dimensions — ``[N]`` versus ``[N m]`` — so a single
+    tolerance cannot serve both. The moment scale is the force scale times a
+    characteristic length taken from the model's bounding box, which makes the
+    test invariant to the size of the structure.
+
+    An earlier revision scaled the moment residual by ``limit * max(1, ref)``,
+    i.e. by the force reference *twice*. The resulting bound had units of
+    force squared: on a 1000 m bridge it was orders of magnitude too tight
+    and rejected a perfectly equilibrated solution, while on a millimetre
+    model it was so loose that a genuine imbalance would pass.
+
     Parameters
     ----------
     nodes : list[Node]
-        Model nodes (used for moment arms).
+        Model nodes (used for moment arms and the characteristic length).
     reactions : dict[str, dict[str, float]]
         Support reactions as returned by :func:`calculate_reactions`.
     applied_loads : list[dict[str, Any]]
         Applied nodal loads with keys ``node_id``, ``Fx``, ``Fy``.
     tol : float, default 1e-6
-        Relative tolerance scaled by the magnitudes present in the model.
+        Relative tolerance applied to the force and moment scales.
 
     Returns
     -------
     dict[str, Any]
         ``{"sum_fx", "sum_fy", "sum_m", "is_valid"}`` with the raw residual
-        sums and the scaled pass/fail verdict.
+        sums and the scaled pass/fail verdict, plus the diagnostic keys
+        ``"ref_force"``, ``"ref_moment"``, ``"length_char"``,
+        ``"force_limit"`` and ``"moment_limit"`` used to reach it.
     """
     coords = {node.id: (node.x, node.y) for node in nodes}
     sum_fx = sum_fy = sum_m = 0.0
@@ -264,22 +282,43 @@ def check_equilibrium(
         sum_fy += lf["Fy"]
         sum_m += x * lf["Fy"] - y * lf["Fx"]
 
-    # Tolerance scaling
-    ref = 0.0
+    # Characteristic length: the bounding-box diagonal, i.e. the scale of the
+    # moment arms in this model. Taking it from the geometry rather than a
+    # constant is what makes the moment bound dimensionally [N m].
+    if nodes:
+        xs = [node.x for node in nodes]
+        ys = [node.y for node in nodes]
+        length_char = math.hypot(max(xs) - min(xs), max(ys) - min(ys))
+    else:
+        length_char = 0.0
+
+    # Reference magnitudes built from the model itself, so both bounds are
+    # relative and unit-agnostic.
+    ref_force = 0.0
     for lf in applied_loads:
-        ref += abs(lf["Fx"]) + abs(lf["Fy"])
+        ref_force += abs(lf["Fx"]) + abs(lf["Fy"])
     for rec in reactions.values():
-        ref += abs(rec["Fx"]) + abs(rec["Fy"])
-    limit = tol * max(1.0, ref)
+        ref_force += abs(rec["Fx"]) + abs(rec["Fy"])
+    ref_moment = ref_force * length_char
+
+    # A load-free model has zero references and, exactly, zero residuals; the
+    # absolute fallback only absorbs round-off in that degenerate case.
+    force_limit = tol * ref_force if ref_force > 0.0 else tol
+    moment_limit = tol * ref_moment if ref_moment > 0.0 else tol
 
     return {
         "sum_fx": float(sum_fx),
         "sum_fy": float(sum_fy),
         "sum_m": float(sum_m),
+        "ref_force": float(ref_force),
+        "ref_moment": float(ref_moment),
+        "length_char": float(length_char),
+        "force_limit": float(force_limit),
+        "moment_limit": float(moment_limit),
         "is_valid": bool(
-            abs(sum_fx) <= limit
-            and abs(sum_fy) <= limit
-            and abs(sum_m) <= limit * max(1.0, ref)
+            abs(sum_fx) <= force_limit
+            and abs(sum_fy) <= force_limit
+            and abs(sum_m) <= moment_limit
         ),
     }
 
@@ -290,11 +329,28 @@ def calculate_buckling(
     results: list[dict[str, Any]],
     tol: float = 1e-12,
 ) -> list[dict[str, Any]]:
-    """Report Euler buckling utilisation for compressed members.
+    """Report elastic buckling utilisation for compressed members.
 
-    Uses the pin-ended Euler load ``P_cr = pi^2 E I / L^2``; members in
-    tension (or with negligible force, length or second moment of area)
-    are reported with ``P_cr = None`` and ``safe = True``.
+    Uses the Euler elastic critical load with the member's effective-length
+    factor,
+
+    .. code-block:: text
+
+        P_cr = pi^2 E I / (K L)^2
+
+    delegating to :func:`truss_analysis.sections.euler_buckling_load` so that
+    this check, the fire limit-state check in
+    :mod:`truss_analysis.limitstates` and the section utilities cannot drift
+    apart. ``K`` defaults to 1.0 (pin-ended), which is the usual assumption
+    for a pin-jointed truss member; a member with rotational restraint should
+    carry ``K < 1``.
+
+    Members that cannot be assessed are reported explicitly rather than
+    defaulting to a pass. A compressed member whose ``I_sec`` was never set
+    previously came back as ``P_cr = None, safe = True`` — missing data
+    interpreted as safety. It now returns ``status = "unknown"`` with
+    ``safe = False`` and emits a warning, because an unevaluated member is not
+    a verified one.
 
     Parameters
     ----------
@@ -310,12 +366,21 @@ def calculate_buckling(
     Returns
     -------
     list[dict[str, Any]]
-        One entry per element with keys ``id``, ``N``, ``length``,
-        ``P_cr``, ``ratio`` (= ``-N / P_cr``), ``slenderness`` and ``safe``.
+        One entry per element with keys ``id``, ``N``, ``length``, ``P_cr``,
+        ``ratio`` (= ``-N / P_cr``), ``slenderness``, ``k_factor``, ``status``
+        and ``safe``. ``status`` is one of ``"tension"`` (not checked),
+        ``"zero_force"``, ``"checked"`` or ``"unknown"``.
+
+    Warns
+    -----
+    BucklingCheckWarning
+        When a compressed member cannot be assessed because ``I_sec`` or the
+        member length is missing.
     """
     coords = {node.id: node for node in nodes}
     forces = {str(r.get("id")): float(r.get("N", 0.0)) for r in results}
     report: list[dict[str, Any]] = []
+    unassessed: list[str] = []
 
     for e in elements:
         ni, nj = coords[e.node_i], coords[e.node_j]
@@ -328,17 +393,46 @@ def calculate_buckling(
             "P_cr": None,
             "ratio": 0.0,
             "slenderness": None,
-            "safe": True,
+            "k_factor": float(e.effective_length_factor),
+            "status": "tension",
+            # Conservative default: an unevaluated member is not a safe member.
+            "safe": False,
         }
 
-        if -tol > N and tol < L and e.I_sec > tol:
-            p_cr = float(np.pi**2 * e.E * e.I_sec / L**2)
-            r_gyr = float(np.sqrt(e.I_sec / e.A)) if tol < e.A else 0.0
-            entry["P_cr"] = p_cr
-            entry["ratio"] = -N / p_cr
-            entry["slenderness"] = L / r_gyr if r_gyr > tol else None
-            entry["safe"] = bool(entry["ratio"] < 1.0)
+        if -tol <= N:
+            # Nothing to buckle: tension or (numerically) zero force.
+            entry["status"] = "zero_force" if abs(N) <= tol else "tension"
+            entry["safe"] = True
+            report.append(entry)
+            continue
 
+        if tol >= L or e.I_sec <= tol:
+            # Compressed but unassessable. Report it loudly instead of
+            # silently passing, and keep safe=False.
+            entry["status"] = "unknown"
+            unassessed.append(str(e.id))
+            report.append(entry)
+            continue
+
+        p_cr = euler_buckling_load(e.I_sec, L, e.E, e.effective_length_factor)
+        k_eff = e.effective_length_factor * L
+        r_gyr = float(np.sqrt(e.I_sec / e.A)) if tol < e.A else 0.0
+        entry["P_cr"] = p_cr
+        entry["ratio"] = -N / p_cr
+        # Slenderness on the *effective* length, consistent with P_cr.
+        entry["slenderness"] = k_eff / r_gyr if r_gyr > tol else None
+        entry["status"] = "checked"
+        entry["safe"] = bool(entry["ratio"] < 1.0)
         report.append(entry)
+
+    if unassessed:
+        warnings.warn(
+            f"buckling not assessed for {len(unassessed)} compressed member(s) "
+            f"with missing I_sec or length: {', '.join(unassessed[:10])}"
+            + (" ..." if len(unassessed) > 10 else "")
+            + "; they are reported with status='unknown' and safe=False",
+            BucklingCheckWarning,
+            stacklevel=2,
+        )
 
     return report

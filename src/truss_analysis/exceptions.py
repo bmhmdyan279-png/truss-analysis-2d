@@ -34,3 +34,33 @@ class UnitConversionError(TrussError):
 
 class IllConditionedWarning(UserWarning):
     """Warning issued when cond(K_ff) exceeds the screening threshold."""
+
+
+class BucklingCheckWarning(UserWarning):
+    """Warning issued when a compressed member cannot be assessed for buckling.
+
+    Emitted by :func:`truss_analysis.postprocess.calculate_buckling` when a
+    member carrying compression has no usable ``I_sec`` or length. Such a
+    member is reported with ``status="unknown"`` and ``safe=False``: missing
+    data must never be interpreted as a pass.
+    """
+
+
+class InputIgnoredWarning(UserWarning):
+    """Warning issued when a recognised-but-unapplied input key is supplied.
+
+    The model parser accepts several keys for compatibility with generated
+    models. Silently swallowing a key that the user believes controls physics
+    is worse than refusing it, so any key that is parsed but not applied
+    raises this warning instead.
+    """
+
+
+class UnitAmbiguityWarning(UserWarning):
+    """Warning issued when an input quantity's unit convention is ambiguous.
+
+    Used for the Imperial mass-density trap: ``515.379`` converts
+    slug/ft^3 to kg/m^3 whereas ``16.0185`` converts lbm/ft^3 (pcf). Both are
+    in everyday use, and choosing the wrong one is a silent factor-of-16
+    error in self-weight.
+    """

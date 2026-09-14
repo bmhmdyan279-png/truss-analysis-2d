@@ -48,7 +48,7 @@ from scipy.linalg import lu_factor, lu_solve
 
 from ..material.steel_eurocode import FloatOrArray
 from ..material.steel_eurocode import k_E as eurocode_k_E
-from ..model import Element, Node
+from ..model import Element, Node, fixed_dof_indices
 from .indices import NciResult, compute_nci
 from .ranking import TauResult, rank_members, tau_b
 from .scenarios import T_AMBIENT, get_scenario_temperatures
@@ -121,13 +121,15 @@ class CiSweep:
 
 
 def free_dof_indices(nodes: Sequence[Node]) -> tuple[int, ...]:
-    fixed = set()
-    for i, node in enumerate(nodes):
-        if node.is_support:
-            if node.support_dx:
-                fixed.add(2 * i)
-            if node.support_dy:
-                fixed.add(2 * i + 1)
+    """Return the unconstrained global DOF indices for ``nodes``.
+
+    Delegates the support semantics to :func:`truss_analysis.model.fixed_dof_indices`,
+    the single definition shared with the assembler. Duplicating the rule here
+    would let the criticality engine and the static solver disagree about
+    which DOFs are fixed -- an error no equivalence test on ``K`` would catch,
+    because both paths would be wrong together.
+    """
+    fixed = set(fixed_dof_indices(list(nodes)))
     return tuple(d for d in range(2 * len(nodes)) if d not in fixed)
 
 

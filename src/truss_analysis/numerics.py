@@ -43,6 +43,7 @@ __all__ = [
     "DEFAULT_TOLERANCES",
     "NumericalStatus",
     "NumericalTolerances",
+    "classify_conditioning",
     "singular_value_screen",
 ]
 
@@ -158,6 +159,35 @@ class NumericalTolerances:
 DEFAULT_TOLERANCES = NumericalTolerances()
 
 
+def classify_conditioning(
+    cond: float,
+    singular: bool,
+    tolerances: NumericalTolerances = DEFAULT_TOLERANCES,
+) -> NumericalStatus:
+    """Map a condition number and a singularity flag onto a status verdict.
+
+    Parameters
+    ----------
+    cond : float
+        Condition number of the matrix, ``inf`` if singular.
+    singular : bool
+        Whether the matrix is numerically rank deficient.
+    tolerances : NumericalTolerances, optional
+        Policy supplying ``cond_warning``.
+
+    Returns
+    -------
+    NumericalStatus
+        ``SINGULAR`` if ``singular``, else ``ILL_CONDITIONED`` when ``cond``
+        exceeds the policy threshold, else ``STABLE``.
+    """
+    if singular:
+        return NumericalStatus.SINGULAR
+    if cond > tolerances.cond_warning:
+        return NumericalStatus.ILL_CONDITIONED
+    return NumericalStatus.STABLE
+
+
 def singular_value_screen(
     K: np.ndarray,
     tolerances: NumericalTolerances = DEFAULT_TOLERANCES,
@@ -199,10 +229,5 @@ def singular_value_screen(
     s_min = float(sv[-1])
     cond = s_max / s_min if s_min > 0.0 else float("inf")
 
-    if rank < n:
-        status = NumericalStatus.SINGULAR
-    elif cond > tolerances.cond_warning:
-        status = NumericalStatus.ILL_CONDITIONED
-    else:
-        status = NumericalStatus.STABLE
+    status = classify_conditioning(cond, rank < n, tolerances)
     return rank, s_max, cond, status

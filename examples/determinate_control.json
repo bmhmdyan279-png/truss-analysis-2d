@@ -37,7 +37,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.85e-5
+      "I_sec": 0.0002253906250000002
     },
     {
       "id": 2,
@@ -50,7 +50,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.85e-5
+      "I_sec": 0.0002253906250000002
     },
     {
       "id": 3,
@@ -63,7 +63,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.85e-5
+      "I_sec": 0.0002253906250000002
     }
   ],
   "loads": [

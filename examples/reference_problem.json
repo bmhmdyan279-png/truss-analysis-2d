@@ -49,7 +49,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 8.33e-10
+      "I_sec": 0.0001001736111111111
     },
     {
       "id": 2,
@@ -62,7 +62,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 8.33e-10
+      "I_sec": 0.0001001736111111111
     },
     {
       "id": 3,
@@ -75,7 +75,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.25e-09
+      "I_sec": 0.0002253906250000002
     },
     {
       "id": 4,
@@ -88,7 +88,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.25e-09
+      "I_sec": 0.0002253906250000002
     },
     {
       "id": 5,
@@ -101,7 +101,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.25e-09
+      "I_sec": 0.0002253906250000002
     },
     {
       "id": 6,
@@ -114,7 +114,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.25e-09
+      "I_sec": 0.0002253906250000002
     },
     {
       "id": 7,
@@ -127,7 +127,7 @@
       "delta_L0": 0.0,
       "effective_length_factor": 1.0,
       "section_type": "rectangular",
-      "I_sec": 1.67e-09
+      "I_sec": 0.0004006944444444447
     }
   ],
   "loads": [

@@ -35,6 +35,11 @@ import numpy as np
 
 from .assembly import assemble_global_matrices
 from .model import Element, Node
+from .numerics import (
+    DEFAULT_TOLERANCES,
+    NumericalStatus,
+    classify_conditioning,
+)
 
 __all__ = [
     "COND_WARNING_THRESHOLD",
@@ -46,8 +51,17 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-COND_WARNING_THRESHOLD = 1e12
-_RANK_RTOL = 1e-9
+#: Condition number above which ``TopologyReport.cond_warning`` is set.
+#: Kept as a module constant for backwards compatibility; the authoritative
+#: value is :attr:`NumericalTolerances.cond_warning`.
+COND_WARNING_THRESHOLD = DEFAULT_TOLERANCES.cond_warning
+
+#: Relative singular-value cutoff for the *diagnostic* near-mechanism test.
+#: Deliberately looser than the solver's hard gate
+#: (:attr:`NumericalTolerances.rank_rel_cutoff`) so model validation warns
+#: about a marginal structure earlier than the solver refuses to factorise
+#: it. Both values come from one policy so the relationship cannot drift.
+_RANK_RTOL = DEFAULT_TOLERANCES.near_singular_rel_cutoff
 
 
 class TopologyValidationError(Exception):
@@ -73,6 +87,7 @@ class TopologyReport:
     cond_k_ff: float
     cond_warning: bool
     symmetric: bool
+    numerical_status: NumericalStatus = NumericalStatus.STABLE
 
 
 def _to_objects(
@@ -235,6 +250,7 @@ def structural_report(model: dict[str, Any]) -> TopologyReport:
             cond_k_ff=float("nan"),
             cond_warning=False,
             symmetric=_symmetric(model),
+            numerical_status=NumericalStatus.STABLE,
         )
 
     nodes, elements = _to_objects(model)
@@ -247,6 +263,11 @@ def structural_report(model: dict[str, Any]) -> TopologyReport:
     mechanism = rank < n_dof_free
     cond = float(s_max / sing[-1]) if (sing.size and sing[-1] > 0.0) else float("inf")
     cond_warning = cond > COND_WARNING_THRESHOLD
+    # Structural classification is deliberately kept separate from numerical
+    # verdicts: determinacy is algebraic, stability is rank(K_ff), and
+    # conditioning is a statement about round-off amplification. Conflating
+    # them makes a report unreadable, so the status is recorded explicitly.
+    numerical_status = classify_conditioning(cond, mechanism, DEFAULT_TOLERANCES)
     return TopologyReport(
         n_nodes=n_nodes,
         n_members=n_members,
@@ -263,6 +284,7 @@ def structural_report(model: dict[str, Any]) -> TopologyReport:
         cond_k_ff=cond,
         cond_warning=cond_warning,
         symmetric=_symmetric(model),
+        numerical_status=numerical_status,
     )
 
 

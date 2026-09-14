@@ -58,6 +58,7 @@ import argparse
 import csv
 import json
 import sys
+import warnings
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -66,7 +67,7 @@ from typing import Any
 import numpy as np
 
 from .assembly import assemble_global_matrices
-from .exceptions import TrussError
+from .exceptions import InputIgnoredWarning, TrussError
 from .fileio import load_json
 from .graph_validation import TopologyValidationError, structural_report
 from .model import Element, Node, validate_inputs
@@ -106,6 +107,193 @@ def _get(d: dict[str, Any], key: str, default: Any = None) -> Any:
     """Get value from dict, tolerating keys with trailing spaces."""
     nd = _normalize_dict(d)
     return nd.get(key, default)
+
+
+def _resolve_element_field(
+    raw: dict[str, Any], key: str, aliases: tuple[str, ...] = ()
+) -> tuple[Any, str | None]:
+    """Resolve one element field from the top level or the ``properties`` block.
+
+    Precedence is **top level first, then ``properties``**. The top-level key
+    is the documented, generated-model location, so it wins; ``properties``
+    is honoured as a nested fallback so that hand-written models which group
+    section data there are not silently reduced to ``I_sec = 0``.
+
+    Parameters
+    ----------
+    raw : dict[str, Any]
+        Raw element payload.
+    key : str
+        Canonical field name, e.g. ``"I_sec"``.
+    aliases : tuple[str, ...], optional
+        Additional accepted spellings, tried in order at each level.
+
+    Returns
+    -------
+    tuple[Any, str or None]
+        The resolved value (``None`` when absent everywhere) and a warning
+        message if the two levels disagreed. A disagreement is reported rather
+        than resolved silently: ``I_sec`` controls buckling capacity, so a
+        factor-of-100 ambiguity between two locations in the same element must
+        not pass unnoticed.
+    """
+    props = _get(raw, "properties", {}) or {}
+    if not isinstance(props, dict):
+        props = {}
+
+    candidates = (key, *aliases)
+    top_val, top_key = None, None
+    for cand in candidates:
+        val = _get(raw, cand)
+        if val is not None:
+            top_val, top_key = val, cand
+            break
+
+    prop_val, prop_key = None, None
+    for cand in candidates:
+        val = _get(props, cand)
+        if val is not None:
+            prop_val, prop_key = val, cand
+            break
+
+    if top_val is None:
+        return prop_val, None
+    if prop_val is None:
+        return top_val, None
+
+    # Both present: top level wins, but flag a material disagreement.
+    try:
+        disagree = abs(float(top_val) - float(prop_val)) > 1e-9 * max(
+            abs(float(top_val)), abs(float(prop_val)), 1.0
+        )
+    except (TypeError, ValueError):
+        disagree = top_val != prop_val
+
+    if not disagree:
+        return top_val, None
+
+    eid = _get(raw, "id", "?")
+    return top_val, (
+        f"element {eid}: '{top_key}'={top_val!r} at top level conflicts with "
+        f"properties.{prop_key}={prop_val!r}; using the top-level value"
+    )
+
+
+#: Element payload keys that the parser understands. Anything else is reported
+#: so that a typo (``"I_Sec"``, ``"density "``, ``"f_y"``) cannot silently
+#: reduce to a default.
+_KNOWN_ELEMENT_KEYS = frozenset(
+    {
+        "id",
+        "node_i",
+        "node_j",
+        "E",
+        "A",
+        "I_sec",
+        "I",
+        "alpha",
+        "delta_T",
+        "delta_L_free",
+        "delta_L0",
+        "density",
+        "rho",
+        "effective_length_factor",
+        "k_factor",
+        "section_type",
+        "properties",
+    }
+)
+
+
+def _parse_model(
+    data: dict[str, Any], unit_sys_default: str = "SI"
+) -> tuple[list[Node], list[Element], str]:
+    """Build SI-unit node/element objects from a raw input dictionary.
+
+    Section and stability fields are resolved through
+    :func:`_resolve_element_field`, which honours a nested ``properties``
+    block as a fallback and warns when it disagrees with the top level.
+    ``effective_length_factor`` and ``density`` are now read into the
+    :class:`~truss_analysis.model.Element`; previously both were accepted in
+    the schema, documented in the README, and then dropped — so a user
+    supplying ``K = 0.7`` silently received a pin-ended ``K = 1`` buckling
+    check that contradicted the fire limit-state path in
+    :mod:`truss_analysis.limitstates`, which did use ``K``.
+
+    Parameters
+    ----------
+    data : dict[str, Any]
+        Raw JSON payload with ``"nodes"`` and ``"elements"`` keys.
+    unit_sys_default : str, optional
+        Unit system used when the payload does not declare ``"units"``.
+
+    Returns
+    -------
+    tuple[list[Node], list[Element], str]
+        Parsed nodes, parsed elements and the effective unit system.
+
+    Warns
+    -----
+    InputIgnoredWarning
+        When an element carries a key the parser does not understand, or when
+        the top-level and ``properties`` values of one field disagree.
+    """
+    unit_sys = data.get("units", unit_sys_default)
+    nodes = [
+        Node(
+            id=str(_get(n, "id")),
+            x=to_si(_get(n, "x"), unit_sys, "L"),
+            y=to_si(_get(n, "y"), unit_sys, "L"),
+            is_support=bool(_get(n, "is_support", False)),
+            support_dx=bool(_get(n, "support_dx", False)),
+            support_dy=bool(_get(n, "support_dy", False)),
+        )
+        for n in data["nodes"]
+    ]
+
+    conflicts: list[str] = []
+    unknown: list[str] = []
+    elements: list[Element] = []
+    for e in data["elements"]:
+        i_sec, warn = _resolve_element_field(e, "I_sec", ("I",))
+        if warn:
+            conflicts.append(warn)
+        k_fac, warn = _resolve_element_field(
+            e, "effective_length_factor", ("k_factor",)
+        )
+        if warn:
+            conflicts.append(warn)
+        density, warn = _resolve_element_field(e, "density", ("rho",))
+        if warn:
+            conflicts.append(warn)
+
+        eid = str(_get(e, "id"))
+        for key in _normalize_dict(e):
+            if key not in _KNOWN_ELEMENT_KEYS:
+                unknown.append(f"element {eid}: unrecognised key '{key}'")
+
+        elements.append(
+            Element(
+                id=eid,
+                node_i=str(_get(e, "node_i")),
+                node_j=str(_get(e, "node_j")),
+                E=to_si(_get(e, "E"), unit_sys, "E"),
+                A=to_si(_get(e, "A"), unit_sys, "A"),
+                I_sec=to_si(float(i_sec or 0.0), unit_sys, "I_sec"),
+                alpha=to_si(_get(e, "alpha", 0.0), unit_sys, "alpha"),
+                delta_T=to_si(_get(e, "delta_T", 0.0), unit_sys, "delta_T"),
+                delta_L_free=to_si(
+                    _get(e, "delta_L_free", _get(e, "delta_L0", 0.0)), unit_sys, "L"
+                ),
+                density=to_si(float(density or 0.0), unit_sys, "density"),
+                effective_length_factor=float(k_fac if k_fac is not None else 1.0),
+            )
+        )
+
+    for msg in (*conflicts, *unknown):
+        warnings.warn(msg, InputIgnoredWarning, stacklevel=3)
+
+    return nodes, elements, unit_sys
 
 
 @dataclass
@@ -201,54 +389,6 @@ def _write_markdown(result: AnalysisResult, path: str) -> None:
     Path(path).write_text("\n".join(lines), encoding="utf-8")
 
 
-def _parse_model(
-    data: dict[str, Any], unit_sys_default: str = "SI"
-) -> tuple[list[Node], list[Element], str]:
-    """Build SI-unit node/element objects from a raw input dictionary.
-
-    Parameters
-    ----------
-    data : dict[str, Any]
-        Raw JSON payload with ``"nodes"`` and ``"elements"`` keys.
-    unit_sys_default : str, optional
-        Unit system used when the payload does not declare ``"units"``.
-
-    Returns
-    -------
-    tuple[list[Node], list[Element], str]
-        Parsed nodes, parsed elements and the effective unit system.
-    """
-    unit_sys = data.get("units", unit_sys_default)
-    nodes = [
-        Node(
-            id=str(_get(n, "id")),
-            x=to_si(_get(n, "x"), unit_sys, "L"),
-            y=to_si(_get(n, "y"), unit_sys, "L"),
-            is_support=bool(_get(n, "is_support", False)),
-            support_dx=bool(_get(n, "support_dx", False)),
-            support_dy=bool(_get(n, "support_dy", False)),
-        )
-        for n in data["nodes"]
-    ]
-    elements = [
-        Element(
-            id=str(_get(e, "id")),
-            node_i=str(_get(e, "node_i")),
-            node_j=str(_get(e, "node_j")),
-            E=to_si(_get(e, "E"), unit_sys, "E"),
-            A=to_si(_get(e, "A"), unit_sys, "A"),
-            I_sec=to_si(_get(e, "I_sec", _get(e, "I", 0.0)), unit_sys, "I_sec"),
-            alpha=to_si(_get(e, "alpha", 0.0), unit_sys, "alpha"),
-            delta_T=to_si(_get(e, "delta_T", 0.0), unit_sys, "delta_T"),
-            delta_L_free=to_si(
-                _get(e, "delta_L_free", _get(e, "delta_L0", 0.0)), unit_sys, "L"
-            ),
-        )
-        for e in data["elements"]
-    ]
-    return nodes, elements, unit_sys
-
-
 def run(
     filepath: str | Path,
     unit_sys: str = "SI",
@@ -308,11 +448,18 @@ def run(
         F_mechanical[2 * idx + 1] += fy
         applied_loads.append({"node_id": nid, "Fx": fx, "Fy": fy})
 
-    # Optional self-weight via per-element density rho [kg/m^3]
-    raw_elems = {str(_get(e, "id")): e for e in data["elements"]}
+    # Optional self-weight from the element mass density [kg/m^3].
+    #
+    # Density is read from the parsed Element rather than the raw payload: the
+    # parser has already resolved the `density`/`rho` aliases and applied the
+    # unit conversion, so an Imperial input is handled correctly. Reading the
+    # raw key here bypassed to_si() entirely and silently produced a
+    # self-weight in the wrong units for any non-SI model, while also leaving
+    # Element.density permanently at its default -- two API surfaces for one
+    # physical quantity, only one of which was live.
     weight_per_node: dict[int, float] = {}
     for elem in elements:
-        rho = float(_get(raw_elems.get(elem.id, {}), "rho", 0.0) or 0.0)
+        rho = elem.density
         if rho <= 0.0:
             continue
         i, j = node_map[elem.node_i], node_map[elem.node_j]
