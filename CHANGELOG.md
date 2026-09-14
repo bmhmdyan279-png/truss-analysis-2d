@@ -197,4 +197,3 @@ a warning.
 
 - Expanded test suite and type annotations
 - Broadened CI matrix
-
