@@ -264,6 +264,16 @@ class UniformForceScan:
     the difference between ``O(grid * n^3)`` and ``O(n^3)`` on the hot paths
     of the retrofit triage.
 
+    Scope limit
+    -----------
+    Exact solver for the **special case of a uniform scalar stiffness
+    degradation only**: one shared factor ``s(T)`` must scale every member's
+    modulus (``E_e(T) = s(T) E_e`` -- one material law, one temperature for
+    all members). Per-member materials, protection or temperature histories
+    break ``K(T) = s(T) K_0``, and those scenarios must fall back to the
+    per-point :func:`~truss_analysis.criticality.engine.build_engine`
+    rebuild. This is not a generic thermal-scan engine.
+
     Attributes
     ----------
     ids : tuple[str, ...]

@@ -7,6 +7,179 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.7.0] — 2026-09-15
+
+This release closes the fourth external audit round (six independent
+audits). Every concrete finding was **reproduced against `06de4a8` before
+being fixed**, and each fix carries a pinning test; findings that did not
+reproduce are recorded under *Changed* with the measurement. Items that **alter reported numbers**
+are marked ⚠ and collected at the end under *Behaviour changes*.
+
+### Fixed
+
+- ⚠ **The DDM sensitivity in `sensitivity.py` differentiated the wrong
+  elongation** (critic 5, finding 1 — reproduced). The member area `A_i`
+  enters the solved system through *two* channels: the stiffness
+  `k_i = E_i A_i / L_i` **and** the imposed-force term
+  `F_pre,i = k_i dL_pre,i b_i` that the assembler puts on the right-hand
+  side. Differentiating only `K` left the adjoint numerator as the *total*
+  elongation `b_i^T U_f` instead of the *mechanical* elongation
+  `b_i^T U_f - dL_pre,i = N_i / k_i` — the same convention the criticality
+  engine's rank-1 numerator has used since 2.6.0. Reproduced on a three-bar
+  redundant model with one heated member: the reported sensitivity was
+  `-2.485` where the central difference gives `+1.4467e-2` — wrong sign,
+  ~170x wrong magnitude. After the fix the DDM matches central differences
+  to seven digits in both the heated and the cold case
+  (`test_ddm_matches_central_finite_difference`). Models without imposed
+  strain are bit-for-bit unchanged.
+- ⚠ **The Gaussian copula fed the Spearman target straight into the
+  Cholesky** (critic 1, finding 2 — reproduced). By Kruskal's theorem,
+  normals with Pearson correlation `rho_P` carry rank correlation
+  `rho_S = (6/pi) arcsin(rho_P / 2)`; injecting the target directly made the
+  *realised* rank correlation the Kruskal image of the target — a systematic
+  contraction (target 0.70 realised 0.682; 0.90 realised 0.891) biasing every
+  correlated reliability draw. `gaussian_copula_correlate` now inverts the
+  relation (`rho_P = 2 sin((pi/6) rho_S)`, diagonal pinned to 1) before the
+  factorisation; the realised `rho_S` reproduces the target within sampling
+  noise (0.70 -> 0.6992 at n = 2e5). An indefinite target raises `ValueError`
+  naming the mapping instead of a bare `LinAlgError`.
+- ⚠ **`ci_two_component` referenced the DCR component to the COLD structure**
+  (critic 3, P0 — reproduced). `docs/theory.md` 5.2 defines the baseline as
+  "the undamaged structure at the same temperature field", and the index is a
+  damage counterfactual; the code instead divided by the 20 degC DCR "so that
+  temperature degradation does NOT cancel out". Exposing test: at `alpha = 1`
+  — no perturbation at all — a 600 degC redundant truss reported
+  `dcr_component ~ +2.1` with `governing = buckling`, i.e. fire degradation
+  masquerading as damage criticality, contaminating `governing` and every
+  ranking built on `ci_values`. The two effects are now separated and
+  reported explicitly: `dcr_component = DCR_pert(T)/DCR_base(T) - 1`
+  (exactly 0 at `alpha = 1`), a new `fire_component =
+  DCR_base(T)/DCR_base(20) - 1` (independent of `alpha`), and a new
+  `dcr_combined = (1 + dcr)(1 + fire) - 1` which is bit-for-bit the legacy
+  cold-referenced ratio for triage contexts that want both effects in one
+  explicit number. The composite `ci = max(u_component, dcr_component)` is
+  pure criticality. `theory.md` 5.2 carries the derivation; the MC ladders
+  and the probabilistic ranking now build their fire-responsive statistic
+  from `max(u_component, dcr_combined)` explicitly, with their estimands
+  re-documented.
+- **The Sherman-Morrison guard used a fixed `1e-8` threshold** (critic 1,
+  finding 4 — mechanism confirmed analytically). The round-off level of
+  `denom = 1 + Delta_i d_i` is `~ cond(K_ff) * eps`; at `cond = 1e8` that is
+  `~2e-8`, above the fixed threshold, so a healthy member of an
+  ill-conditioned structure divided by a ~20%-contaminated denominator and
+  emitted a silently inaccurate rank-1 CI instead of routing to the exact
+  brute-force solve. `build_engine` now estimates `cond` from the LU factors
+  it already computed (LAPACK `dgecon`, `O(n^2)`, no extra factorisation) and
+  `EngineSetup` carries
+  `guard_tol = min(max(1e-8, 100 cond eps), 1e-4)`; `ci_sweep` uses it unless
+  the caller overrides. The cap trades brute-force time, never accuracy
+  (guarded members are re-solved exactly), and `denom >= alpha`
+  mathematically bounds healthy members away from any `tol <= alpha`.
+  Reproduced before the fix (`denom ~ 1e-7` at `cond ~ 1e8` passed unflagged);
+  now flagged, routed, and equal to the exact solve bit-for-bit
+  (`tests/test_guard_tolerance.py`, 5 tests).
+- **`member_critical_temperature` linearly interpolated a curved `DCR(T)`**
+  across a 25 degC cell while its docstring claimed "root-found" (critic 3,
+  P1). It now brackets on the grid and bisects on exact
+  `UniformForceScan.forces_at` evaluations — `O(m)` each, so the
+  one-factorisation-per-scan guarantee is untouched (the decomposition-count
+  test stays green) — down to `1e-3` degC, and returns the upper bracket end,
+  making `DCR(theta) >= 1` true by construction: conservative by at most the
+  tolerance, with no guarantee-free interpolation error of up to a grid step.
+  Pinned two-sided through the independent `dcr_field` path.
+- **The zero-stiffness endpoint crashed the temperature scans** (critic 3,
+  P1 — path hardened). A grid point with `k_E(T) <= 0` (the Eurocode
+  zero-stiffness endpoint at 1200 degC) raised `MechanismError` out of the
+  middle of a scan. It is now modelled as what it physically is — failure by
+  collapse at that point: `system_critical_temperature` returns the last safe
+  temperature, `member_critical_temperature` converges to the endpoint. With
+  the real Eurocode law the capacity collapse at 1100 degC fires first, so
+  this only affects custom grids and direct `forces_at` users; both are
+  covered by tests.
+
+### Changed
+
+- **`system_critical_temperature`'s definition is now explicit** (critic 3,
+  P1 — documentation defect, code correct). The docstring said "highest
+  scanned temperature with no member at DCR >= 1", which read over the WHOLE
+  grid and contradicted the first-failure algorithm whenever `DCR(T)` is
+  non-monotone. The algorithm is right for a heating fire: once a member
+  crosses `DCR = 1` at `T*` it has failed at `T*`, whatever redistribution
+  does above it. θ_sys is now documented as the first loss of acceptability
+  along the monotone heating path — the largest `T` such that every scanned
+  point up to `T` is safe. **No numerical change.**
+- **`UniformForceScan` is documented as an exact solver for the special case
+  of uniform scalar stiffness degradation only** (critics 3 and 5): one
+  shared factor `s(T)` must scale every member's modulus (one material law,
+  one temperature for all members). Per-member materials, protection or
+  temperature histories break `K(T) = s(T) K_0` and must fall back to the
+  per-point engine rebuild. It is not a generic thermal-scan engine, and the
+  class docstring now says so.
+- **The `O(N)` `list.index()` anti-pattern is gone from `sensitivity.py`**
+  (critic 1, finding 1): the 4M-iteration compatibility-assembly loop and the
+  per-member critical-DOF resolution now use an `O(1)` dict mapping, and the
+  `next(n for n in nodes ...)` scans in `_limit_states_from_forces` /
+  `_length` were replaced the same way.
+- **The sparse free-DOF extraction in `solver.py` stays `np.ix_`, with the
+  measurement on record** (critic 1, finding 3 — claim did not reproduce).
+  SciPy dispatches array-x-array indexing on CSC/CSR to its C++ IndexMixin,
+  not Python loops; measured on a 40k-node band truss (80k DOF, 480k nnz) the
+  slice costs ~12 ms against the seconds-scale SuperLU factorisation of the
+  same matrix — well under 1% of the solve. The proposed second assembly
+  path (building `K_ff` directly at element level) is not worth its
+  synchronisation risk against `assembly.py`; the comment in `solver.py`
+  records the numbers.
+- **`lambda_bar_theta` was verified to be built from `E(theta)`** (critic 5,
+  finding 4 — did not reproduce; the code was already correct) and is now
+  pinned by regression: `lambda_bar(theta)/lambda_bar(20) = sqrt(k_y/k_E)`
+  against the closed form, the absolute value against a hand-built `N_cr`
+  from `k_E(theta) E`, plus an explicit not-the-ambient-modulus guard.
+
+### Added
+
+- **Cross-path demand invariants** (critic 5, finding 2):
+  `tests/test_cross_path_demand.py` pins that the full public pipeline
+  (JSON -> `run()` -> dense block assembler) and the limit-state chain
+  (rank-1 engine) report the same member forces on a redundant heated model
+  with restrained expansion *and* fabrication strain — two assemblers that
+  share no code — and that the `ReactionInfluence` reactions close globally
+  against the mechanical load in both directions (critic 5, finding 6).
+- 22 new tests total (521 vs 499), covering every fix above: DDM vs central
+  differences (heated/cold), copula target fidelity (negative, 3x3,
+  indefinite, marginal preservation, spec-level path), the `alpha = 1`
+  exposure case, fire/damage component isolation on determinate and
+  redundant frames, bisection bracketing, collapse endpoint, and guard
+  routing.
+
+### Behaviour changes ⚠
+
+Numbers published before 2.7.0 change as follows (each traced to a
+reproduced defect — none is a refactoring side effect):
+
+1. **`ci_two_component` on heated models**: `dcr_component`, the composite
+   `ci` and `governing` now measure the damage counterfactual at the fire
+   state; the legacy cold-referenced ratio is exactly `dcr_combined`.
+   Ambient-temperature models are unchanged (at `T = 20` the two baselines
+   coincide). Consumers that need the legacy composite build
+   `max(u_component, dcr_combined)` — the MC tests do.
+2. **Correlated sampling**: for the same seed, `gaussian_copula_correlate`
+   and `sample_spec_matrix(..., correlation=...)` draws change so that the
+   realised rank correlation equals the target instead of its Kruskal image.
+3. **`IndependentValidator.compute_all`**: `ddm_sensitivity` values change
+   for models with imposed (thermal/fabrication) strain — they were wrong
+   (wrong sign possible); cold models are bit-for-bit unchanged.
+4. **`member_critical_temperature`**: returns the bisected crossing
+   (conservative upper end, `<= 1e-3` degC above the true first crossing of
+   the bracketed cell) instead of a linear interpolation that could land on
+   either side by up to a grid step. `system_critical_temperature` is
+   numerically unchanged.
+5. **`EngineSetup`** gains a `guard_tol` field (default `GUARD_TOL`, so
+   direct constructions keep working); `ci_sweep`'s `guard_tol` parameter
+   now defaults to `None` = "use the setup's adaptive value" — an explicit
+   float still overrides, and results only change where the old fixed
+   threshold was below the round-off band of an ill-conditioned `denom`,
+   i.e. exactly where the old numbers were noise.
+
 ## [2.6.0] — 2026-09-15
 
 This release is the outcome of a nine-part external technical audit of the
