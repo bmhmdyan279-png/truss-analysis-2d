@@ -284,3 +284,66 @@ def test_dcr_field_on_campaign_truss(campaign) -> None:
         assert st.dcr >= 0.0
         if not st.compression:
             assert st.p_cr is None
+
+
+def test_member_critical_temperature_brackets_the_crossing_tightly() -> None:
+    """Bisection, not linear interpolation: a two-sided pin on the root.
+
+    The returned temperature must sit ON the failure side (DCR >= 1, by the
+    conservative upper-end convention) and one tolerance-step below it must
+    still be safe -- verified through ``dcr_field``, i.e. through the
+    independent per-point engine path, not the UniformForceScan the root
+    finder itself uses. Pre-2.7 the crossing was linearly interpolated
+    across a 25 degC cell of a curved DCR(T), with no guarantee on which
+    side of the true root the answer landed.
+    """
+    nodes, elements, loads = _column()
+    theta = member_critical_temperature(nodes, elements, loads, "c", F_Y)
+    assert theta is not None
+    at_theta = dcr_field(nodes, elements, loads, _uniform(elements, theta), F_Y)["c"]
+    assert at_theta.dcr >= 1.0 - 1e-9
+    below = dcr_field(nodes, elements, loads, _uniform(elements, theta - 0.05), F_Y)[
+        "c"
+    ]
+    assert below.dcr < 1.0
+    # and the answer stays inside the grid cell the coarse scan bracketed
+    grid = tuple(range(20, 1201, 25))
+    coarse = next(
+        t
+        for t in grid
+        if dcr_field(nodes, elements, loads, _uniform(elements, float(t)), F_Y)["c"].dcr
+        >= 1.0
+    )
+    assert coarse - 25.0 < theta <= coarse
+
+
+def test_zero_stiffness_endpoint_counts_as_collapse(monkeypatch) -> None:
+    """A grid point with k_E(T) <= 0 is failure-by-collapse, not a crash.
+
+    With the real Eurocode law the scan always fails through k_y = 0 first
+    (capacity gone at 1100 degC), so the zero-stiffness endpoint at
+    1200 degC is only reachable with a capacity law that survives it; the
+    monkeypatched k_y isolates exactly that MechanismError path. Pre-2.7 the
+    error escaped from the middle of the scan.
+    """
+    import truss_analysis.limitstates as ls
+
+    monkeypatch.setattr(ls, "eurocode_k_y", lambda theta: 1.0)
+    # determinate tie in constant tension: force is temperature-invariant,
+    # capacity (patched) never falls -> the scan survives to 1195 degC
+    nodes = [
+        Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="2", x=3.0, y=0.0, is_support=True, support_dy=True),
+    ]
+    elements = [Element(id="t", node_i="1", node_j="2", E=E, A=0.01, I_sec=1e-6)]
+    loads = {"2": {"Fx": 50.0e3, "Fy": 0.0}}
+    grid = (20.0, 600.0, 1195.0, 1200.0)
+
+    theta_sys = system_critical_temperature(nodes, elements, loads, F_Y, grid)
+    assert theta_sys == 1195.0  # collapse AT 1200 counts as failure there
+
+    theta_m = member_critical_temperature(
+        nodes, elements, loads, "t", F_Y, temp_grid=grid
+    )
+    assert theta_m is not None
+    assert theta_m == pytest.approx(1200.0, abs=0.01)

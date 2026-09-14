@@ -29,6 +29,7 @@ from enum import Enum
 import numpy as np
 
 from .criticality.engine import (
+    MechanismError,
     base_displacement,
     build_engine,
     ci_sweep,
@@ -69,6 +70,16 @@ GAMMA_M_FIRE = 1.0
 
 _DCR_BASE_TOL = 1e-12
 _TEMP_GRID = tuple(range(20, 1201, 25))
+
+#: Bisection refinement of a bracketed DCR = 1 crossing: the interval is
+#: halved on exact ``UniformForceScan.forces_at`` evaluations (O(m) each, no
+#: refactorisation) until it is at most ``_BISECT_XTOL`` degC wide. The
+#: returned temperature is the upper end, so ``DCR(theta) >= 1`` holds by
+#: construction -- the reported crossing is conservative by at most the
+#: tolerance instead of carrying a linear-interpolation error of the whole
+#: grid step on a curved DCR(T).
+_BISECT_XTOL = 1e-3
+_BISECT_MAX_ITER = 60
 
 #: Default flexural buckling curve. Curve ``c`` suits the thin-walled and
 #: cold-formed hollow sections this library idealises, and is the
@@ -467,9 +478,10 @@ def _limit_states_from_forces(
     of rebuilding the engine at every grid point.
     """
     out: dict[str, MemberLimitState] = {}
+    node_by_id = {n.id: n for n in nodes}
     for e in elements:
-        ni = next(n for n in nodes if n.id == e.node_i)
-        nj = next(n for n in nodes if n.id == e.node_j)
+        ni = node_by_id[e.node_i]
+        nj = node_by_id[e.node_j]
         length = float(np.hypot(nj.x - ni.x, nj.y - ni.y))
         out[e.id] = _member_limit_state(
             e.id,
@@ -536,16 +548,29 @@ def member_critical_temperature(
 ) -> float | None:
     """Smallest uniform temperature at which ``DCR_member >= 1``.
 
-    Root-found by scanning the discrete reduction curves and linearly
-    interpolating the DCR = 1 crossing between grid points.  ``None`` when the
-    member never reaches DCR = 1 within [20, 1200] degC.
+    Root-found in two stages: the grid locates the first bracket
+    ``[T_k, T_k+1]`` with ``DCR(T_k) < 1 <= DCR(T_k+1)``, then bisection on
+    exact :meth:`UniformForceScan.forces_at` evaluations (``O(m)`` each --
+    no refactorisation, no interpolation of a curved ``DCR(T)``) narrows the
+    crossing to ``_BISECT_XTOL`` degC.  The upper end of the final bracket
+    is returned, so ``DCR(theta) >= 1`` holds by construction: the report is
+    conservative by at most the tolerance.  If ``DCR(T)`` crosses several
+    times inside one grid cell, the crossing found is the one bisection
+    converges to inside the FIRST failing cell -- the grid resolution still
+    defines which cell that is.  ``None`` when the member never reaches
+    DCR = 1 within the grid range.
+
+    A grid point where the material law has lost all stiffness
+    (``k_E(T) <= 0``, the Eurocode endpoint at 1200 degC) is treated as
+    ``DCR = +inf`` -- failure by collapse -- instead of propagating
+    :class:`MechanismError` out of the middle of the scan.
 
     Because ``lambda_bar_theta`` grows as ``k_E`` falls faster than ``k_y``,
     the reported critical temperature depends on the compression capacity
     model; see :class:`BucklingModel`.
 
     The whole grid is served by ONE ambient factorisation through
-    :class:`UniformForceScan`: at each grid point the exact member forces
+    :class:`UniformForceScan`: at each evaluation the exact member forces
     (including restrained thermal expansion) are ``O(m)`` arithmetic, not a
     fresh ``O(n^3)`` engine build.
     """
@@ -553,11 +578,15 @@ def member_critical_temperature(
     if member_id not in scan.ids:
         msg = f"member_critical_temperature: unknown member {member_id!r}"
         raise KeyError(msg)
-    prev_t: float | None = None
-    prev_dcr: float | None = None
-    for t in temp_grid:
-        forces = scan.forces_at(t)
-        temps_t = {eid: float(t) for eid in scan.ids}
+
+    def dcr_at(temp: float) -> float:
+        try:
+            forces = scan.forces_at(temp)
+        except MechanismError:
+            # k_E(T) <= 0: zero stiffness is structural collapse, i.e. the
+            # failure side of the DCR = 1 crossing, not a scan error.
+            return float("inf")
+        temps_t = {eid: temp for eid in scan.ids}
         state = _limit_states_from_forces(
             nodes,
             elements,
@@ -567,14 +596,25 @@ def member_critical_temperature(
             buckling_model,
             buckling_curve,
         )[member_id]
-        dcr = state.dcr
-        if dcr >= 1.0:
-            if prev_t is None or prev_dcr is None:
-                return float(t)
-            denom = dcr - prev_dcr
-            frac = (1.0 - prev_dcr) / denom if denom > 0 else 0.0
-            return float(prev_t + frac * (t - prev_t))
-        prev_t, prev_dcr = float(t), dcr
+        return state.dcr
+
+    prev_t: float | None = None
+    for t in temp_grid:
+        t_f = float(t)
+        if dcr_at(t_f) >= 1.0:
+            if prev_t is None:
+                return t_f
+            lo, hi = prev_t, t_f  # DCR(lo) < 1 <= DCR(hi)
+            for _ in range(_BISECT_MAX_ITER):
+                if hi - lo <= _BISECT_XTOL:
+                    break
+                mid = 0.5 * (lo + hi)
+                if dcr_at(mid) >= 1.0:
+                    hi = mid
+                else:
+                    lo = mid
+            return hi
+        prev_t = t_f
     return None
 
 
@@ -587,12 +627,29 @@ def system_critical_temperature(
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> float:
-    """Highest scanned uniform temperature with no member at DCR >= 1.
+    """First loss of acceptability along the monotone heating path.
 
-    Grid-based by construction (DCR(T) is not monotone because forces
-    redistribute as stiffnesses degrade); the resolution is the grid step.
-    Returns ``temp_grid[0]`` when even the coldest scan already fails and
-    ``temp_grid[-1]`` when nothing fails within the range.
+    Precisely: the largest grid temperature ``T`` such that EVERY scanned
+    point up to and including ``T`` is safe (no member at ``DCR >= 1``).
+    ``DCR(T)`` is **not** monotone -- forces redistribute as stiffnesses
+    degrade -- so a grid point above a failure can look safe again; such
+    post-failure "recovery" does NOT make the structure acceptable, because
+    a standard fire only heats: once some member crosses ``DCR = 1`` at
+    ``T*``, it has failed at ``T*`` whatever redistribution does above it.
+    The scan therefore stops at the first failing grid point and returns the
+    last safe one. (Pre-2.7 the docstring said "highest scanned temperature
+    with no member at DCR >= 1", which read over the WHOLE grid and
+    contradicted the first-failure algorithm -- the round-4 audit asked for
+    the definition to be made explicit; this is it.)
+
+    A grid point where the material law has lost all stiffness
+    (``k_E(T) <= 0``, the Eurocode endpoint at 1200 degC) counts as failure
+    by collapse at that point instead of raising :class:`MechanismError` out
+    of the middle of the scan.
+
+    Returns ``temp_grid[0]`` when even the coldest scan already fails (or
+    collapses) and ``temp_grid[-1]`` when nothing fails within the range;
+    the resolution is the grid step.
 
     Like :func:`member_critical_temperature`, the grid is evaluated from a
     single :class:`UniformForceScan` factorisation, which is what keeps the
@@ -601,7 +658,11 @@ def system_critical_temperature(
     scan = UniformForceScan.build(nodes, elements, loads)
     last_safe = float(temp_grid[0])
     for t in temp_grid:
-        forces = scan.forces_at(t)
+        try:
+            forces = scan.forces_at(t)
+        except MechanismError:
+            # k_E(T) <= 0: zero-stiffness endpoint == collapse == failure.
+            return last_safe
         temps_t = {eid: float(t) for eid in scan.ids}
         states = _limit_states_from_forces(
             nodes,
@@ -754,6 +815,7 @@ def ci_two_component(
 
 
 def _length(nodes: Sequence[Node], elem: Element) -> float:
-    ni = next(n for n in nodes if n.id == elem.node_i)
-    nj = next(n for n in nodes if n.id == elem.node_j)
+    node_by_id = {n.id: n for n in nodes}
+    ni = node_by_id[elem.node_i]
+    nj = node_by_id[elem.node_j]
     return float(np.hypot(nj.x - ni.x, nj.y - ni.y))
