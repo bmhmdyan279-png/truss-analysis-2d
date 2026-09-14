@@ -141,7 +141,11 @@ extend-ignore-names = [
 [tool.ruff.lint.per-file-ignores]
 # Tests are named descriptively; docstrings are not enforced on them.
 # N802 exemption: two test names embed the Eurocode symbol `k_E` verbatim.
-"tests/**" = ["D", "N802"]
+# N806 exemption: tests assert on the same structural-mechanics symbols that
+# src/ is allowed to use verbatim (K, U, F, B, delta_L, ...). Renaming them to
+# snake_case inside a test would make the assertion harder to read than the
+# formula it checks.
+"tests/**" = ["D", "N802", "N806"]
 # Repository utility scripts: same documentation exemption, pytest-style
 # rules do not apply, and mechanics/Greek notation is kept verbatim.
 "scripts/**" = ["D", "PT", "N806", "RUF001", "RUF002", "RUF003"]

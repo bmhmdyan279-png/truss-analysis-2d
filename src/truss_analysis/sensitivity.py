@@ -40,13 +40,25 @@ class SensitivityResult:
         Derivative of the maximum nodal displacement magnitude with
         respect to the member area, ``d(|u|_max)/dA_i`` [m per m^2].
     strain_energy : float
-        Member strain energy ``0.5 * u_e^T k_e u_e`` [J], clipped at zero
-        against negative floating-point round-off.
+        **Mechanical** member strain energy ``0.5 * k * delta_L_mech^2`` [J],
+        where ``delta_L_mech = delta_L_total - delta_L_prestress``. This is the
+        energy actually stored as stress. Clipped at zero against negative
+        floating-point round-off.
+    strain_energy_total : float
+        ``0.5 * u_e^T k_e u_e = 0.5 * k * delta_L_total^2`` [J], i.e. the
+        quadratic form over the *total* elongation including imposed
+        (thermal / fabrication) strain. Retained for cross-checking: the two
+        coincide exactly when the member carries no imposed strain, and they
+        differ precisely by the prestress contribution otherwise. A member
+        that expands freely has ``strain_energy = 0`` but a non-zero
+        ``delta_L_total``; a fully restrained heated member has
+        ``delta_L_total = 0`` but a large ``strain_energy``.
     """
 
     member_id: str
     ddm_sensitivity: float
     strain_energy: float
+    strain_energy_total: float = 0.0
 
 
 class IndependentValidator:
@@ -160,8 +172,16 @@ class IndependentValidator:
             c = dx / L
             s = dy / L
 
-            # 1. Strain energy in global coordinates: 0.5 * u_e^T k_e u_e
-            #    with k_e = (E A / L) * [direction dyadic pattern].
+            # 1. Strain energy. Two routes are computed and cross-checked:
+            #
+            #    (a) the full 4x4 quadratic form u_e^T k_e u_e in global
+            #        coordinates, which equals k * delta_L_total^2 because
+            #        k_e is the rank-1 dyad k * b b^T;
+            #    (b) the compatibility vector b dotted with u_e, giving
+            #        delta_L_total directly.
+            #
+            #    Agreement between them verifies the element matrix and the
+            #    DOF mapping independently of the assembler.
             k_e = (elem.E * elem.A / L) * np.array(
                 [
                     [c**2, c * s, -(c**2), -c * s],
@@ -180,11 +200,26 @@ class IndependentValidator:
                 ]
             )
 
+            k_axial = elem.E * elem.A / L
+            quad_total = float(u_e @ k_e @ u_e)  # == k * delta_L_total^2
+            delta_L_total = float(np.array([-c, -s, c, s]) @ u_e)
+
+            # The energy *stored* in the member comes only from the mechanical
+            # part of the elongation. The total elongation includes the imposed
+            # (thermal + fabrication) strain, which produces displacement
+            # without stress when the member is free to expand. Reporting
+            # 0.5 * u_e^T k_e u_e as the strain energy therefore overstated it
+            # whenever delta_T or delta_L_free was non-zero -- and understated
+            # it to exactly zero for a fully restrained heated bar, where the
+            # nodes do not move but the member is fully stressed.
+            delta_L_prestress = elem.alpha * elem.delta_T * L + elem.delta_L_free
+            delta_L_mech = delta_L_total - delta_L_prestress
+            raw_energy = 0.5 * k_axial * delta_L_mech**2
             # Strain energy is theoretically non-negative for stable
             # structures; max(0.0, ...) guards against floating-point
             # negative zeros from round-off.
-            raw_energy = 0.5 * float(u_e.T @ k_e @ u_e)
             strain_energy = max(0.0, raw_energy)
+            strain_energy_total = max(0.0, 0.5 * quad_total)
 
             # 2. DDM (adjoint formulation on free DOFs), with dK/dA = K_i / A
             z_i = z_mat[:, e_i]
@@ -213,6 +248,7 @@ class IndependentValidator:
                     member_id=str(elem.id),
                     ddm_sensitivity=dmax_sensitivity,
                     strain_energy=strain_energy,
+                    strain_energy_total=strain_energy_total,
                 )
             )
 
