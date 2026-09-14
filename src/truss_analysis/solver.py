@@ -280,12 +280,21 @@ def _solve_sparse(
         return np.asarray(spla.splu(sp.csc_matrix(K_ff)).solve(F_f))
     except RuntimeError as exc:
         # SciPy raises RuntimeError("Factor is exactly singular") rather than
-        # LinAlgError; translate it into the library's own error type.
-        if screened:
-            raise
+        # LinAlgError; translate it into the library's own error type ALWAYS.
+        # An earlier revision re-raised the raw RuntimeError when the SVD
+        # screen had passed, which leaked a SciPy message through the
+        # library's documented error contract: callers catching
+        # SingularMatrixError would miss it, and a screen pass followed by a
+        # factorisation failure is precisely the round-off-margin case that
+        # deserves the library's own diagnostic.
+        detail = (
+            " despite passing the SVD rank screen (round-off margin)"
+            if (screened)
+            else ""
+        )
         raise SingularMatrixError(
             f"Stiffness matrix is singular (mechanism detected); "
-            f"SuperLU could not factorise K_ff ({n_free} free DOFs)"
+            f"SuperLU could not factorise K_ff ({n_free} free DOFs){detail}"
         ) from exc
 
 

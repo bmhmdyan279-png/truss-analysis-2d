@@ -472,6 +472,7 @@ def run(
     use_sparse: bool | None = None,
     bc_method: str | None = None,
     penalty_value: float | None = None,
+    check_condition: bool = True,
 ) -> AnalysisResult:
     """Run the full analysis pipeline and return an AnalysisResult.
 
@@ -502,6 +503,15 @@ def run(
         ``bc_method="penalty"``. ``None`` takes the value from the model's
         ``options`` block; when absent there too, the solver derives a
         scale-aware penalty of ``1e10 * max(|diag(K)|)``.
+    check_condition : bool, default True
+        Run the SVD rank/conditioning screen before the elimination solve.
+        Callers solving the same topology repeatedly (temperature sweeps,
+        Monte Carlo, retrofit triage) should pass ``False`` and let Cholesky
+        act as the singularity gate, as the :func:`truss_analysis.solver.solve`
+        docstring recommends; the screen costs an ``O(n^3)`` decomposition
+        that dominates the solve itself. The penalty path never screens (its
+        inflated diagonal makes the generic warning meaningless) so this flag
+        only affects ``bc_method="elimination"``.
 
     Returns
     -------
@@ -590,7 +600,7 @@ def run(
             K, F_ext, fixed_dofs, penalty_value=penalty_eff
         )
     else:
-        U = solve(K, F_ext, fixed_dofs)
+        U = solve(K, F_ext, fixed_dofs, check_condition=check_condition)
     element_forces, strain_energy, prestress_work = calculate_element_forces(
         nodes, elements, U
     )

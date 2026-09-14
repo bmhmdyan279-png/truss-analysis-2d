@@ -140,3 +140,81 @@ def test_ddm_matches_central_finite_difference() -> None:
         ana = results[key].ddm_sensitivity
         assert ana is not None
         assert abs(ana - fd) < 1e-6 * max(1.0, abs(fd))
+
+
+# ---------------------------------------------------------------------
+# Sparse path: the library's own error contract (audit round 2, finding 4)
+# ---------------------------------------------------------------------
+
+
+def _singular_sparse_system():
+    """A sparse K_ff that is exactly singular (one free DOF, zero stiffness)."""
+    import scipy.sparse as sp
+
+    # Node 1 fully fixed, node 2 free but connected by a zero-stiffness
+    # member: K_ff = [[0]] -> SuperLU raises RuntimeError internally.
+    nodes = [
+        Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="2", x=1.0, y=0.0),
+    ]
+    K = sp.csr_matrix((2, 2))  # identically zero
+    F = np.array([0.0, 1.0])
+    return nodes, K, F
+
+
+def test_sparse_singular_unscreened_raises_library_error() -> None:
+    """check_condition=False: SuperLU failure must surface as SingularMatrixError."""
+    import scipy.sparse as sp
+
+    _nodes, K, F = _singular_sparse_system()
+    with pytest.raises(SingularMatrixError):
+        solve(K, F, [], check_condition=False)
+    assert sp.issparse(K)
+
+
+def test_sparse_singular_after_screen_raises_library_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even when the SVD screen passed, a SuperLU failure is translated.
+
+    An earlier revision re-raised the raw SciPy RuntimeError on the screened
+    path, leaking a foreign exception type through the library's documented
+    error contract.  Force the exact branch: stub the screen to report a
+    healthy matrix, then hand SuperLU a singular one.
+    """
+    import truss_analysis.solver as solver_mod
+    from truss_analysis.numerics import NumericalStatus
+
+    monkeypatch.setattr(
+        solver_mod,
+        "singular_value_screen",
+        lambda _k, _t: (1, 1.0, 1.0, NumericalStatus.STABLE),
+    )
+    _nodes, K, F = _singular_sparse_system()
+    with pytest.raises(SingularMatrixError) as excinfo:
+        solve(K, F, [], check_condition=True)
+    assert "SuperLU" in str(excinfo.value)
+    assert "SVD rank screen" in str(excinfo.value)
+
+
+def test_run_exposes_check_condition_flag(tmp_path) -> None:
+    """run(check_condition=False) skips the O(n^3) screen, same answer."""
+    import shutil
+    from pathlib import Path
+
+    from truss_analysis.main import run
+
+    src = Path(__file__).resolve().parents[1] / "examples" / "example1.json"
+    model = tmp_path / "model.json"
+    shutil.copy(src, model)
+
+    with_screen = run(model, quiet=True, check_condition=True)
+    without_screen = run(model, quiet=True, check_condition=False)
+    assert with_screen.status == without_screen.status == "SUCCESS"
+    for nid, rec in with_screen.displacements.items():
+        assert rec["ux"] == pytest.approx(
+            without_screen.displacements[nid]["ux"], rel=1e-12
+        )
+        assert rec["uy"] == pytest.approx(
+            without_screen.displacements[nid]["uy"], rel=1e-12
+        )

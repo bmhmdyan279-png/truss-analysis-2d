@@ -106,3 +106,41 @@ def test_no_solid_square_hollow_naming_anywhere() -> None:
         Path(__file__).resolve().parents[1] / "src" / "truss_analysis" / "sections.py"
     ).read_text(encoding="utf-8")
     assert "idealised" in sections
+
+
+# ---------------------------------------------------------------------
+# Fire imperfection factor is defined for curve c only
+# (EN 1993-1-2:2005 4.2.3.1(3); audit round 2, finding 5)
+# ---------------------------------------------------------------------
+
+
+def test_fire_reduction_on_curve_c_does_not_warn() -> None:
+    import warnings
+
+    from truss_analysis.sections import buckling_reduction_factor
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        chi = buckling_reduction_factor(0.8, "c", fire=True)
+    assert 0.0 < chi <= 1.0
+
+
+@pytest.mark.parametrize("curve", ["a0", "a", "b", "d"])
+def test_fire_reduction_off_curve_c_warns(curve: str) -> None:
+    from truss_analysis.exceptions import BucklingCheckWarning
+    from truss_analysis.sections import buckling_reduction_factor
+
+    with pytest.warns(BucklingCheckWarning, match="extrapolation beyond the code"):
+        chi = buckling_reduction_factor(0.8, curve, fire=True)
+    assert 0.0 < chi <= 1.0
+
+
+def test_ambient_curves_never_warn() -> None:
+    import warnings
+
+    from truss_analysis.sections import buckling_reduction_factor
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        for curve in ("a0", "a", "b", "c", "d"):
+            buckling_reduction_factor(0.8, curve, fire=False)

@@ -28,8 +28,11 @@ section approximation and is deliberately not used anywhere here.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
+
+from .exceptions import BucklingCheckWarning
 
 __all__ = [
     "BUCKLING_CURVE_ALPHA",
@@ -322,6 +325,17 @@ def buckling_reduction_factor(
     ------
     ValueError
         If ``curve`` is not a recognised buckling curve label.
+
+    Warns
+    -----
+    BucklingCheckWarning
+        If ``fire`` is set with a curve other than ``"c"``: the 0.65
+        imperfection reduction of EN 1993-1-2:2005 4.2.3.1(3) is defined for
+        buckling curve ``c`` (``alpha = 0.65 * 0.49``). Combining it with
+        another curve's imperfection factor (e.g. ``0.65 * 0.21`` for curve
+        ``a``) is an extrapolation no clause of the standard defines, so the
+        result is reported as such rather than silently presented as code
+        compliance.
     """
     try:
         alpha_c = BUCKLING_CURVE_ALPHA[curve]
@@ -329,6 +343,16 @@ def buckling_reduction_factor(
         known = ", ".join(sorted(BUCKLING_CURVE_ALPHA))
         msg = f"unknown buckling curve {curve!r}; expected one of {known}"
         raise ValueError(msg) from None
+
+    if fire and curve != "c":
+        warnings.warn(
+            f"EN 1993-1-2 4.2.3.1(3) defines the {FIRE_IMPERFECTION_FACTOR} "
+            f"imperfection reduction for buckling curve 'c'; fire=True with "
+            f"curve {curve!r} uses alpha = {FIRE_IMPERFECTION_FACTOR} * "
+            f"{alpha_c}, an extrapolation beyond the code",
+            BucklingCheckWarning,
+            stacklevel=2,
+        )
 
     if not math.isfinite(lambda_bar) or lambda_bar <= 0.0:
         # An infinitely slender member has no capacity; a stocky one cannot

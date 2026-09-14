@@ -117,17 +117,6 @@ def _to_objects(
     return nodes, elements
 
 
-def _fixed_dofs(nodes: list[Node]) -> list[int]:
-    fixed: list[int] = []
-    for i, node in enumerate(nodes):
-        if node.is_support:
-            if node.support_dx:
-                fixed.append(2 * i)
-            if node.support_dy:
-                fixed.append(2 * i + 1)
-    return fixed
-
-
 def _graph_checks(
     model: dict[str, Any],
 ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...], bool]:
