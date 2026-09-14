@@ -2,8 +2,9 @@
 
 Provides the stochastic input layer for screening (small Latin-hypercube
 designs) and Monte Carlo studies (larger sample counts) with **correlation
-support** via a Gaussian copula (Cholesky factor of the target
-rank-correlation matrix), deterministic seeds, and generation that is
+support** via a Gaussian copula (the target *rank* correlation is mapped to
+its normal-space Pearson equivalent through Kruskal's relation before the
+Cholesky factorisation), deterministic seeds, and generation that is
 independent of call order (every draw is a pure function of ``seed``).
 """
 
@@ -66,33 +67,62 @@ def latin_hypercube(n: int, dim: int, seed: int) -> np.ndarray:
 def gaussian_copula_correlate(u: np.ndarray, correlation: np.ndarray) -> np.ndarray:
     """Map independent uniforms to uniforms with a target rank correlation.
 
-    ``z = Phi^-1(u)``, ``z_c = L z`` with ``L = cholesky(correlation)``,
-    ``u_c = Phi(z_c)``. The target matrix is the correlation in normal
-    space (approximately the Spearman-type rank correlation of the output).
+    ``correlation`` is the target **Spearman (rank) correlation** of the
+    output. By Kruskal's theorem a bivariate normal with Pearson correlation
+    ``rho_P`` has Spearman correlation ``rho_S = (6/pi) arcsin(rho_P / 2)``,
+    so achieving a target ``rho_S`` requires the inverse mapping
+
+    .. code-block:: text
+
+        rho_P = 2 sin((pi/6) rho_S)
+
+    applied elementwise **before** the Cholesky factorisation. Feeding the
+    rank-correlation target to the Cholesky directly (the pre-2.7 behaviour)
+    produced normals with ``rho_P = rho_S`` and therefore an output rank
+    correlation of ``(6/pi) arcsin(rho_S/2)`` — a systematic contraction
+    (target 0.70 realised 0.682, target 0.90 realised 0.891).
+
+    Pipeline: ``z = Phi^-1(u)``, ``z_c = L z`` with ``L = cholesky(rho_P)``,
+    ``u_c = Phi(z_c)``.
 
     Parameters
     ----------
     u : np.ndarray
         Independent uniform matrix ``(n, m)``.
     correlation : np.ndarray
-        Symmetric positive-definite target correlation matrix ``(m, m)``.
+        Symmetric positive-definite target **Spearman** correlation matrix
+        ``(m, m)`` with unit diagonal and off-diagonals in ``(-1, 1)``.
 
     Returns
     -------
     np.ndarray
-        Correlated uniform matrix ``(n, m)``.
+        Correlated uniform matrix ``(n, m)`` whose column rank correlations
+        reproduce ``correlation``.
 
     Raises
     ------
     ValueError
-        If the column count of ``u`` does not match ``correlation``.
+        If the column count of ``u`` does not match ``correlation``, or if
+        the Kruskal-mapped matrix is not positive definite.
     """
     m = correlation.shape[0]
     if u.shape[1] != m:
         msg = f"u has {u.shape[1]} columns, correlation is {m}x{m}"
         raise ValueError(msg)
+    # Kruskal inverse: target Spearman -> Pearson correlation in normal space.
+    pearson = 2.0 * np.sin((np.pi / 6.0) * np.asarray(correlation, dtype=float))
+    # 2*sin(pi/6) is 1 up to round-off; pin the diagonal exactly so the
+    # Cholesky sees a proper correlation matrix.
+    np.fill_diagonal(pearson, 1.0)
+    try:
+        chol = np.linalg.cholesky(pearson)
+    except np.linalg.LinAlgError as exc:
+        msg = (
+            "target rank-correlation matrix is not positive definite after "
+            "the Kruskal mapping rho_P = 2 sin((pi/6) rho_S)"
+        )
+        raise ValueError(msg) from exc
     z = norm.ppf(np.clip(u, 1e-12, 1.0 - 1e-12))
-    chol = np.linalg.cholesky(correlation)
     z_c = z @ chol.T
     return np.asarray(norm.cdf(z_c))
 

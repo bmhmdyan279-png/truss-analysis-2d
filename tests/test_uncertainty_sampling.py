@@ -37,14 +37,60 @@ def test_lhs_deterministic_and_order_independent() -> None:
     assert not np.array_equal(a, c)
 
 
-def test_gaussian_copula_realises_target_rank_correlation() -> None:
-    corr = np.array([[1.0, 0.7], [0.7, 1.0]])
-    u = latin_hypercube(20000, 2, seed=3)
+@pytest.mark.parametrize("target", [0.3, 0.7, 0.9, -0.6])
+def test_gaussian_copula_realises_target_rank_correlation(target: float) -> None:
+    """The realised Spearman rho reproduces the target, not its Kruskal image.
+
+    Pre-2.7 the target matrix went straight into the Cholesky, so the output
+    rank correlation was ``(6/pi) arcsin(target/2)`` -- 0.682 instead of 0.700
+    at target 0.7. The tolerance is now tight enough that the distortion
+    cannot come back: at 0.7 the old behaviour missed by ~0.018.
+    """
+    corr = np.array([[1.0, target], [target, 1.0]])
+    u = latin_hypercube(40000, 2, seed=3)
     uc = gaussian_copula_correlate(u, corr)
-    rho = spearmanr(uc[:, 0], uc[:, 1]).statistic
-    assert abs(rho - 0.7) < 0.05
+    rho = float(spearmanr(uc[:, 0], uc[:, 1]).statistic)
+    assert abs(rho - target) < 0.005, (target, rho)
+
+
+def test_gaussian_copula_dimension_mismatch_and_indefinite_target() -> None:
+    corr = np.array([[1.0, 0.7], [0.7, 1.0]])
     with pytest.raises(ValueError, match="columns"):
         gaussian_copula_correlate(np.zeros((10, 3)), corr)
+    # not positive definite -> the Kruskal-mapped Cholesky fails and is
+    # re-raised as a ValueError naming the mapping
+    bad = np.array([[1.0, 0.95, 0.95], [0.95, 1.0, -0.95], [0.95, -0.95, 1.0]])
+    with pytest.raises(ValueError, match="positive definite"):
+        gaussian_copula_correlate(np.zeros((10, 3)), bad)
+
+
+def test_gaussian_copula_three_by_three_rank_correlation_matrix() -> None:
+    target = np.array(
+        [
+            [1.00, 0.60, -0.40],
+            [0.60, 1.00, 0.30],
+            [-0.40, 0.30, 1.00],
+        ]
+    )
+    u = latin_hypercube(60000, 3, seed=7)
+    uc = gaussian_copula_correlate(u, target)
+    measured = spearmanr(uc).statistic
+    assert measured.shape == (3, 3)
+    for i in range(3):
+        for j in range(3):
+            if i == j:
+                continue
+            assert abs(float(measured[i, j]) - target[i, j]) < 0.006, (i, j)
+
+
+def test_gaussian_copula_preserves_uniform_marginals() -> None:
+    corr = np.array([[1.0, 0.7], [0.7, 1.0]])
+    u = latin_hypercube(20000, 2, seed=5)
+    uc = gaussian_copula_correlate(u, corr)
+    assert np.all(uc > 0.0)
+    assert np.all(uc < 1.0)
+    for d in range(2):
+        assert abs(float(uc[:, d].mean()) - 0.5) < 0.01
 
 
 def test_truncated_normal_respects_bounds() -> None:
