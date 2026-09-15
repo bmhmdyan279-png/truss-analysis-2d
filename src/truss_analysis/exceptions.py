@@ -46,6 +46,23 @@ class BucklingCheckWarning(UserWarning):
     """
 
 
+class LargeDisplacementWarning(UserWarning):
+    """Warning issued when the linear kinematics assumption is being stretched.
+
+    The whole library is a small-displacement, first-order solver: the
+    stiffness is built on the undeformed geometry and second-order (P-Delta)
+    effects are out of scope. Emitted by
+    :func:`truss_analysis.postprocess.check_displacement_magnitude` (wired
+    into :func:`truss_analysis.main.run`) when the largest nodal
+    displacement exceeds a documented fraction of the structure's
+    characteristic length -- past that point the reported forces and
+    displacements are an *approximation of unknown conservatism*, and a
+    geometrically nonlinear analysis is warranted. The linearised
+    bifurcation check :func:`truss_analysis.stability.linearized_buckling_load_factor`
+    is the in-scope companion diagnostic for stability concerns.
+    """
+
+
 class InputIgnoredWarning(UserWarning):
     """Warning issued when a recognised-but-unapplied input key is supplied.
 

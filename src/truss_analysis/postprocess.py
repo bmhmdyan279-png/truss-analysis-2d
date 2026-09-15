@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .exceptions import BucklingCheckWarning
+from .exceptions import BucklingCheckWarning, LargeDisplacementWarning
 from .model import Element, Node
 from .sections import euler_buckling_load
 
@@ -436,3 +436,67 @@ def calculate_buckling(
         )
 
     return report
+
+
+#: Largest nodal displacement as a fraction of the structure's characteristic
+#: length beyond which the small-displacement assumption is considered
+#: stretched and :class:`~truss_analysis.exceptions.LargeDisplacementWarning`
+#: is emitted. 10 % is the round-5 audit's suggested physical-plausibility
+#: threshold (C9 8.3): well above serviceability-relevant deflections, well
+#: below "the geometry has visibly changed".
+LARGE_DISPLACEMENT_RATIO = 0.1
+
+
+def check_displacement_magnitude(
+    nodes: list[Node],
+    U: np.ndarray,
+    ratio: float = LARGE_DISPLACEMENT_RATIO,
+) -> float | None:
+    """Warn when max |u| exceeds ``ratio`` of the characteristic length.
+
+    The solver is first-order: stiffness is assembled on the undeformed
+    geometry and P-Delta effects are out of scope. This check makes that
+    validity boundary *observable* instead of silent -- a model whose
+    displacements are a sizeable fraction of its own dimensions has left
+    the regime where the linear answer is trustworthy (round-5 audit,
+    C9 8.3 / C2 / C5-1).
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes (for the characteristic length: the bounding-box
+        diagonal, the same measure ``calculate_buckling`` reports as
+        ``length_char``).
+    U : np.ndarray
+        Global displacement vector ``(2n,)`` [m].
+    ratio : float, default LARGE_DISPLACEMENT_RATIO
+        Threshold fraction; must be positive.
+
+    Returns
+    -------
+    float or None
+        ``max|u| / length_char`` (``None`` when the characteristic length
+        is zero, i.e. a degenerate single-point model). The warning is
+        emitted when the returned value exceeds ``ratio``.
+    """
+    if ratio <= 0.0:
+        msg = f"ratio must be positive, got {ratio}"
+        raise ValueError(msg)
+    xs = [n.x for n in nodes]
+    ys = [n.y for n in nodes]
+    length_char = math.hypot(max(xs) - min(xs), max(ys) - min(ys)) if nodes else 0.0
+    if length_char <= 0.0:
+        return None
+    u_max = float(np.max(np.abs(U))) if U.size else 0.0
+    rel = u_max / length_char
+    if rel > ratio:
+        warnings.warn(
+            f"largest nodal displacement {u_max:.4g} m is {rel:.1%} of the "
+            f"characteristic length {length_char:.4g} m (threshold {ratio:.0%}): "
+            "the small-displacement assumption of the linear solver is "
+            "stretched; results may be non-conservative. Consider a "
+            "geometrically nonlinear analysis.",
+            LargeDisplacementWarning,
+            stacklevel=2,
+        )
+    return rel

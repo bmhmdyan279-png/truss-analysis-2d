@@ -4,9 +4,24 @@ import json
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from truss_analysis.main import run
 
+# The golden models below use unit-like numbers (loads of order 5 with a
+# small EA) chosen so the member forces come out as clean integers; that
+# makes the *displacements* large relative to the span, which trips the
+# round-5 large-displacement validity guard. These tests verify scale-free
+# statics (method-of-joints forces, reactions, equilibrium), not geometric
+# linearity, so the warning is noise here -- suppressed locally rather than
+# globally so real models still warn.
+_GOLDEN_FILTERS = pytest.mark.filterwarnings(
+    "ignore:largest nodal displacement"
+    ":truss_analysis.exceptions.LargeDisplacementWarning"
+)
 
+
+@_GOLDEN_FILTERS
 def test_golden_pratt_truss():
     """
     Pratt Truss with central load.
@@ -76,6 +91,7 @@ def test_golden_pratt_truss():
         Path(temp_path).unlink()
 
 
+@_GOLDEN_FILTERS
 def test_golden_warren_truss():
     """
     Warren Truss with central load.
@@ -127,6 +143,7 @@ def test_golden_warren_truss():
         Path(temp_path).unlink()
 
 
+@_GOLDEN_FILTERS
 def test_golden_cantilever_truss():
     """
     Cantilever Truss with load at free end.

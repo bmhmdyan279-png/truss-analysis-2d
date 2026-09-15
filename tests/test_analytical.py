@@ -155,3 +155,86 @@ def test_reactions_and_equilibrium():
     assert abs(errors["sum_fx"]) < 1e-6
     assert abs(errors["sum_fy"]) < 1e-6
     assert abs(errors["sum_m"]) < 1e-6
+
+
+# --------------------------------------------------------------------------
+# Round-5 audit (C9 8.3): large-displacement validity guard
+# --------------------------------------------------------------------------
+
+
+def test_check_displacement_magnitude_warns_past_threshold() -> None:
+    import numpy as np
+    import pytest
+
+    from truss_analysis.exceptions import LargeDisplacementWarning
+    from truss_analysis.model import Node
+    from truss_analysis.postprocess import check_displacement_magnitude
+
+    nodes = [Node(id="1", x=0.0, y=0.0), Node(id="2", x=10.0, y=0.0)]
+    # characteristic length = 10 m; a 2 m displacement is 20 % > 10 %
+    U = np.array([0.0, 0.0, 2.0, 0.0])
+    with pytest.warns(LargeDisplacementWarning, match="characteristic length"):
+        rel = check_displacement_magnitude(nodes, U)
+    assert rel == pytest.approx(0.2)
+
+    # below the threshold: silent, still returns the ratio
+    small = np.array([0.0, 0.0, 0.5, 0.0])
+    import warnings as _w
+
+    with _w.catch_warnings():
+        _w.simplefilter("error", LargeDisplacementWarning)
+        assert check_displacement_magnitude(nodes, small) == pytest.approx(0.05)
+
+
+def test_check_displacement_magnitude_degenerate_and_guards() -> None:
+    import numpy as np
+    import pytest
+
+    from truss_analysis.model import Node
+    from truss_analysis.postprocess import check_displacement_magnitude
+
+    # single point: zero characteristic length -> None, no crash
+    one = [Node(id="1", x=1.0, y=1.0)]
+    assert check_displacement_magnitude(one, np.array([0.5, 0.5])) is None
+    with pytest.raises(ValueError, match="positive"):
+        check_displacement_magnitude(one, np.array([0.0, 0.0]), ratio=0.0)
+
+
+def test_run_emits_large_displacement_warning_for_extreme_model(tmp_path) -> None:
+    """The guard is wired into run(): a grossly overloaded model warns."""
+    import json
+
+    import pytest
+
+    from truss_analysis.exceptions import LargeDisplacementWarning
+    from truss_analysis.main import run
+
+    model = {
+        "units": "SI",
+        "nodes": [
+            {
+                "id": "1",
+                "x": 0.0,
+                "y": 0.0,
+                "is_support": True,
+                "support_dx": True,
+                "support_dy": True,
+            },
+            {
+                "id": "2",
+                "x": 1.0,
+                "y": 0.0,
+                "is_support": True,
+                "support_dx": False,
+                "support_dy": True,
+            },
+        ],
+        "elements": [{"id": "e1", "node_i": "1", "node_j": "2", "E": 210e9, "A": 1e-6}],
+        # absurd axial load on a hair-thin bar: strain ~ 0.5 m over 1 m
+        "loads": [{"node_id": "2", "Fx": 1e5, "Fy": 0.0}],
+    }
+    p = tmp_path / "extreme.json"
+    p.write_text(json.dumps(model), encoding="utf-8")
+    with pytest.warns(LargeDisplacementWarning):
+        res = run(str(p), quiet=True)
+    assert res.status == "SUCCESS"

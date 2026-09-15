@@ -44,7 +44,16 @@ Output JSON schema (``analyze --output RESULT.json``)
                       "sum_m": <float>, "is_valid": <bool>},
       "buckling": [{"id": "<element_id>", "N": <float N>,
                     "length": <float m>, "P_cr": <float N or null>,
-                    "ratio": <float>, "safe": <bool>}, ...]
+                    "ratio": <float>, "safe": <bool>}, ...],
+      "solver_metadata": {"library_version": "<str>",
+                          "numpy_version": "<str>", "scipy_version": "<str>",
+                          "bc_method": "<elimination|penalty>",
+                          "use_sparse": <bool>,
+                          "factorisation": "<cholesky|lu|sparse-lu|...>",
+                          "rank_k_ff": <int>, "n_free_dofs": <int>,
+                          "cond_k_ff": <float or null>,
+                          "numerical_status": "<stable|ill_conditioned>",
+                          "tolerances": {...}}
     }
 
 All quantities are SI (metres, newtons, pascals) regardless of the input
@@ -65,20 +74,27 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import scipy
 
 from .assembly import assemble_global_matrices
 from .exceptions import InputIgnoredWarning, InputValidationError, TrussError
 from .fileio import load_json
 from .graph_validation import TopologyValidationError, structural_report
 from .model import Element, Node, validate_inputs
+from .numerics import DEFAULT_TOLERANCES
 from .postprocess import (
     calculate_buckling,
     calculate_element_forces,
     calculate_reactions,
+    check_displacement_magnitude,
     check_equilibrium,
     imposed_strain_energy,
 )
-from .solver import check_energy, solve, solve_penalty_with_energy
+from .solver import (
+    check_energy,
+    solve_penalty_with_energy,
+    solve_with_diagnostics,
+)
 from .topology_generator import generate_topology, model_to_json
 from .units import to_si
 
@@ -316,6 +332,16 @@ class AnalysisResult:
     buckling : list[dict[str, Any]]
         Euler buckling utilisation per compressed member; empty unless the
         buckling check was requested.
+    solver_metadata : dict[str, Any]
+        Reproducibility block for the exported report (round-5 audit,
+        C1-12): library/numpy/scipy versions, the boundary-condition method
+        and penalty value, sparse flag, and -- for the elimination path --
+        the numerical evidence from :func:`solve_with_diagnostics`
+        (factorisation used, rank and estimated condition number of
+        ``K_ff``, the stable/ill-conditioned verdict) plus the full
+        :class:`~truss_analysis.numerics.NumericalTolerances` policy that
+        governed every threshold. Empty only if the result was constructed
+        by hand rather than by :func:`run`.
     """
 
     status: str
@@ -324,6 +350,7 @@ class AnalysisResult:
     reactions: dict[str, dict[str, float]]
     equilibrium: dict[str, Any]
     buckling: list[dict[str, Any]] = field(default_factory=list)
+    solver_metadata: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> str:
         """Generate human-readable summary."""
@@ -595,12 +622,44 @@ def run(
         applied_loads.append({"node_id": nodes[idx].id, "Fx": 0.0, "Fy": -weight})
 
     penalty_energy = 0.0
+    from . import __version__ as _lib_version  # deferred: avoids import cycle
+
+    solver_metadata: dict[str, Any] = {
+        "library_version": _lib_version,
+        "python_version": sys.version.split()[0],
+        "numpy_version": np.__version__,
+        "scipy_version": scipy.__version__,
+        "bc_method": bc_method_eff,
+        "use_sparse": bool(use_sparse_eff),
+        "check_condition": bool(check_condition),
+        "n_nodes": len(nodes),
+        "n_elements": len(elements),
+        "n_dof": 2 * len(nodes),
+        "tolerances": asdict(DEFAULT_TOLERANCES),
+    }
     if bc_method_eff == "penalty":
         U, penalty_energy = solve_penalty_with_energy(
             K, F_ext, fixed_dofs, penalty_value=penalty_eff
         )
+        solver_metadata["penalty_value"] = penalty_eff
+        solver_metadata["penalty_energy"] = penalty_energy
     else:
-        U = solve(K, F_ext, fixed_dofs, check_condition=check_condition)
+        # Same computation as solve() -- solve() delegates here -- but the
+        # numerical evidence rides along into the exported report.
+        diag = solve_with_diagnostics(
+            K, F_ext, fixed_dofs, check_condition=check_condition
+        )
+        U = diag.U
+        solver_metadata.update(
+            {
+                "factorisation": diag.factorisation,
+                "screened": diag.screened,
+                "n_free_dofs": diag.n_free,
+                "rank_k_ff": diag.rank,
+                "cond_k_ff": float(diag.cond) if np.isfinite(diag.cond) else None,
+                "numerical_status": diag.status.value,
+            }
+        )
     element_forces, strain_energy, prestress_work = calculate_element_forces(
         nodes, elements, U
     )
@@ -612,6 +671,7 @@ def run(
         energy_scale=imposed_strain_energy(nodes, elements),
         penalty_energy=penalty_energy,
     )
+    check_displacement_magnitude(nodes, U)
     reactions = calculate_reactions(nodes, K, U, F_ext, fixed_dofs)
     equilibrium = check_equilibrium(nodes, reactions, applied_loads)
     buckling = (
@@ -629,6 +689,7 @@ def run(
         reactions=_pure(reactions),
         equilibrium=_pure(equilibrium),
         buckling=_pure(buckling),
+        solver_metadata=_pure(solver_metadata),
     )
 
     if output:
