@@ -14,20 +14,28 @@ ad-hoc definition.
 from __future__ import annotations
 
 import abc
-import math
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import ClassVar
 
 import numpy as np
+from scipy.linalg import LinAlgError, cho_factor, lapack
 
 from .assembly import assemble_global_matrices
 from .exceptions import SingularMatrixError
 from .material.steel_eurocode import k_E as eurocode_k_E
 from .model import Element, Node
+from .postprocess import calculate_element_forces
 from .reliability_adapter import NodalLoad
 from .solver import solve
+
+#: Reciprocal-condition threshold of the ``alpha = 1e-6`` key-element probe
+#: (see :meth:`DamageOperator._check_mechanism`). Calibrated against the
+#: probe magnitude, NOT a numerics-policy cutoff: removing an essential
+#: member drives ``rcond`` to ``O(probe)``, a merely important one stays
+#: orders of magnitude above this.
+_KEY_ELEMENT_RCOND = 1e-5
 
 
 @dataclass(frozen=True)
@@ -132,23 +140,12 @@ class DamageOperator:
 
         U = solve(K, F_ext, fixed_dofs)
 
-        axial_forces: dict[str, float] = {}
-        for elem in current_elements:
-            i = self.node_map[elem.node_i]
-            j = self.node_map[elem.node_j]
-            ui, vi = U[2 * i], U[2 * i + 1]
-            uj, vj = U[2 * j], U[2 * j + 1]
-            dx = current_nodes[j].x - current_nodes[i].x
-            dy = current_nodes[j].y - current_nodes[i].y
-            length = math.hypot(dx, dy)
-            if length < 1e-12:
-                axial_forces[elem.id] = 0.0
-                continue
-            c, s = dx / length, dy / length
-            delta_L_mech = c * (uj - ui) + s * (vj - vi)
-            delta_L_prestress = (elem.alpha * elem.delta_T * length) + elem.delta_L_free
-            k = elem.E * elem.A / length
-            axial_forces[elem.id] = k * (delta_L_mech - delta_L_prestress)
+        # Delegate force recovery to the single canonical implementation.
+        # An earlier revision re-derived delta_L_mech / prestress by hand
+        # here -- the exact "two implementations of one physics" pattern
+        # that produced the 2.6.0 demand-chain bugs (round-5 audit).
+        results, _, _ = calculate_element_forces(current_nodes, current_elements, U)
+        axial_forces: dict[str, float] = {str(r["id"]): float(r["N"]) for r in results}
 
         return U, axial_forces
 
@@ -157,6 +154,22 @@ class DamageOperator:
         current_nodes: list[Node],
         current_elements: list[Element],
     ) -> bool:
+        """Near-mechanism probe consistent with the library's solver policy.
+
+        ``K_ff`` of a stable truss is symmetric positive definite, so the
+        probe Cholesky-factorises it (raising on indefiniteness == hard
+        mechanism) and estimates the reciprocal condition number from the
+        existing factors with LAPACK ``dpocon`` (``O(n^2)``, the same trick
+        :func:`truss_analysis.criticality.engine._guard_tolerance` uses with
+        ``dgecon``).  This replaces a full ``O(n^3)`` SVD per member *and*
+        its hard-coded ``1e-5`` rank cutoff with a named, documented
+        threshold.  ``_KEY_ELEMENT_RCOND`` is deliberately **not** one of the
+        :class:`~truss_analysis.numerics.NumericalTolerances` policy cutoffs:
+        it is calibrated against the ``alpha = 1e-6`` key-element probe --
+        removing a kinematically essential member drops ``rcond`` to
+        ``O(alpha_probe)``, while a merely important member leaves it orders
+        of magnitude above the threshold.
+        """
         K, _, _, fixed_dofs = assemble_global_matrices(current_nodes, current_elements)
         n = len(current_nodes)
         free_dofs = [i for i in range(2 * n) if i not in fixed_dofs]
@@ -165,13 +178,19 @@ class DamageOperator:
         K_ff = K[np.ix_(free_dofs, free_dofs)]
 
         try:
-            sv = np.linalg.svd(K_ff, compute_uv=False)
-            tol = sv[0] * 1e-5 if len(sv) > 0 else 1e-9
-            rank = int(np.sum(sv > tol))
-        except np.linalg.LinAlgError:
-            rank = 0
-
-        return rank < len(free_dofs)
+            c, low = cho_factor(K_ff, lower=True, check_finite=False)
+        except LinAlgError:
+            return True
+        anorm = float(np.abs(K_ff).sum(axis=0).max())
+        if not np.isfinite(anorm) or anorm <= 0.0:
+            return True
+        try:
+            rcond, info = lapack.dpocon(c, anorm, "L" if low else "U")
+        except (ValueError, TypeError, lapack.LapackError):
+            return True
+        if info != 0 or not np.isfinite(rcond):
+            return True
+        return float(rcond) < _KEY_ELEMENT_RCOND
 
     def _apply_geometric_scaling(
         self,
@@ -274,7 +293,11 @@ class DamageOperator:
                 slope = float(np.linalg.lstsq(A_mat, y, rcond=None)[0][0])
             else:
                 slope = 0.0
-            scf_min = scfs[-1] if scfs else float("inf")
+            # The documented contract is "SCF at the SMALLEST non-singular
+            # alpha" -- select it explicitly instead of trusting the caller's
+            # ordering (``scfs[-1]`` silently meant something else for any
+            # non-descending ``alphas``; round-5 audit).
+            scf_min = scfs[int(np.argmin(x))]
 
         return MemberSensitivityProfile(
             member_id=target_id,
@@ -354,7 +377,23 @@ class ThermalDegradation(DegradationOperator):
         """Return copies of all elements with ``E *= k_E(T)`` per temperature.
 
         Every element is copied because any member may carry a temperature.
+
+        Raises
+        ------
+        ValueError
+            If any element has no entry in the temperature mapping. The
+            pre-2.8 behaviour was a bare ``KeyError`` from the dict
+            lookup, which did not say *which* members were missing nor what
+            to do about them (round-5 audit).
         """
+        missing = [elem.id for elem in elements if elem.id not in self.temps]
+        if missing:
+            msg = (
+                "ThermalDegradation: no temperature supplied for member(s) "
+                f"{', '.join(repr(m) for m in missing)}; every member needs "
+                "an entry (use 20.0 degC for unaffected ones)"
+            )
+            raise ValueError(msg)
         out = []
         for elem in elements:
             new = deepcopy(elem)

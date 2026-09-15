@@ -71,16 +71,34 @@ factors it already computed (LAPACK ``dgecon``, ``O(n^2)``) and stores
 No deep copying of element containers anywhere in this package:
 perturbed states are built from the rank-1/rank-r formulas
 or from fresh dataclass instances via :func:`dataclasses.replace`.
+
+Scale and memory ceiling
+-------------------------------
+This engine is **dense**: :func:`build_engine` materialises the free-free
+stiffness ``(n_free x n_free)`` and its inverse action on every member
+(``z`` is ``(n_free x n_members)``), and :func:`ci_sweep` holds one
+perturbed-displacement column per member (``u_pert`` is
+``(n_free x n_members)``).  Memory therefore grows as ``O(n_free *
+n_members)``, not ``O(nnz)``.  Concretely, a 10k-member truss with ~20k
+free DOFs needs ~1.6 GB for ``u_pert`` alone.  The *assembly* and *solve*
+layers (:mod:`truss_analysis.assembly`, :mod:`truss_analysis.solver`) do
+support CSR-sparse storage and scale far beyond this; the criticality /
+retrofit / uncertainty tools that sit on this dense rank-1 engine do not.
+Until a blocked ``ci_sweep`` and a sparse rank-1 update land, treat the
+criticality engine as scoped to small/medium models (the round-5 audit's
+C8 performance finding) -- the physics is exact, the footprint is the
+constraint.
 """
 
 from __future__ import annotations
 
 import logging
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
-from scipy.linalg import lapack, lu_factor, lu_solve
+from scipy.linalg import LinAlgWarning, lapack, lu_factor, lu_solve
 
 from ..material.steel_eurocode import FloatOrArray
 from ..material.steel_eurocode import k_E as eurocode_k_E
@@ -258,7 +276,9 @@ def prestress_lengths(
     return out
 
 
-def _check_lu(lu: tuple[np.ndarray, np.ndarray]) -> None:
+def _check_lu(
+    lu: tuple[np.ndarray, np.ndarray], context: str = "in base state"
+) -> None:
     lu_mat, _piv = lu  # scipy packs L and U into one matrix; second item is pivots
     diag = np.abs(np.diag(lu_mat))
     if diag.size == 0:
@@ -269,7 +289,7 @@ def _check_lu(lu: tuple[np.ndarray, np.ndarray]) -> None:
         return
     scale = max(float(np.max(diag)), 1.0)
     if float(np.min(diag)) < _SINGULAR_TOL * scale:
-        msg = "stiffness matrix singular (mechanism) in base state"
+        msg = f"stiffness matrix singular (mechanism) {context}"
         raise MechanismError(msg)
 
 
@@ -372,8 +392,9 @@ def load_vector(
 ) -> np.ndarray:
     """Mechanical load vector restricted to the free DOFs."""
     f = np.zeros(2 * len(nodes))
+    node_idx = {n.id: i for i, n in enumerate(nodes)}  # built once, not per load
     for node_id, load in loads.items():
-        idx = {n.id: i for i, n in enumerate(nodes)}[str(node_id)]
+        idx = node_idx[str(node_id)]
         f[2 * idx] += float(load.get("Fx", 0.0))
         f[2 * idx + 1] += float(load.get("Fy", 0.0))
     return f[list(free)]
@@ -550,7 +571,23 @@ def perturb_multi(
     g_ss = setup.b_free[idx] @ z_s
     core = np.diag(1.0 / deltas) + g_ss
     f_s = setup.b_free[idx] @ u - setup.dl_pre[idx]
-    perturbed: np.ndarray = u - z_s @ np.linalg.solve(core, f_s)
+    # The Woodbury core is singular exactly when the simultaneously perturbed
+    # structure is (or is numerically indistinguishable from) a mechanism.
+    # Screen it with the same relative criterion the base-state solve uses,
+    # so the library raises its contract error instead of a bare LinAlgError
+    # -- or, worse, a silent finite answer from an ~1e-17 pivot (round-5
+    # audit: deleting two members of a determinate triangle left the 2x2
+    # core mathematically singular but numerically solvable garbage).
+    members = ", ".join(setup.ids[i] for i in idx)
+    with warnings.catch_warnings():
+        # lu_factor emits LinAlgWarning on an exactly-zero pivot; the screen
+        # below turns that case into the library's own MechanismError, so the
+        # raw warning would only be noise on top of a handled condition.
+        warnings.simplefilter("ignore", LinAlgWarning)
+        lu = lu_factor(core, check_finite=False)
+    _check_lu(lu, f"after simultaneous perturbation of member(s) {members}")
+    core_sol = lu_solve(lu, f_s)
+    perturbed: np.ndarray = u - z_s @ core_sol
     return perturbed
 
 

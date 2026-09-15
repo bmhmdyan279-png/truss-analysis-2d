@@ -77,3 +77,104 @@ def test_stable_indeterminate_run(stable_indeterminate_truss):
     assert isinstance(prof.is_key_element, bool)
     assert not any(p.is_singular for p in prof.points)
     assert len(prof.points) == 4
+
+
+# --------------------------------------------------------------------------
+# Round-5 audit pins
+# --------------------------------------------------------------------------
+
+
+def test_scf_alpha_min_is_order_invariant(simple_determinate_truss):
+    """``scf_alpha_min`` must select by VALUE, not by list position.
+
+    The pre-fix code took ``scfs[-1]``, silently changing meaning for any
+    non-descending ``alphas`` sequence (round-5 audit, finding F4).
+    """
+    nodes, elements, loads = simple_determinate_truss
+    op = DamageOperator(nodes, elements, loads)
+    descending = op.analyze_member("A", alphas=[1.0, 0.9, 0.8, 0.7])
+    shuffled = op.analyze_member("A", alphas=[0.8, 1.0, 0.7, 0.9])
+    assert math.isclose(descending.scf_alpha_min, shuffled.scf_alpha_min, rel_tol=1e-12)
+    # And the value really is the SCF at the smallest non-singular alpha.
+    smallest = min(
+        (p for p in shuffled.points if not p.is_singular), key=lambda p: p.alpha
+    )
+    assert math.isclose(
+        shuffled.scf_alpha_min,
+        smallest.max_disp / shuffled.baseline_max_disp,
+        rel_tol=1e-12,
+    )
+
+
+def test_key_element_detection_matches_mechanism_semantics(
+    simple_determinate_truss, stable_indeterminate_truss
+):
+    """The Cholesky+dpocon probe must classify exactly like a rank test.
+
+    Determinate truss: every member is kinematically essential. The
+    indeterminate fixture: bottom-chord members 1-2 are redundant, every
+    diagonal/top member is essential (pinned against the pre-fix full-SVD
+    implementation, which agreed on all members -- round-5 finding F5).
+    """
+    nodes, elements, loads = simple_determinate_truss
+    op = DamageOperator(nodes, elements, loads)
+    for elem in elements:
+        assert op._check_mechanism(
+            nodes, op._apply_geometric_scaling(elements, elem.id, 1e-6)
+        ), f"member {elem.id} of a determinate truss must be key"
+
+    nodes2, elements2, loads2 = stable_indeterminate_truss
+    op2 = DamageOperator(nodes2, elements2, loads2)
+    expected_key = {
+        "1": False,
+        "2": False,
+        "3": True,
+        "4": True,
+        "5": True,
+        "6": True,
+        "7": True,
+    }
+    for elem in elements2:
+        got = op2._check_mechanism(
+            nodes2, op2._apply_geometric_scaling(elements2, elem.id, 1e-6)
+        )
+        assert got == expected_key[elem.id], elem.id
+
+
+def test_solve_forces_match_postprocess(simple_determinate_truss):
+    """``_solve`` must recover forces through the canonical implementation.
+
+    Guards the delegation to ``postprocess.calculate_element_forces`` --
+    the "two implementations of one physics" pattern is what produced the
+    2.6.0 demand-chain bugs (round-5 audit, finding F5).
+    """
+    from truss_analysis.postprocess import calculate_element_forces
+
+    nodes, elements, loads = simple_determinate_truss
+    # Give one member a thermal + fabrication strain so the prestress
+    # convention is exercised, not just the bare mechanical elongation.
+    elements[0].delta_T = 100.0
+    elements[0].alpha = 1.2e-5
+    elements[0].delta_L_free = 1e-4
+    op = DamageOperator(nodes, elements, loads)
+    U, forces = op._solve(nodes, elements)
+    results, _, _ = calculate_element_forces(nodes, elements, U)
+    for r in results:
+        assert math.isclose(
+            forces[str(r["id"])], float(r["N"]), rel_tol=1e-12, abs_tol=1e-6
+        )
+
+
+def test_thermal_degradation_missing_temperature_names_members():
+    """A missing temperature entry must raise ValueError naming the member.
+
+    Pre-fix this surfaced as a bare ``KeyError`` (round-5 audit, F7).
+    """
+    from truss_analysis.degradation import ThermalDegradation
+
+    elements = [Element(id="bar", node_i="1", node_j="2", E=210e9, A=1e-3)]
+    with pytest.raises(ValueError, match="bar"):
+        ThermalDegradation(temps={}).apply(elements)
+    # Complete mapping still works.
+    out = ThermalDegradation(temps={"bar": 600.0}).apply(elements)
+    assert out[0].E < elements[0].E

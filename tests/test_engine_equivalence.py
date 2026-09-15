@@ -24,7 +24,11 @@ from truss_analysis.criticality import (
     member_matrices,
     perturb_multi,
 )
-from truss_analysis.criticality.engine import base_displacement, load_vector
+from truss_analysis.criticality.engine import (
+    base_displacement,
+    load_vector,
+    total_load_vector,
+)
 from truss_analysis.criticality.scenarios import get_scenario_temperatures
 from truss_analysis.material.steel_eurocode import k_E as eurocode_k_E
 from truss_analysis.model import Element, Node
@@ -200,3 +204,28 @@ def test_engine_module_documents_validity_limit() -> None:
     assert "single-member" in src
     assert "Woodbury" in src
     assert "perturb_multi" in inspect.getsource(perturb_multi)
+
+
+def test_perturb_multi_raises_mechanism_error_not_linalg(campaign) -> None:
+    """Multi-member damage that creates a mechanism must raise the library's
+    contract error -- including the numerically-near-singular core that
+    ``np.linalg.solve`` would happily invert into garbage (round-5 audit).
+
+    On the determinate control model, deleting ANY member already removes a
+    load path; deleting two leaves the Woodbury core mathematically singular
+    but numerically solvable (~1e-17 pivot), which pre-fix returned a finite
+    displacement vector instead of failing.
+    """
+    cm = next(c for c in campaign if c.name == "control_1")
+    temps = get_scenario_temperatures(cm.nodes, cm.elements, "uniform", 20.0)
+    setup = build_engine(cm.nodes, cm.elements, cm.loads, temps)
+    u = base_displacement(setup, total_load_vector(cm.nodes, cm.loads, setup))
+
+    for indices in ([0], [0, 1], list(range(len(cm.elements)))):
+        alphas = [0.0] * len(indices)
+        with pytest.raises(MechanismError):
+            perturb_multi(setup, u, indices, alphas)
+
+    # A healthy simultaneous perturbation still returns finite displacements.
+    u2 = perturb_multi(setup, u, [0, 1], [0.5, 0.7])
+    assert np.all(np.isfinite(u2))

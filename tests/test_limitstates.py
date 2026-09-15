@@ -347,3 +347,118 @@ def test_zero_stiffness_endpoint_counts_as_collapse(monkeypatch) -> None:
     )
     assert theta_m is not None
     assert theta_m == pytest.approx(1200.0, abs=0.01)
+
+
+# --------------------------------------------------------------------------
+# Round-5 audit pins: failure_mode labels (C8-5) and the loud I_sec guard
+# --------------------------------------------------------------------------
+
+
+def test_member_critical_temperature_failure_mode_material() -> None:
+    """A genuine limit-state crossing is labelled MATERIAL."""
+    from truss_analysis.limitstates import (
+        FailureMode,
+        member_critical_temperature_detailed,
+    )
+
+    nodes, elements, loads = _column(load=400.0e3)
+    res = member_critical_temperature_detailed(nodes, elements, loads, "c", F_Y)
+    assert res.failure_mode is FailureMode.MATERIAL
+    assert res.theta is not None
+    assert res.theta < 1200.0
+    # The scalar facade is bit-for-bit the same number.
+    assert member_critical_temperature(nodes, elements, loads, "c", F_Y) == res.theta
+
+
+def test_member_critical_temperature_failure_mode_collapse() -> None:
+    """A member that never reaches DCR=1 but dies with k_E(1200)=0 is
+    labelled STIFFNESS_COLLAPSE -- it must not masquerade as a material
+    critical temperature in engineering output (round-5 audit, C8-5)."""
+    from truss_analysis.limitstates import (
+        FailureMode,
+        member_critical_temperature_detailed,
+    )
+
+    # Unloaded tie: with N = 0 the material DCR never reaches 1 (k_y hits
+    # zero before k_E does, so ANY non-zero force fails as MATERIAL just
+    # below 1200 degC); the only way the scan can end is the zero-stiffness
+    # endpoint itself. The default grid stops at 1195, so the endpoint is
+    # only reachable -- and only worth labelling -- on a grid that has it.
+    nodes, elements, loads = _tie()
+    loads = {"2": {"Fx": 0.0, "Fy": 0.0}}
+    grid = (20.0, 600.0, 1195.0, 1200.0)
+    res = member_critical_temperature_detailed(
+        nodes, elements, loads, "t", F_Y, temp_grid=grid
+    )
+    assert res.failure_mode is FailureMode.STIFFNESS_COLLAPSE
+    assert res.theta == pytest.approx(1200.0, abs=0.01)
+    assert (
+        member_critical_temperature(nodes, elements, loads, "t", F_Y, temp_grid=grid)
+        == res.theta
+    )
+
+
+def test_member_critical_temperature_failure_mode_none() -> None:
+    from truss_analysis.limitstates import (
+        FailureMode,
+        member_critical_temperature_detailed,
+    )
+
+    nodes, elements, loads = _tie()
+    loads = {"2": {"Fx": 1.0e3, "Fy": 0.0}}
+    res = member_critical_temperature_detailed(
+        nodes, elements, loads, "t", F_Y, temp_grid=tuple(range(20, 501, 25))
+    )
+    assert res.theta is None
+    assert res.failure_mode is FailureMode.NONE
+
+
+def test_system_critical_temperature_failure_modes() -> None:
+    from truss_analysis.limitstates import (
+        FailureMode,
+        system_critical_temperature_detailed,
+    )
+
+    # Heavily loaded column: a member limit state stops the scan.
+    nodes, elements, loads = _column(load=400.0e3)
+    res = system_critical_temperature_detailed(nodes, elements, loads, F_Y)
+    assert res.failure_mode is FailureMode.MATERIAL
+    assert res.theta == system_critical_temperature(nodes, elements, loads, F_Y)
+
+    # Unloaded tie: nothing fails until the zero-stiffness endpoint.
+    nodes_t, elements_t, loads_t = _tie()
+    loads_t = {"2": {"Fx": 0.0, "Fy": 0.0}}
+    grid = (20.0, 600.0, 1195.0, 1200.0)
+    res_t = system_critical_temperature_detailed(
+        nodes_t, elements_t, loads_t, F_Y, temp_grid=grid
+    )
+    assert res_t.failure_mode is FailureMode.STIFFNESS_COLLAPSE
+    assert res_t.theta == 1195.0
+
+    # Truncated grid with no failure anywhere: NONE.
+    res_n = system_critical_temperature_detailed(
+        nodes_t, elements_t, loads_t, F_Y, temp_grid=tuple(range(20, 301, 25))
+    )
+    assert res_n.failure_mode is FailureMode.NONE
+    assert res_n.theta == 295.0  # range(20, 301, 25) ends at 295
+
+
+def test_dcr_field_warns_for_compressed_members_without_i_sec() -> None:
+    """The fire chain must be as loud as the static report path when a
+    compressed member has no second moment of area (round-5 audit, C7-3)."""
+    from truss_analysis.exceptions import BucklingCheckWarning
+
+    nodes, elements, loads = _column(i_sec=0.0, load=100.0e3)
+    temps = _uniform(elements, 20.0)
+    with pytest.warns(BucklingCheckWarning, match="I_sec <= 0"):
+        states = dcr_field(nodes, elements, loads, temps, F_Y)
+    assert states["c"].dcr == float("inf")
+
+    # Tension members and members with a real I_sec stay quiet.
+    nodes_t, elements_t, loads_t = _tie()
+    temps_t = _uniform(elements_t, 20.0)
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error", BucklingCheckWarning)
+        dcr_field(nodes_t, elements_t, loads_t, temps_t, F_Y)

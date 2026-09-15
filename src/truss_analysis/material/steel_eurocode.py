@@ -43,6 +43,7 @@ from numpy.typing import NDArray
 
 __all__ = [
     "alpha",
+    "effective_alpha",
     "eps_p",
     "eps_t",
     "eps_u",
@@ -57,6 +58,7 @@ __all__ = [
     "table",
     "table_temperatures",
     "thermal_conductivity",
+    "thermal_strain",
     "unit_mass",
 ]
 
@@ -267,6 +269,59 @@ def alpha(theta: FloatOrArray) -> FloatOrArray:
     coefficient.
     """
     return _piecewise(theta, "thermal_elongation")
+
+
+def thermal_strain(theta: FloatOrArray, theta_ref: float = 20.0) -> FloatOrArray:
+    """Free thermal strain ``eps_th`` relative to ``theta_ref`` [-].
+
+    ``eps_th(theta) = alpha(theta) - alpha(theta_ref)`` with :func:`alpha` the
+    standard's *relative thermal elongation* ``dl/l`` (clause 3.4.1.1). This
+    is the strain quantity the fire chain should impose, and it is NOT the
+    same as ``alpha_const * (theta - theta_ref)`` with the ambient
+    coefficient: the standard's elongation curve is convex (its secant slope
+    rises from ``1.2e-5`` at 20 degC to about ``1.4e-5`` around 600 degC),
+    so a constant ambient coefficient underestimates restrained thermal
+    strain -- and therefore restrained thermal force -- by roughly 15-20 %
+    at fire temperatures (round-5 audit, finding F9).
+
+    Parameters
+    ----------
+    theta : float or ndarray
+        Steel temperature(s) [degC]; clamped to the standard's validity
+        range by :func:`alpha`.
+    theta_ref : float, default 20.0
+        Stress-free reference temperature [degC].
+
+    Returns
+    -------
+    float or ndarray
+        Free thermal elongation ``dl/l`` [-], same shape as ``theta``.
+    """
+    return alpha(theta) - alpha(theta_ref)
+
+
+def effective_alpha(theta: FloatOrArray, theta_ref: float = 20.0) -> FloatOrArray:
+    """Secant expansion coefficient ``eps_th / (theta - theta_ref)`` [1/K].
+
+    The drop-in replacement for :attr:`truss_analysis.model.Element.alpha`
+    when a member is heated from ``theta_ref`` to ``theta`` and the imposed
+    strain must follow the EN 1993-1-2 elongation curve rather than a
+    constant ambient coefficient. Setting
+    ``elem.alpha = effective_alpha(elem.temperature)`` and keeping the
+    framework's ``alpha * delta_T * L`` prestress term reproduces
+    :func:`thermal_strain` exactly.
+
+    Returns ``0.0`` when ``theta == theta_ref`` (no elongation, so the
+    coefficient is irrelevant and the ``0/0`` quotient is defined away).
+    """
+    arr = np.asarray(theta, dtype=float)
+    d_theta = arr - float(theta_ref)
+    strain = np.asarray(thermal_strain(arr, theta_ref), dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = np.where(d_theta != 0.0, strain / d_theta, 0.0)
+    if np.ndim(theta) == 0:
+        return float(out)
+    return out
 
 
 def specific_heat(theta: FloatOrArray) -> FloatOrArray:

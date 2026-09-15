@@ -38,6 +38,22 @@ class SensitivityResult:
     ddm_sensitivity : float
         Derivative of the maximum nodal displacement magnitude with
         respect to the member area, ``d(|u|_max)/dA_i`` [m per m^2].
+
+        Two documented conventions (round-5 audit, C8-7):
+
+        1. **Subgradient at ties/switches.** ``|u|_max`` is differentiated
+           at the *base-state* argmax node. The map ``A -> max_k |u_k|`` is
+           piecewise smooth: when perturbing ``A_i`` moves the identity of
+           the critical node (or when several nodes tie), the reported
+           value is one valid **subgradient** of the max function, not a
+           Frechet derivative. As a screening/ranking quantity this is the
+           intended use; a smooth alternative is the p-norm aggregate.
+        2. **Degenerate-displacement floor.** When every nodal displacement
+           is below ``1e-15`` m (an unloaded or fully restrained model), the
+           normalising magnitude ``d_max`` is set to ``1.0`` to avoid a
+           ``0/0``. In that case the value is the *un-normalised* numerator
+           ``u . du/dA`` (numerically ~0) and carries no physical unit; do
+           not interpret it as [m/m^2].
     strain_energy : float
         **Mechanical** member strain energy ``0.5 * k * delta_L_mech^2`` [J],
         where ``delta_L_mech = delta_L_total - delta_L_prestress``. This is the
@@ -85,14 +101,13 @@ class IndependentValidator:
         self.loads = loads
         self.node_map = {node.id: i for i, node in enumerate(nodes)}
 
-    def compute_baseline(self) -> tuple[np.ndarray, list[int]]:
-        """Solve the baseline system ``K U = F`` including the nodal loads.
+    def _assemble_and_solve(self) -> tuple[np.ndarray, np.ndarray, list[int]]:
+        """One assembly + one solve; returns ``(K, U, fixed_dofs)``.
 
-        Returns
-        -------
-        tuple[np.ndarray, list[int]]
-            ``(U, fixed_dofs)``: the global displacement vector and the
-            list of constrained DOF indices.
+        Shared by :meth:`compute_baseline` and :meth:`compute_all` so the
+        DDM pass no longer re-assembles the global matrix it just solved
+        (round-5 audit, C8 perf): assembly is O(m) with a large constant,
+        and the duplicated call was pure waste on every invocation.
         """
         K, F_ext, _, fixed_dofs = assemble_global_matrices(self.nodes, self.elements)
 
@@ -105,6 +120,18 @@ class IndependentValidator:
             F_ext[2 * idx + 1] += fy
 
         U = solve(K, F_ext, fixed_dofs)
+        return K, U, fixed_dofs
+
+    def compute_baseline(self) -> tuple[np.ndarray, list[int]]:
+        """Solve the baseline system ``K U = F`` including the nodal loads.
+
+        Returns
+        -------
+        tuple[np.ndarray, list[int]]
+            ``(U, fixed_dofs)``: the global displacement vector and the
+            list of constrained DOF indices.
+        """
+        _K, U, fixed_dofs = self._assemble_and_solve()
         return U, fixed_dofs
 
     def compute_all(self) -> list[SensitivityResult]:
@@ -142,11 +169,10 @@ class IndependentValidator:
         list[SensitivityResult]
             One result per element, in element order.
         """
-        U, fixed_dofs = self.compute_baseline()
+        K, U, fixed_dofs = self._assemble_and_solve()
         n = len(self.nodes)
         free_dofs = [i for i in range(2 * n) if i not in fixed_dofs]
 
-        K, _, _, _ = assemble_global_matrices(self.nodes, self.elements)
         K_ff = K[np.ix_(free_dofs, free_dofs)]
         U_f = U[free_dofs]
 
@@ -182,6 +208,9 @@ class IndependentValidator:
         d_max = disp_magnitudes[crit_node_idx]
 
         if d_max < 1e-15:
+            # Degenerate model (no measurable displacement): avoid 0/0. The
+            # reported value is then the un-normalised numerator, NOT a
+            # [m/m^2] sensitivity -- see SensitivityResult.ddm_sensitivity.
             d_max = 1.0
 
         crit_dof_x = 2 * crit_node_idx

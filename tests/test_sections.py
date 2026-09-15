@@ -144,3 +144,22 @@ def test_ambient_curves_never_warn() -> None:
         warnings.simplefilter("error")
         for curve in ("a0", "a", "b", "c", "d"):
             buckling_reduction_factor(0.8, curve, fire=False)
+
+
+def test_chi_curve_ordering_is_proven() -> None:
+    """The docstring's "conservative" claim, proven: chi is monotonically
+    non-increasing in the imperfection factor across the whole slenderness
+    range above the 0.2 buckling limit (round-5 audit, C4-7)."""
+    import itertools
+
+    import numpy as np
+
+    from truss_analysis.sections import buckling_reduction_factor
+
+    curves = ["a0", "a", "b", "c", "d"]
+    for lam in np.linspace(0.21, 4.0, 40):
+        chis = [buckling_reduction_factor(float(lam), c, fire=False) for c in curves]
+        assert all(x >= y - 1e-12 for x, y in itertools.pairwise(chis)), (lam, chis)
+    # at/below the limit every curve is exactly 1
+    for c in curves:
+        assert buckling_reduction_factor(0.1, c, fire=False) == 1.0

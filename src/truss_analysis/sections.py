@@ -310,8 +310,19 @@ def buckling_reduction_factor(
         Non-dimensional slenderness from :func:`non_dimensional_slenderness`.
     curve : str, default "c"
         Buckling curve label, one of ``"a0"``, ``"a"``, ``"b"``, ``"c"``,
-        ``"d"``. Curve ``c`` is the usual choice for thin-walled and
-        cold-formed hollow sections and is the conservative default here.
+        ``"d"`` (imperfection factors 0.13/0.21/0.34/0.49/0.76). Curve
+        ``c`` is the usual choice for thin-walled and cold-formed hollow
+        sections. "Conservative default" here is a *proven ordering claim*,
+        not an intuition: for every ``lambda_bar > 0.2`` the reduction
+        factors satisfy ``chi_a0 >= chi_a >= chi_b >= chi_c >= chi_d``
+        (higher imperfection factor => lower chi), so curve ``c`` is
+        conservative with respect to the curves typically specified for
+        such sections (``a0``/``a``/``b``); ``d`` is more onerous still and
+        exists for the sections the codes assign to it. Pinned by
+        ``test_chi_curve_ordering_is_proven``. The choice of curve is a
+        *user modelling input* (it follows from the section type and
+        buckling axis per the code's selection tables), not something the
+        default can decide universally.
     fire : bool, default False
         Apply the EN 1993-1-2 imperfection reduction ``alpha = 0.65 alpha_c``.
 

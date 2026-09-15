@@ -22,6 +22,7 @@ Consumes the temperature-dependent material reduction factors of
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -38,6 +39,7 @@ from .criticality.engine import (
     total_load_vector,
 )
 from .criticality.scenarios import T_AMBIENT
+from .exceptions import BucklingCheckWarning
 from .material.steel_eurocode import k_E as eurocode_k_E
 from .material.steel_eurocode import k_y as eurocode_k_y
 from .model import Element, Node
@@ -53,6 +55,8 @@ __all__ = [
     "GAMMA_M_FIRE",
     "BucklingModel",
     "ComponentCI",
+    "CriticalTemperatureResult",
+    "FailureMode",
     "Governing",
     "MemberLimitState",
     "TwoComponentResult",
@@ -61,7 +65,9 @@ __all__ = [
     "dcr_field",
     "member_axial_forces",
     "member_critical_temperature",
+    "member_critical_temperature_detailed",
     "system_critical_temperature",
+    "system_critical_temperature_detailed",
     "yield_capacity",
 ]
 
@@ -110,6 +116,50 @@ class BucklingModel(str, Enum):
 
     EUROCODE_CHI = "eurocode_chi"
     EULER_ONLY = "euler_only"
+
+
+class FailureMode(str, Enum):
+    """What physical event produced a reported critical temperature.
+
+    ``MATERIAL``
+        A member limit state was reached: ``DCR(T) >= 1`` with finite
+        stiffness (yield or buckling governed, per :class:`Governing`).
+
+    ``STIFFNESS_COLLAPSE``
+        The Eurocode material law lost all stiffness (``k_E(T) <= 0`` at the
+        1200 degC table endpoint): the structure collapsed as a system,
+        *without* any member necessarily reaching its own DCR = 1 first.
+        Reporting such a temperature as an ordinary "critical temperature"
+        is misleading in engineering reports -- the distinction the round-5
+        audit asked for -- so the detailed scans label it explicitly.
+
+    ``NONE``
+        No failure occurred within the scanned temperature range.
+    """
+
+    MATERIAL = "material"
+    STIFFNESS_COLLAPSE = "stiffness_collapse"
+    NONE = "none"
+
+
+@dataclass(frozen=True)
+class CriticalTemperatureResult:
+    """Critical temperature together with the mode of failure behind it.
+
+    Attributes
+    ----------
+    theta : float or None
+        Critical temperature [degC] with the exact same value and
+        conventions as the legacy scalar-returning functions (member-level:
+        the refined crossing or ``None`` when the member never fails inside
+        the grid; system-level: the last safe grid temperature, never
+        ``None``).
+    failure_mode : FailureMode
+        Which physical event the reported ``theta`` corresponds to.
+    """
+
+    theta: float | None
+    failure_mode: FailureMode
 
 
 class Governing(str, Enum):
@@ -356,8 +406,6 @@ class UniformForceScan:
             the structure has no stiffness left, which the per-point engine
             build reported the same way.
         """
-        from .criticality.engine import MechanismError
-
         s = float(eurocode_k_E(temperature))
         if s <= 0.0:
             msg = (
@@ -489,11 +537,12 @@ def _limit_states_from_forces(
     """
     out: dict[str, MemberLimitState] = {}
     node_by_id = {n.id: n for n in nodes}
+    unassessable: list[str] = []
     for e in elements:
         ni = node_by_id[e.node_i]
         nj = node_by_id[e.node_j]
         length = float(np.hypot(nj.x - ni.x, nj.y - ni.y))
-        out[e.id] = _member_limit_state(
+        state = _member_limit_state(
             e.id,
             float(temps[e.id]),
             forces[e.id],
@@ -505,6 +554,29 @@ def _limit_states_from_forces(
             f_y,
             buckling_model,
             buckling_curve,
+        )
+        out[e.id] = state
+        # A compressed member without a second moment of area has no
+        # computable buckling capacity: lambda_bar -> inf, chi -> 0 and the
+        # DCR is +inf. That verdict is conservative but it is NOT a limit
+        # state -- it is a missing input, and the static-report path
+        # (postprocess.calculate_buckling) already refuses to pass such a
+        # member silently. The fire chain must be equally loud, or a model
+        # built with the Element default ``I_sec = 0.0`` reports every
+        # compression member as failed at ambient with no explanation
+        # (round-5 audit, C7 conceptual-3).
+        if state.compression and e.I_sec <= 0.0:
+            unassessable.append(e.id)
+    if unassessable:
+        warnings.warn(
+            f"buckling capacity not assessable for {len(unassessable)} "
+            f"compressed member(s) with I_sec <= 0 "
+            f"({', '.join(unassessable[:5])}"
+            f"{'...' if len(unassessable) > 5 else ''}); their DCR is "
+            "reported as +inf. Set a real second moment of area to assess "
+            "them.",
+            BucklingCheckWarning,
+            stacklevel=2,
         )
     return out
 
@@ -556,6 +628,35 @@ def member_critical_temperature(
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> float | None:
+    """Scalar facade of :func:`member_critical_temperature_detailed`.
+
+    Returns exactly the same temperature (bit-for-bit); callers that need
+    to know *why* the member failed -- limit state reached, or the system
+    collapsing at the ``k_E = 0`` table endpoint -- should use the detailed
+    variant and read :attr:`CriticalTemperatureResult.failure_mode`.
+    """
+    return member_critical_temperature_detailed(
+        nodes,
+        elements,
+        loads,
+        member_id,
+        f_y,
+        temp_grid,
+        buckling_model,
+        buckling_curve,
+    ).theta
+
+
+def member_critical_temperature_detailed(
+    nodes: Sequence[Node],
+    elements: Sequence[Element],
+    loads: Mapping[str, Mapping[str, float]],
+    member_id: str,
+    f_y: float,
+    temp_grid: Sequence[float] = _TEMP_GRID,
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+) -> CriticalTemperatureResult:
     """Smallest uniform temperature at which ``DCR_member >= 1``.
 
     Root-found in two stages: the grid locates the first bracket
@@ -567,8 +668,19 @@ def member_critical_temperature(
     conservative by at most the tolerance.  If ``DCR(T)`` crosses several
     times inside one grid cell, the crossing found is the one bisection
     converges to inside the FIRST failing cell -- the grid resolution still
-    defines which cell that is.  ``None`` when the member never reaches
-    DCR = 1 within the grid range.
+    defines which cell that is.  ``theta`` is ``None`` (with
+    ``failure_mode = NONE``) when the member never reaches DCR = 1 within
+    the grid range.
+
+    ``failure_mode`` distinguishes the two ways the scan can end in
+    failure: ``MATERIAL`` when a genuine limit state (``DCR >= 1`` at
+    finite stiffness) was crossed, and ``STIFFNESS_COLLAPSE`` when the
+    crossing is the ``k_E = 0`` table endpoint itself -- the structure lost
+    all stiffness without the member's own DCR necessarily reaching 1 (a
+    lightly loaded member in a redundant truss).  Reporting ~1200 degC as
+    that member's "critical temperature" without the label would put a
+    system-collapse temperature into engineering output as if it were a
+    material limit state (round-5 audit, C8-5).
 
     A grid point where the material law has lost all stiffness
     (``k_E(T) <= 0``, the Eurocode endpoint at 1200 degC) is treated as
@@ -589,13 +701,14 @@ def member_critical_temperature(
         msg = f"member_critical_temperature: unknown member {member_id!r}"
         raise KeyError(msg)
 
-    def dcr_at(temp: float) -> float:
+    def dcr_at(temp: float) -> tuple[float, bool]:
+        """``(DCR, collapsed)`` at one temperature."""
         try:
             forces = scan.forces_at(temp)
         except MechanismError:
             # k_E(T) <= 0: zero stiffness is structural collapse, i.e. the
             # failure side of the DCR = 1 crossing, not a scan error.
-            return float("inf")
+            return float("inf"), True
         temps_t = {eid: temp for eid in scan.ids}
         state = _limit_states_from_forces(
             nodes,
@@ -606,26 +719,40 @@ def member_critical_temperature(
             buckling_model,
             buckling_curve,
         )[member_id]
-        return state.dcr
+        return state.dcr, False
 
     prev_t: float | None = None
     for t in temp_grid:
         t_f = float(t)
-        if dcr_at(t_f) >= 1.0:
+        dcr_t, collapsed = dcr_at(t_f)
+        if dcr_t >= 1.0:
             if prev_t is None:
-                return t_f
+                return CriticalTemperatureResult(
+                    t_f,
+                    FailureMode.STIFFNESS_COLLAPSE
+                    if collapsed
+                    else FailureMode.MATERIAL,
+                )
             lo, hi = prev_t, t_f  # DCR(lo) < 1 <= DCR(hi)
+            hi_collapsed = collapsed
             for _ in range(_BISECT_MAX_ITER):
                 if hi - lo <= _BISECT_XTOL:
                     break
                 mid = 0.5 * (lo + hi)
-                if dcr_at(mid) >= 1.0:
+                dcr_mid, collapsed_mid = dcr_at(mid)
+                if dcr_mid >= 1.0:
                     hi = mid
+                    hi_collapsed = collapsed_mid
                 else:
                     lo = mid
-            return hi
+            return CriticalTemperatureResult(
+                hi,
+                FailureMode.STIFFNESS_COLLAPSE
+                if hi_collapsed
+                else FailureMode.MATERIAL,
+            )
         prev_t = t_f
-    return None
+    return CriticalTemperatureResult(None, FailureMode.NONE)
 
 
 def system_critical_temperature(
@@ -637,6 +764,34 @@ def system_critical_temperature(
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
 ) -> float:
+    """Scalar facade of :func:`system_critical_temperature_detailed`.
+
+    Returns exactly the same temperature (bit-for-bit); the detailed
+    variant additionally labels whether the scan stopped on a member limit
+    state (:attr:`FailureMode.MATERIAL`) or on the zero-stiffness table
+    endpoint (:attr:`FailureMode.STIFFNESS_COLLAPSE`), or found no failure
+    in range (:attr:`FailureMode.NONE`).
+    """
+    return system_critical_temperature_detailed(
+        nodes,
+        elements,
+        loads,
+        f_y,
+        temp_grid,
+        buckling_model,
+        buckling_curve,
+    ).theta  # type: ignore[return-value]  # never None for the system scan
+
+
+def system_critical_temperature_detailed(
+    nodes: Sequence[Node],
+    elements: Sequence[Element],
+    loads: Mapping[str, Mapping[str, float]],
+    f_y: float,
+    temp_grid: Sequence[float] = _TEMP_GRID,
+    buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+    buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+) -> CriticalTemperatureResult:
     """First loss of acceptability along the monotone heating path.
 
     Precisely: the largest grid temperature ``T`` such that EVERY scanned
@@ -659,7 +814,10 @@ def system_critical_temperature(
 
     Returns ``temp_grid[0]`` when even the coldest scan already fails (or
     collapses) and ``temp_grid[-1]`` when nothing fails within the range;
-    the resolution is the grid step.
+    the resolution is the grid step.  The detailed variant labels the
+    stopping event: ``MATERIAL`` (first member DCR >= 1),
+    ``STIFFNESS_COLLAPSE`` (the ``k_E = 0`` endpoint) or ``NONE`` (no
+    failure inside the grid).
 
     Like :func:`member_critical_temperature`, the grid is evaluated from a
     single :class:`UniformForceScan` factorisation, which is what keeps the
@@ -672,7 +830,7 @@ def system_critical_temperature(
             forces = scan.forces_at(t)
         except MechanismError:
             # k_E(T) <= 0: zero-stiffness endpoint == collapse == failure.
-            return last_safe
+            return CriticalTemperatureResult(last_safe, FailureMode.STIFFNESS_COLLAPSE)
         temps_t = {eid: float(t) for eid in scan.ids}
         states = _limit_states_from_forces(
             nodes,
@@ -684,9 +842,9 @@ def system_critical_temperature(
             buckling_curve,
         )
         if any(s.dcr >= 1.0 for s in states.values()):
-            return last_safe
+            return CriticalTemperatureResult(last_safe, FailureMode.MATERIAL)
         last_safe = float(t)
-    return last_safe
+    return CriticalTemperatureResult(last_safe, FailureMode.NONE)
 
 
 def ci_two_component(

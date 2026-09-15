@@ -374,3 +374,54 @@ def test_compat_layer_delegates_with_warning() -> None:
         assert get_eurocode_k_y(600.0) == ss.k_y(600.0)
     with pytest.warns(DeprecationWarning, match="deprecated"):
         assert get_eurocode_k_E(1100.0) == 0.0225  # legacy 0.0 is gone
+
+
+# --------------------------------------------------------------------------
+# Round-5 audit (F9): secant thermal strain / effective expansion coefficient
+# --------------------------------------------------------------------------
+
+
+def test_thermal_strain_is_elongation_relative_to_reference() -> None:
+    """``thermal_strain`` must be the fixture's elongation curve, rebased."""
+    data = _fixture()["thermal"]["thermal_elongation"]["pieces"]
+    for t in (100.0, 400.0, 600.0, 749.0, 900.0, 1150.0):
+
+        def _in(piece: dict, x: float) -> bool:
+            (lo, hi), (lo_inc, hi_inc) = piece["range_c"], piece["range_inclusive"]
+            return (lo <= x if lo_inc else lo < x) and (x <= hi if hi_inc else x < hi)
+
+        piece = next(p for p in data if _in(p, t))
+        expected = _piece_eval(piece, t) - _piece_eval(data[0], 20.0)
+        assert ss.thermal_strain(t) == pytest.approx(expected, rel=1e-12, abs=1e-15)
+        # rebasing is exact: strain(theta) = alpha(theta) - alpha(theta_ref)
+        assert ss.thermal_strain(t, 400.0) == pytest.approx(
+            ss.alpha(t) - ss.alpha(400.0), rel=1e-12, abs=1e-15
+        )
+
+
+def test_effective_alpha_reproduces_thermal_strain_exactly() -> None:
+    """``effective_alpha(T) * (T - T0) == thermal_strain(T)`` on a dense grid.
+
+    This identity is what makes ``elem.alpha = effective_alpha(T)`` a
+    drop-in correction for the framework's ``alpha * delta_T * L`` prestress
+    term: the imposed strain then follows the standard's elongation curve
+    instead of a constant ambient coefficient.
+    """
+    grid = np.arange(21.0, 1200.01, 7.0)
+    eff = ss.effective_alpha(grid)
+    assert np.allclose(eff * (grid - 20.0), ss.thermal_strain(grid), rtol=1e-12)
+    # degenerate quotient is defined away, not NaN
+    assert ss.effective_alpha(20.0) == 0.0
+    assert ss.effective_alpha(np.array([20.0, 20.0]))[0] == 0.0
+
+
+def test_effective_alpha_quantifies_constant_coefficient_underestimate() -> None:
+    """The round-5 finding, measured: a constant ambient coefficient of
+    1.2e-5 1/K understates the restrained thermal strain at 600 degC by
+    roughly 20 % -- effective_alpha is the secant slope of a convex curve,
+    so it must exceed the ambient tangent throughout the fire range up to
+    the 750-860 degC plateau."""
+    eff_600 = ss.effective_alpha(600.0)
+    assert eff_600 > 1.15 * 1.2e-5  # measured: ~1.448e-5 (+20.7 %)
+    plateau = np.arange(100.0, 750.0, 25.0)
+    assert np.all(ss.effective_alpha(plateau) > 1.2e-5)
