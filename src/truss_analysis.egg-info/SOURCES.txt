@@ -9,6 +9,8 @@ MANIFEST.in
 README.fa.md
 README.md
 pyproject.toml
+benchmarks/__init__.py
+benchmarks/reference_problems.py
 docs/conf.py
 docs/error_codes.md
 docs/index.rst
@@ -79,6 +81,7 @@ src/truss_analysis/sections.py
 src/truss_analysis/sensitivity.py
 src/truss_analysis/solver.py
 src/truss_analysis/stability.py
+src/truss_analysis/tangent_verification.py
 src/truss_analysis/topology_generator.py
 src/truss_analysis/units.py
 src/truss_analysis/visualization.py
