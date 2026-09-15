@@ -49,6 +49,8 @@ Output JSON schema (``analyze --output RESULT.json``)
                           "numpy_version": "<str>", "scipy_version": "<str>",
                           "bc_method": "<elimination|penalty>",
                           "use_sparse": <bool>,
+                          "assembly_mode": "<sparse-coo|dense-einsum>",
+                          "reduction_order": "<free-dof-elimination|penalty-augmented>",
                           "factorisation": "<cholesky|lu|sparse-lu|...>",
                           "rank_k_ff": <int>, "n_free_dofs": <int>,
                           "cond_k_ff": <float or null>,
@@ -633,6 +635,17 @@ def run(
         "bc_method": bc_method_eff,
         "use_sparse": bool(use_sparse_eff),
         "check_condition": bool(check_condition),
+        # C15: how the linear system that produced these numbers was actually
+        # formed and reduced.  `bc_method` says which boundary-condition
+        # strategy was chosen; these say what the assembler and the linear
+        # algebra then did, which is what a reproducer or a reviewer needs in
+        # order to know that two runs are comparable at all.
+        "assembly_mode": "sparse-coo" if use_sparse_eff else "dense-einsum",
+        "reduction_order": (
+            "penalty-augmented"
+            if bc_method_eff == "penalty"
+            else "free-dof-elimination"
+        ),
         "n_nodes": len(nodes),
         "n_elements": len(elements),
         "n_dof": 2 * len(nodes),

@@ -85,8 +85,16 @@ _TEMP_GRID = tuple(range(20, 1201, 25))
 #: construction -- the reported crossing is conservative by at most the
 #: tolerance instead of carrying a linear-interpolation error of the whole
 #: grid step on a curved DCR(T).
-_BISECT_XTOL = 1e-3
-_BISECT_MAX_ITER = 60
+BISECT_XTOL = 1e-3
+#: Default bisection tolerance [degC] for the critical-temperature search.
+#: Exposed (it was ``_BISECT_XTOL``) because callers now pass their own; see
+#: the ``tolerance`` argument of :func:`member_critical_temperature_detailed`.
+_BISECT_XTOL = BISECT_XTOL  # backwards-compatible private alias
+BISECT_MAX_ITER = 60
+#: Iteration ceiling for the same bisection.  60 halvings of a 100 degC grid
+#: cell is far past double-precision resolution, so it is a runaway guard
+#: rather than a real limit.
+_BISECT_MAX_ITER = BISECT_MAX_ITER
 
 #: Default flexural buckling curve. Curve ``c`` suits the thin-walled and
 #: cold-formed hollow sections this library idealises, and is the
@@ -676,6 +684,7 @@ def member_critical_temperature(
     temp_grid: Sequence[float] = _TEMP_GRID,
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+    tolerance: float = BISECT_XTOL,
 ) -> float | None:
     """Scalar facade of :func:`member_critical_temperature_detailed`.
 
@@ -683,6 +692,8 @@ def member_critical_temperature(
     to know *why* the member failed -- limit state reached, or the system
     collapsing at the ``k_E = 0`` table endpoint -- should use the detailed
     variant and read :attr:`CriticalTemperatureResult.failure_mode`.
+
+    ``tolerance`` is the bisection width in degC; see the detailed variant.
     """
     return member_critical_temperature_detailed(
         nodes,
@@ -693,6 +704,7 @@ def member_critical_temperature(
         temp_grid,
         buckling_model,
         buckling_curve,
+        tolerance=tolerance,
     ).theta
 
 
@@ -705,6 +717,7 @@ def member_critical_temperature_detailed(
     temp_grid: Sequence[float] = _TEMP_GRID,
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+    tolerance: float = BISECT_XTOL,
 ) -> CriticalTemperatureResult:
     """Smallest uniform temperature at which ``DCR_member >= 1``.
 
@@ -712,9 +725,18 @@ def member_critical_temperature_detailed(
     ``[T_k, T_k+1]`` with ``DCR(T_k) < 1 <= DCR(T_k+1)``, then bisection on
     exact :meth:`UniformForceScan.forces_at` evaluations (``O(m)`` each --
     no refactorisation, no interpolation of a curved ``DCR(T)``) narrows the
-    crossing to ``_BISECT_XTOL`` degC.  The upper end of the final bracket
+    crossing to ``tolerance`` degC.  The upper end of the final bracket
     is returned, so ``DCR(theta) >= 1`` holds by construction: the report is
-    conservative by at most the tolerance.  If ``DCR(T)`` crosses several
+    conservative by at most the tolerance.
+
+    ``tolerance`` (C6) defaults to :data:`BISECT_XTOL` = 1e-3 degC, which is
+    far below any engineering resolution and exists so the *upper end of the
+    bracket* is a well-defined answer rather than an artefact of where the
+    bisection happened to stop.  Loosening it trades ``DCR`` evaluations for
+    a wider conservative band -- useful for a screening sweep over many
+    members, wrong for a reported fire-resistance duration.  Note that the
+    grid step still decides *which* cell is searched, so a loose tolerance
+    cannot compensate for a coarse ``temp_grid``.  If ``DCR(T)`` crosses several
     times inside one grid cell, the crossing found is the one bisection
     converges to inside the FIRST failing cell -- the grid resolution still
     defines which cell that is.  ``theta`` is ``None`` (with
@@ -744,7 +766,20 @@ def member_critical_temperature_detailed(
     :class:`UniformForceScan`: at each evaluation the exact member forces
     (including restrained thermal expansion) are ``O(m)`` arithmetic, not a
     fresh ``O(n^3)`` engine build.
+
+    Parameters
+    ----------
+    tolerance : float, default BISECT_XTOL
+        Bisection bracket width [degC]; must be positive.
+
+    Raises
+    ------
+    ValueError
+        If ``tolerance`` is not positive.
     """
+    if tolerance <= 0.0:
+        msg = f"tolerance must be > 0 degC, got {tolerance}"
+        raise ValueError(msg)
     scan = UniformForceScan.build(nodes, elements, loads)
     if member_id not in scan.ids:
         msg = f"member_critical_temperature: unknown member {member_id!r}"
@@ -784,8 +819,8 @@ def member_critical_temperature_detailed(
                 )
             lo, hi = prev_t, t_f  # DCR(lo) < 1 <= DCR(hi)
             hi_collapsed = collapsed
-            for _ in range(_BISECT_MAX_ITER):
-                if hi - lo <= _BISECT_XTOL:
+            for _ in range(BISECT_MAX_ITER):
+                if hi - lo <= tolerance:
                     break
                 mid = 0.5 * (lo + hi)
                 dcr_mid, collapsed_mid = dcr_at(mid)

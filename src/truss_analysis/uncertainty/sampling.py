@@ -20,10 +20,11 @@ draw is a pure function of ``seed``).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import cast
 
 import numpy as np
-from scipy.stats import norm, rankdata
+from scipy.stats import norm, rankdata, spearmanr
 
 from .random_variables import (
     DeterministicRV,
@@ -35,8 +36,10 @@ from .random_variables import (
 )
 
 __all__ = [
+    "RankCorrelationReport",
     "gaussian_copula_correlate",
     "iman_conover_correlate",
+    "iman_conover_with_report",
     "latin_hypercube",
     "sample_spec_matrix",
 ]
@@ -246,6 +249,86 @@ def iman_conover_correlate(u: np.ndarray, correlation: np.ndarray) -> np.ndarray
         # column's ranks equal the score column's ranks exactly.
         out[np.argsort(z_target[:, d], kind="stable"), d] = np.sort(u[:, d])
     return out
+
+
+@dataclass(frozen=True)
+class RankCorrelationReport:
+    """What an Iman--Conover reordering actually achieved (C5).
+
+    :func:`iman_conover_correlate` documents that the realised Spearman
+    correlation reproduces the target "within sampling noise" and then
+    returns only the reordered matrix, so the caller has to re-derive the
+    achieved correlation to know how large that noise was.  Rank
+    correlation is *not* exactly attainable at finite ``n``: the reordering
+    is a permutation of a fixed set of values, so the achievable
+    correlations form a discrete set and the target generally falls between
+    two of them.  Reporting the gap turns "within sampling noise" into a
+    number a study can be checked against.
+
+    Attributes
+    ----------
+    reordered : numpy.ndarray
+        The reordered matrix, identical to
+        :func:`iman_conover_correlate`'s return value.
+    target : numpy.ndarray
+        The target Spearman correlation matrix that was requested.
+    achieved : numpy.ndarray
+        Spearman correlation actually realised by ``reordered``.
+    max_abs_deviation : float
+        Largest off-diagonal ``|achieved - target|`` -- the single number to
+        quote when reporting that a correlation structure was imposed.
+    n_samples : int
+        Sample count; the deviation shrinks as ``O(1/n)``, so it is
+        meaningless without it.
+    """
+
+    reordered: np.ndarray
+    target: np.ndarray
+    achieved: np.ndarray
+    max_abs_deviation: float
+    n_samples: int
+
+
+def iman_conover_with_report(
+    u: np.ndarray, correlation: np.ndarray
+) -> RankCorrelationReport:
+    """Reorder with Iman--Conover *and* report the achieved rank correlation.
+
+    Parameters
+    ----------
+    u : np.ndarray
+        Input uniform matrix ``(n, m)`` (typically a Latin hypercube).
+    correlation : np.ndarray
+        Symmetric positive-definite target **Spearman** matrix ``(m, m)``.
+
+    Returns
+    -------
+    RankCorrelationReport
+        The reordered matrix plus target, achieved and the maximum deviation.
+
+    See Also
+    --------
+    iman_conover_correlate : the reordering alone, for hot loops that do not
+        need the diagnostic.
+    """
+    reordered = iman_conover_correlate(u, correlation)
+    target = np.asarray(correlation, dtype=float)
+    m = reordered.shape[1]
+    if m < 2:
+        achieved = target.copy()
+        deviation = 0.0
+    else:
+        rho = spearmanr(reordered).statistic
+        achieved = np.atleast_2d(np.asarray(rho, dtype=float))
+        off = ~np.eye(m, dtype=bool)
+        deviation = float(np.max(np.abs(achieved[off] - target[off])))
+    return RankCorrelationReport(
+        reordered=reordered,
+        target=target,
+        achieved=achieved,
+        max_abs_deviation=deviation,
+        n_samples=int(reordered.shape[0]),
+    )
 
 
 def _build_rv(
