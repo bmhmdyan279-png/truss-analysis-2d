@@ -105,3 +105,13 @@ class AmbiguousModeWarning(UserWarning):
     version, rounding errors, or tiny perturbations. Engineers should
     examine all modes in the repeated eigenspace for physical interpretation.
     """
+
+
+class IllConditionedPerturbationWarning(UserWarning):
+    """Warning issued when perturbation analysis encounters near-singular LU factors.
+
+    Raised by :func:`truss_analysis.reliability.perturb_multi` when the core
+    stiffness matrix is close to singular (condition number exceeds threshold).
+    The perturbation results may be unreliable; engineers should verify with
+    alternative methods or refine the model (round-5 audit C8#4).
+    """
