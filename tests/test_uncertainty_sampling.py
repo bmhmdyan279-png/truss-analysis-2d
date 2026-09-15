@@ -186,3 +186,73 @@ def test_sample_spec_matrix_honours_correlation_and_deterministic_specs() -> Non
     # the correlated pair realises its target rank correlation
     rho = float(spearmanr(out["live_load"], out["f_y"]).statistic)
     assert abs(rho - 0.6) < 0.02, rho
+
+
+# --------------------------------------------------------------------------
+# Round-5 audit pins: Iman-Conover path and correlation validation
+# --------------------------------------------------------------------------
+
+
+def test_iman_conover_preserves_lhs_stratification_exactly() -> None:
+    """The reordering must be a per-column permutation of the input.
+
+    The pre-2.8 correlated path mixed columns linearly, which destroyed the
+    "exactly one sample per stratum per dimension" property that LHS exists
+    to provide (round-5 audit, finding F8/C8-3).
+    """
+    from truss_analysis.uncertainty.sampling import iman_conover_correlate
+
+    n = 2000
+    u = latin_hypercube(n, 3, seed=5)
+    corr = np.eye(3)
+    corr[0, 1] = corr[1, 0] = 0.7
+    corr[0, 2] = corr[2, 0] = -0.5
+    out = iman_conover_correlate(u, corr)
+    for d in range(3):
+        assert np.array_equal(np.sort(out[:, d]), np.sort(u[:, d])), d
+        strata = np.floor(out[:, d] * n).astype(int)
+        assert np.array_equal(np.sort(strata), np.arange(n)), d
+
+
+def test_iman_conover_realises_target_rank_correlation() -> None:
+    from truss_analysis.uncertainty.sampling import iman_conover_correlate
+
+    n = 20000
+    u = latin_hypercube(n, 2, seed=11)
+    out = iman_conover_correlate(u, np.array([[1.0, 0.6], [0.6, 1.0]]))
+    rho = float(spearmanr(out[:, 0], out[:, 1]).statistic)
+    assert abs(rho - 0.6) < 0.02, rho
+
+
+def test_correlation_validation_rejects_asymmetric_and_bad_diagonal() -> None:
+    """Asymmetric input previously vanished into the Cholesky lower triangle."""
+    from truss_analysis.uncertainty.sampling import (
+        gaussian_copula_correlate,
+        iman_conover_correlate,
+    )
+
+    u = latin_hypercube(64, 2, seed=3)
+    asymmetric = np.array([[1.0, 0.5], [0.2, 1.0]])
+    bad_diag = np.array([[1.0, 0.5], [0.5, 2.0]])
+    off_range = np.array([[1.0, 1.5], [1.5, 1.0]])
+    for bad in (asymmetric, bad_diag, off_range):
+        for fn in (gaussian_copula_correlate, iman_conover_correlate):
+            with pytest.raises(ValueError, match="correlation"):
+                fn(u, bad)
+
+
+def test_sample_spec_matrix_correlated_marginals_are_stratified() -> None:
+    """End-to-end: the spec pipeline keeps every marginal a Latin hypercube."""
+    specs = default_rv_specs(fire_scenario_temperature=400.0)
+    names = [s.name for s in specs]
+    means = {"live_load": 1.0, "f_y": 235e6, "fire_intensity": 400.0, "E": 210e9}
+    corr = np.eye(len(specs))
+    i_ll, i_fy = names.index("live_load"), names.index("f_y")
+    corr[i_ll, i_fy] = corr[i_fy, i_ll] = 0.6
+    n = 500
+    out = sample_spec_matrix(specs, means, n, seed=23, correlation=corr)
+    # Compare against the uncorrelated draw: correlated columns must contain
+    # exactly the same values (a permutation), i.e. identical marginals.
+    ref = sample_spec_matrix(specs, means, n, seed=23, correlation=None)
+    for name in ("live_load", "f_y"):
+        assert np.allclose(np.sort(out[name]), np.sort(ref[name])), name

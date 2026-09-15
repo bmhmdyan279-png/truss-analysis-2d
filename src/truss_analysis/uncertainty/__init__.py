@@ -25,6 +25,7 @@ from .random_variables import (
 )
 from .sampling import (
     gaussian_copula_correlate,
+    iman_conover_correlate,
     latin_hypercube,
     sample_spec_matrix,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "TruncatedNormalRV",
     "default_rv_specs",
     "gaussian_copula_correlate",
+    "iman_conover_correlate",
     "latin_hypercube",
     "load_distributions_config",
     "probabilistic_ranking",
