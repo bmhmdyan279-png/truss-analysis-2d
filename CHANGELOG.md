@@ -7,6 +7,314 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Round-6 external audit. 22 tracked items (7 P0 scientific/safety, 5 P1
+physical coverage, 10 P2 performance/architecture) plus the three failures
+that were live on `main` at the start of the round. As in rounds 1-5, each
+fix carries a pinning test, and the two items where the *ticket itself* was
+technically wrong are implemented correctly with the discrepancy recorded
+rather than followed.
+
+### Fixed
+
+- **`.gitignore` was committed wrapped in markdown code fences**, so git
+  never honoured a single line of it. That is how 40 `__pycache__/*.pyc`
+  files, `.coverage` and the generated `_version.py` came to be tracked, and
+  why `test_no_bytecode_tracked_in_git` and
+  `test_setuptools_scm_fallback_configured` were both failing on `main`.
+  Fences removed, the `setuptools_scm` `write_to` target and the
+  coverage/type caches added, all 42 offenders dropped from the index.
+- **`tests/test_stability_tangent.py` duplicated the finite-difference
+  tangent oracle already in `test_stability.py` (A5)** and called
+  `member_forces()` with the full displacement vector instead of the free-DOF
+  slice, so it failed with a shape mismatch on every run. Deleted; its one
+  non-redundant assertion survives as
+  `test_geometric_stiffness_is_homogeneous_in_the_base_state`, which pins
+  `K_G(alpha N) = alpha K_G(N)` at matrix level through the production demand
+  path.
+- **`tangent_verification.py` was dead scaffolding that always passed.**
+  `verify_tangent_stiffness()` looped over `pass` and returned
+  `(True, 0.0, ...)` unconditionally; `TangentVerifier.compute_internal_force()`
+  raised `NotImplementedError`; the module was imported by nothing and had
+  0 % coverage. A verifier that always passes is worse than no verifier, so
+  it was rewritten around the geometrically-exact internal force of the
+  pin-jointed assembly, its exact two-dyad tangent (material + geometric, at
+  the *deformed* cosines), a central-FD oracle, and
+  `verify_linearization_convergence()`. The first draft of the rewrite had a
+  real bug the oracle caught immediately: the transverse extractor's second
+  node block was not sign-flipped, giving an 8.8e-3 relative error against
+  1e-10 once fixed.
+- **153 ruff findings on `main`** (83 whitespace, 16 over-length lines, 5
+  unused locals, 4 unused imports, naming and docstring rules) reduced to
+  zero; `mypy --strict` green on all 48 source files. The matplotlib
+  `Normalize` reference now imports from `matplotlib.colors`.
+- **`stability.geometric_stiffness` documented its own sign convention
+  backwards**: it claimed `K_G` is positive semi-definite on the *compressed*
+  members. With tension-positive `N_e`, tension stiffens and compression
+  softens. Corrected.
+- **`ShallowSystemWarning` was listed under `Raises`** though it is issued,
+  not raised; moved to a `Notes` section.
+- **`n_modes` was accepted and then ignored.** The dense path always computed
+  and returned every positive eigenvalue, so `BucklingResult.modes` held
+  `n_free` entries regardless of what was asked for. Now honoured through
+  `eigh(subset_by_index=...)` / `eigsh(k=...)`.
+- **`BucklingResult.modes` was documented as "the first element equals
+  `mode`" while being sorted ascending by `nu`**, i.e. the first element was
+  the *least* critical mode. Now sorted descending by `nu` (ascending
+  `lambda_cr`) so `modes[0]` is the critical one and the docstring is true.
+- **`_rise_span_ratio` flagged every collinear model as shallow.** The
+  orientation-robust rewrite initially returned `0.0` for a degenerate
+  bounding box, which made every member-level buckling check in `limitstates`
+  emit a shallow-system warning for a single column. Such a model now returns
+  `inf` (the heuristic is undefined, not "shallow"), and `dcr_field()` passes
+  `warn_shallow=False` since the advisory belongs to a deliberate stability
+  study, not to every DCR call.
+- **`IllConditionedPerturbationWarning` existed since round 5 and was never
+  raised**, and its docstring pointed at `truss_analysis.reliability.perturb_multi`
+  -- not where that function lives. Wired up (C2) and the docstring corrected.
+- **`perturb_multi` returned noise from a merely ill-conditioned core.**
+  `_check_lu` only rejects cores singular to working precision; a core at
+  `cond ~ 1e13` sailed through and its digits fed straight into retrofit
+  ranking. The solve is now *measured* -- exact `cond` of the `r x r` core
+  plus the backward error `||core x - f|| / denom` -- and warns above
+  `PERTURB_COND_WARN` (1e10) or `PERTURB_RESID_WARN` (1e-8).
+- **`apply_decision` hard-coded `b/t = 25` for every member it enlarged**
+  (C7), with the same literal duplicated in `sections.idealised_square_hss`
+  and `TrussConfig`. For a slender section the error is unsafe: the enlarged
+  `I` comes out too large, so the retrofit looks better than it is. The ratio
+  is now recovered per member from its own `(A, I_sec)` pair.
+- **`docs/api` had no page for `thermal.fire_curve`** -- one of the largest
+  modules in the library -- nor for `thermal.protection` or
+  `tangent_verification`. Added, both toctrees updated.
+
+### Added
+
+- **C1: a sparse Lanczos eigen-path for large models.** `eigen_solver=
+  {"auto","dense","sparse"}` on `linearized_buckling_load_factor`, with CSR
+  assembly and one SuperLU factorisation shared between the
+  positive-definiteness probe and the eigensolve (handed to ARPACK as `Minv`).
+  Two details are easy to get wrong and are documented on the functions:
+  the whitened problem needs the largest *algebraic* `nu` (`which="LA"`),
+  not the smallest magnitude, since `nu = 1/lambda_cr`; and the definiteness
+  probe shifts to `sigma = 0`, not to `-||A||_F` -- the far shift brackets
+  the spectrum and looks more rigorous but clusters every transformed
+  eigenvalue at `1/||A||_F`, and *measured* it failed to converge in 12811
+  iterations at 1121 free DOFs where `sigma = 0` converges in under ten.
+  `SPARSE_EIGEN_THRESHOLD` is set from measurement (see *Behaviour changes*),
+  and new `solver_path` / `n_free_dof` fields report which path actually ran,
+  because `eigen_solver="sparse"` cannot be honoured when ARPACK has no room
+  (`k < n`) and that fallback should be visible.
+- **C3: a redundancy screen before perturbation.** Removing `k` members from
+  an assembly with redundancy `n_s` leaves `n_s - k` (a bar goes away without
+  the DOF count changing), so a negative result is a *certain* mechanism.
+  `perturb_multi` now says so combinatorially, before any factorisation, in
+  engineering terms. New `setup_indeterminacy()` derives it as `m - n_free`,
+  and `graph_validation.static_indeterminacy` / `model_indeterminacy` are now
+  the single definition of `m + r - 2j`.
+- **C16: parallel Monte Carlo.** `ReliabilityEngine(n_jobs=..., parallel_backend=...)`
+  plus a per-call `run_convergence(n_jobs=...)` override. Bit-identical to
+  the serial run at every worker count and on both backends -- the draws come
+  from one up-front stream and margins accumulate strictly in index order,
+  with each index taken from its own block rather than a running counter that
+  could drift. Threads are the default (the callback is never pickled and the
+  work is numpy/scipy, which releases the GIL); evaluation is chunked so
+  resident responses are bounded by a chunk rather than `max_n`.
+- **B4: `imperfection_sensitivity()`.** Imposes `eps * L_ref * phi` on the
+  node coordinates and re-runs the bifurcation analysis, returning the sweep,
+  the first-order gradient `d(lambda/lambda_0)/d(eps)` and a sensitivity
+  verdict. **Both imperfection signs are probed and the adverse one
+  reported**: an eigenvector's sign is arbitrary, and on a shallow toggle the
+  two signs are wildly asymmetric -- one deepens the arch and `lambda_cr`
+  roughly quadruples with the rise, the other flattens it and the reserve
+  collapses. Reporting only the favourable sign would be the most dangerous
+  output this function could produce. When the perfect geometry has no
+  bifurcation at all (`lambda_cr = inf`, mode identically zero) it refuses to
+  invent a direction and asks for an explicit `mode=`.
+- **B2: the EN 1991-1-2 Annex A parametric temperature-time curve.**
+  `ParametricFire` (callable, so it drops into `steel_temperature(fire_curve=...)`)
+  and `parametric_fire_temperature`, derived from the compartment's opening
+  factor, fire load density, boundary thermal inertia and Table A.2 limiting
+  duration -- with a real peak and a cooling phase, which a nominal
+  fire-rating curve cannot express. Implemented against the Access Steel
+  worked example SX042a-EN-EU rather than from recollection, because two
+  details are easy to get wrong and invisible in the curve's shape: `Gamma`
+  is formed from the *opening factor*, `(O/b)^2 / (0.04/1160)^2`, not from
+  `q_td`; and `t_max = max(0.2e-3 q_td / O, t_lim)`, so a lightly loaded or
+  well ventilated compartment is bounded below by the fire-growth duration
+  and becomes fuel-controlled. The example's `Gamma = 5.791`,
+  `t_max = 0.355 h`, `t*_max = 2.056 h`, `theta_max = 1052 degC`, cooling
+  rate 250 K/h and the line `theta = theta_max - 250 (t* - t*_max)` are all
+  reproduced and pinned; the heating branch matches a hand evaluation of
+  A.1(1) to 1e-12, and all three A.2 cooling-rate branches have a parameter
+  set that lands in them.
+- **B1: EN 1993-1-2 clause 4.2.5.2 heating of an insulated member** -- new
+  module `truss_analysis.thermal.protection`. The library could heat an
+  unprotected member but had no path for a protected one, so any insulated
+  design had to be hand-computed outside the library and fed in as a
+  prescribed field. Three deliberate choices: the integrator is **explicit
+  Euler, not RK4**, because 4.2.5.2 states a *recursion* with a
+  non-negativity clip and a 30 s ceiling rather than an ODE, and a test
+  measures the order as ~1 so "improving" it to RK4 fails the suite (a
+  fire-resistance duration quoted against a different integrator than the
+  code's is not a code-compliant duration); `c_a = c_a(theta_a)` is
+  re-evaluated every step from the library's own EN single source of truth, so
+  `mu` moves with the specific-heat spike near 730 degC; and `k_sh` defaults
+  to the conservative 1.0, with `box_protection_shadow_factor()` computing the
+  `0.9 (A_p/V)_box / (A_p/V)` reduction and rejecting reversed arguments --
+  which would otherwise yield `k_sh > 1`, a *less* conservative temperature
+  from a call that looks valid. Ships a ten-product catalogue in the
+  project's provenance-fixture style, which states plainly that it is a
+  SECONDARY source and not a substitute for certified product data.
+- **B7: `LumpedCapacityWarning` when `A_m/V < 50 1/m`.** The
+  uniform-cross-section assumption of clause 4.2.2.2 was documented in the
+  module docstring and then applied silently to every section factor,
+  including stocky ones where it does not hold. The message carries the
+  Biot number rather than just the threshold: `lumped_capacity_biot()` derives
+  `Bi = h_eff (V/A_m) / lambda_a` from the module's own `h_net` linearised
+  about a representative exposure, and `biot_critical_section_factor()`
+  inverts it. For the default exposure the classical `Bi < 0.1` criterion is
+  reached at `A_m/V ~ 34 1/m`, so the code's 50 fires first -- a test pins
+  that ordering, because quoting a Biot number that passed its own stated
+  criterion would be self-contradicting.
+- **C5: `iman_conover_with_report()` / `RankCorrelationReport`.** The bare
+  function claimed the realised Spearman correlation matched the target
+  "within sampling noise" and returned only the matrix, leaving the caller to
+  re-derive the noise. Rank correlation is not exactly attainable at finite
+  `n` (the reordering permutes a fixed value set, so the achievable
+  correlations are discrete), which made the claim unfalsifiable. The report
+  carries target, achieved (recomputed with `spearmanr`, not self-reported),
+  maximum off-diagonal deviation and `n`.
+- **C6: `tolerance` on `member_critical_temperature[_detailed]`**, default
+  `BISECT_XTOL` (1e-3 degC, now public with the private name kept as an
+  alias). Because the returned `theta` is the bracket's *upper* end,
+  `DCR(theta) >= 1` holds at any tolerance, so loosening it widens a
+  conservative band rather than introducing error.
+- **C15: `assembly_mode` and `reduction_order` in `solver_metadata`** and in
+  the documented JSON schema. `bc_method` said which strategy was
+  *requested*; these say what the assembler and linear algebra then did. This
+  earned its place immediately: requesting `use_sparse=true` with
+  `bc_method=penalty` silently falls back to dense assembly, which was
+  already warned about at run time but is now machine-readable in the report
+  that survives.
+- **`tangent_verification` as a real module**: `internal_force` (the
+  geometrically-exact operator), `exact_tangent_stiffness`,
+  `linearized_tangent_stiffness`, `verify_tangent_stiffness` and
+  `verify_linearization_convergence`. The last one converts the word
+  "linearised" from a docstring sentence into a measured rate: the relative
+  Frobenius gap between `K_E + K_G` and the exact tangent closes at fitted
+  order **1.000** over a 16x load range on the toggle.
+- **`EigenConvergenceError`** in the exception hierarchy: a buckling load
+  factor is safety-critical, so an unconverged Ritz value is never returned as
+  if it were an answer.
+
+### Changed
+
+- **C12: the README statistics are now gated.** `make stats` regenerated the
+  test/coverage/module numbers quoted in four places in each of two READMEs,
+  but nothing enforced that it had been run: round 5 found them advertising
+  356 tests / 95.44 %, round 6 found 611 / 95.3 % against a suite that had
+  moved past both. `scripts/update_readme_stats.py --check` renders the same
+  patches in memory and exits 1 on any difference (a pattern that no longer
+  matches is also a failure -- the READMEs changed shape and the numbers are
+  no longer maintained at all). Wired as `make stats-check`, into
+  `make check-all`, as a CI `stats` job, and as a **pre-push** hook: it
+  re-runs the suite plus mypy (~100 s), and gating every commit on that is how
+  gates get bypassed with `--no-verify`. `make pre-commit-setup` now installs
+  the pre-push hook type too. The CI job lets the script do its own measuring
+  rather than parsing the coverage job's log in shell, so `--check` and
+  `make stats` share one parser and a green gate genuinely implies
+  `make stats` would be a no-op.
+- **`BucklingResult` gained `load_factors`, `solver_path` and `n_free_dof`.**
+  A list of mode shapes without the loads they belong to cannot be checked,
+  plotted or ranked by the caller, so each returned mode now carries its
+  factor.
+- **C8: `beta_hat` renamed to `beta_mom`** on `MarginStatistics` and
+  `HeterogeneityResult`, with the old names kept as `DeprecationWarning`
+  alias properties. `mean/std` of a sampled margin is not a Hasofer-Lind
+  reliability index -- a FORM index is the distance from the origin to a
+  design point minimised over the actual limit-state surface in standard
+  normal space, and no such search happens here. The two coincide only for a
+  Gaussian margin *and* a linear limit state. `_beta_hat` -> `_beta_mom`.
+- `geometric_stiffness(sparse=True)` and the new sparse dyad assembler map
+  global DOFs to free positions by fancy indexing rather than a Python
+  comprehension over `geom.dofs`, which was a measurable share of the cost at
+  the sizes the sparse path exists for. Local dyad vectors are now built
+  straight from the shared cosines instead of being gathered out of the full
+  `(m, n_dof)` matrix, removing a restricted-vs-unrestricted indexing trap
+  that the first draft of this change fell into and a test caught.
+- `DEFAULT_THICKNESS_RATIO` / `MIN_THICKNESS_RATIO` are now the single source
+  for the section-ratio literals.
+
+### Behaviour changes ⚠
+
+Collected for quick scanning; each is detailed above.
+
+1. **C19 (recorded late): `TopologyResult.tau_vs_base`** was added in 2.8.0
+   and never appeared in that release's *Behaviour changes*, though it puts a
+   new ranking quantity -- tau-b of the perturbed topology against the base
+   -- into `compute_ci_for_topology` output. Recorded here for completeness;
+   it is additive and does not alter any pre-existing number.
+2. **`BucklingResult.modes` is now ordered by ascending `lambda_cr`** (was
+   ascending `nu`, i.e. the *opposite*), is truncated to `n_modes` (was all
+   positive eigenvalues), and `modes[0]` now genuinely equals `mode`. Code
+   that indexed `modes[-1]` for the critical mode must change to `modes[0]`.
+3. **`lambda_cr` from `eigen_solver="auto"`** switches to sparse Lanczos at
+   `SPARSE_EIGEN_THRESHOLD = 400` free DOFs. Agreement with the dense path is
+   `< 2e-13` relative on `lambda_cr` and on mode subspace angles across
+   241-2001 DOF, with and without a thermal prestress field, so no published
+   number moves at reporting precision; the threshold was set from measurement
+   (sparse/dense time ratio 1.7x, 3.6x, 0.42x, 0.88x, 0.52x, 0.40x, 0.36x,
+   0.29x, 0.29x at `n_free` = 33, 65, 121, 181, 241, 481, 801, 1281, 2001),
+   choosing 400 over the ~120 crossover because the dense path also buys an
+   unconditional Cholesky verdict and the full spectrum.
+4. **`beta_hat` -> `beta_mom`** on two public dataclasses. The old attribute
+   still works and emits `DeprecationWarning`; keyword construction with
+   `beta_hat=` does not.
+5. **`apply_decision(thickness_ratio=...)` now defaults to `None`** (derive
+   per member) instead of `25.0`. Enlarged `I_sec` values therefore change for
+   any member whose real `b/t` is not 25 -- which is the point, and the
+   direction is *less* optimistic for slender sections. Pass an explicit
+   ratio to restore the old behaviour.
+6. **New warnings, no silent number changes:** `LumpedCapacityWarning` for
+   `A_m/V < 50 1/m`, `IllConditionedPerturbationWarning` from `perturb_multi`,
+   a `UserWarning` when a parametric fire's `q_td` is outside [50, 1000], and
+   `MechanismError` (instead of a cryptic factorisation failure) when
+   simultaneous removals exceed the system's redundancy.
+7. **`solver_metadata` gained `assembly_mode` and `reduction_order`**
+   (additive; strict JSON preserved).
+8. Models solved through the unchanged dense path, uncorrelated sampling,
+   unprotected members below the `A_m/V` threshold, and all legacy scalar APIs
+   remain **bit-for-bit identical**.
+
+### Deferred with rationale (recorded, not dropped)
+
+- **C11 -- separate `MaterialState` from `MemberResponse`.** The two are
+  genuinely conflated (`MemberResponse` carries both the response quantities
+  `axial_force`/`E` and the section/material state `A`/`I_sec`/`yield_stress`/
+  `temperature`). Splitting them is the right call but touches every
+  constructor site in the reliability chain, and doing it at the end of a
+  round with no budget for a full re-verification is how a clean refactor
+  becomes a silent behaviour change in a safety-critical path. Deferred to a
+  round of its own.
+- **C10 -- complex-step verification of the DDM.** The sensitivity module's
+  analytic derivatives are already cross-checked against central differences;
+  complex-step would remove the round-off floor and let the agreement be
+  asserted to machine precision. Worth doing, but it needs `complex`-safe
+  paths through the EN material interpolation (piecewise-linear tables with
+  `np.interp` do not accept complex input), which is a change to the material
+  layer rather than to the sensitivity layer.
+- **C13/C14 -- a machine-readable `physics_boundary.yaml` and its propagation
+  into `AnalysisResult`/JSON.** `docs/theory.md` already states the boundary
+  matrix in prose; making it a shipped artefact that the result carries is a
+  good idea and a schema decision (what belongs in a *result* versus in
+  documentation) that deserves its own discussion rather than a late-round
+  guess.
+- **C9 -- mandatory triple ranking output.** Ranking currently returns one
+  ordering chosen by the caller; making all three unconditional would change
+  the shape of a public result type.
+- **C4 -- calibrating `dpocon` on more than two fixtures.** Needs a reference
+  corpus with known condition numbers; the benchmark suite is the right home
+  and does not have them yet.
+
 ## [2.8.0] — 2026-09-15
 
 This release closes the fifth external audit round (nine independent

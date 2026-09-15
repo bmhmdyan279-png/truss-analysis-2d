@@ -813,6 +813,79 @@ configuration ($O(\theta_0^2)$ apart for the toggle).
 
 ---
 
+### 9.4 Eigen-path selection at scale (round-6 C1)
+
+The bifurcation problem is posed on the free DOFs, so its cost is set by
+$n = n_{\text{free}}$. The dense path is three $O(n^3)$ stages — Cholesky of
+$A$, two triangular whitening solves, `eigh` — plus $O(n^2)$ memory for three
+full matrices. The sparse path replaces all of them with one SuperLU
+factorisation of $A$ plus $O(k)$ Lanczos iterations, sharing that
+factorisation between the definiteness probe (`OPinv` at $\sigma = 0$) and
+the eigensolve (`Minv`):
+
+$$
+B x = \nu A x, \qquad \nu_{\max} = 1/\lambda_{cr},
+\qquad A = K_E + K_G(N_{\text{imposed}}), \quad B = -K_G(N_{\text{mech}}).
+$$
+
+Two details decide whether this is a scalability fix or a wrong answer:
+
+* The request is the largest **algebraic** $\nu$ (`which="LA"`), not the
+  smallest magnitude. Since $\nu = 1/\lambda_{cr}$, asking for `"SM"` would
+  return the *highest* buckling load and label it critical.
+* The definiteness probe shifts to $\sigma = 0$, not to $-\lVert A\rVert_F$.
+  The far shift brackets the whole spectrum and looks more rigorous, but every
+  transformed eigenvalue then clusters at $1/\lVert A\rVert_F$ and Lanczos
+  cannot separate them: it failed to converge in 12811 iterations at
+  $n = 1121$ where $\sigma = 0$ converges in under ten. The reduced scope of
+  the $\sigma = 0$ probe — it detects the loss-of-definiteness *crossing*
+  ($\lambda_{\min} \to 0$), which is the physically relevant failure, not a
+  base state already deeply past it — is documented on
+  `_sparse_smallest_eigenvalue`; use `eigen_solver="dense"` when such a state
+  is suspected, since a Cholesky attempt gives an unconditional verdict.
+
+Measured against the dense path on a Pratt truss (agreement $<2\times10^{-13}$
+relative on $\lambda_{cr}$ and on mode subspace angles, with and without a
+thermal prestress field):
+
+| $n_{\text{free}}$ | 33 | 65 | 121 | 181 | 241 | 481 | 801 | 1281 | 2001 |
+|---|---|---|---|---|---|---|---|---|---|
+| sparse / dense time | 1.7× | 3.6× | 0.42× | 0.88× | 0.52× | 0.40× | 0.36× | 0.29× | 0.29× |
+
+(Entries below 1 mean the sparse path is faster.) The crossover is near
+$n \approx 100$, but `SPARSE_EIGEN_THRESHOLD` is set to **400** rather than
+100: below that a solve costs well under a second, and the dense path buys two
+things the sparse one cannot — an unconditional positive-definiteness verdict,
+and the full spectrum rather than the leading Ritz pairs. `solver_path` on the
+result reports which path actually ran, because `"sparse"` cannot be honoured
+when ARPACK has no room ($k < n$) and that fallback should not be silent.
+
+### 9.5 Imperfection sensitivity (round-6 B4)
+
+A linearised $\lambda_{cr}$ is an upper bound, and how much of an upper bound
+it is depends on the post-critical path. `imperfection_sensitivity` measures
+that instead of asserting it: the perfect geometry's critical mode $\varphi$
+is imposed on the *coordinates* at amplitude $\varepsilon$,
+
+$$
+x_i \leftarrow x_i + \varepsilon\, L_{\text{ref}}\, \varphi_i ,
+$$
+
+and the bifurcation analysis repeated on each imperfect geometry, giving the
+first-order gradient $\mathrm{d}(\lambda/\lambda_0)/\mathrm{d}\varepsilon$
+and a sensitivity verdict.
+
+**Both signs of $\varepsilon$ are probed and the adverse one reported.** An
+eigenvector's sign is arbitrary, and on an asymmetric post-critical path the
+two signs are not equivalent: for a shallow toggle one sign deepens the arch
+and $\lambda_{cr}$ grows roughly with the cube of the rise, while the other
+flattens it and the reserve collapses. Reporting only the favourable sign
+would be the single most dangerous output this function could produce, so
+$\lambda_{cr} = \min(\lambda_+, \lambda_-)$ elementwise and both series are
+retained for diagnosis. Each point is a fresh *linearised* analysis on the
+imperfect geometry, not a limit-point search; full arc-length continuation
+remains out of scope.
+
 ## 10. Fire Exposure and Member Heating (`thermal/fire_curve.py`)
 
 ### 10.1 The layering this closes
@@ -870,6 +943,122 @@ are deliberately unchanged: models without imposed strain stay bit-for-bit,
 and the correction is an explicit, documented user choice.
 
 ---
+
+### 10.4 Parametric fire — EN 1991-1-2 Annex A (round-6 B2)
+
+ISO 834 is a prescriptive curve that rises forever and never cools. A
+performance-based design needs a fire derived from the compartment, with a
+real peak and a decay. With $t^* = t\,\Gamma$ in hours:
+
+$$
+\theta_g = 20 + 1325\left(1 - 0.324 e^{-0.2 t^*} - 0.204 e^{-1.7 t^*}
+- 0.472 e^{-19 t^*}\right), \qquad
+\Gamma = \frac{(O/b)^2}{(0.04/1160)^2}
+$$
+
+$$
+t_{\max} = \max\!\left(\frac{0.2\times10^{-3} q_{t,d}}{O},\; t_{\lim}\right),
+\qquad t^*_{\max} = t_{\max}\,\Gamma
+$$
+
+and, for $t^* > t^*_{\max}$, a cooling branch whose rate is selected by
+$t^*_{\max}$: $625$ K/h below $0.5$ h, $250(3 - t^*_{\max})$ between $0.5$
+and $2$ h, $250$ K/h above, with $\theta_g$ floored at $\theta_0$.
+
+Two details are easy to get wrong and invisible in the curve's shape, which is
+why the implementation is pinned against the Access Steel worked example
+SX042a-EN-EU rather than against a recollection of the clause:
+
+* $\Gamma$ is formed from the **opening factor** $O = A_v\sqrt{h_{eq}}/A_t$,
+  not from $q_{t,d}$. The example gives $\Gamma = 5.791$; a $q_{t,d}$-based
+  reading gives $6.04$ for the same compartment.
+* $t_{\max}$ takes the **maximum** of the ventilation-controlled duration and
+  $t_{\lim}$ (Table A.2: slow 25, medium 20, fast 15 min), so a lightly
+  loaded or well ventilated compartment is fuel-controlled and bounded below.
+
+Reproduced and pinned: $\Gamma = 5.791$, $t_{\max} = 0.355$ h,
+$t^*_{\max} = 2.056$ h, $\theta_{\max} = 1052\,^\circ\mathrm{C}$, cooling
+rate $250$ K/h, and the heating branch against a hand evaluation of A.1(1) to
+$10^{-12}$. Limits of validity are enforced ($0.02 \le O \le 0.2$ m$^{0.5}$,
+$100 \le b \le 2200$ J m$^{-2}$ s$^{-0.5}$ K$^{-1}$) and $q_{t,d}$ outside
+$[50, 1000]$ MJ/m$^2$ warns as an extrapolation of the standard's fitting
+data.
+
+*Not implemented, deliberately:* the standard's **note** to A.1(1) defines a
+different $\Gamma = (b/1160)^2/(q_{t,d}/420)^2$ for low-fire-load offices with
+$b > 1200$. It is a National-Annex-dependent special case, and shipping an
+unvalidated second variant of a fire curve is worse than not shipping it.
+
+### 10.5 Protected members — EN 1993-1-2 §4.2.5.2 (round-6 B1)
+
+For an insulated member the protection layer's own heat capacity enters,
+because it must be heated before the steel behind it warms:
+
+$$
+\Delta\theta_a = k_{sh}\frac{\lambda_p}{d_p}\frac{A_p/V}{\rho_a c_a}
+\,\frac{\theta_g - \theta_a}{1 + \mu/3}\,\Delta t
+\;-\;\left(e^{\mu/10} - 1\right)\Delta\theta_g,
+\qquad
+\mu = \frac{c_p \rho_p}{c_a \rho_a}\, d_p \,\frac{A_p}{V}
+$$
+
+with $\Delta\theta_a \ge 0$ imposed whenever $\Delta\theta_g > 0$, and
+$\Delta t \le 30$ s.
+
+**The integrator is explicit Euler, not RK4** — deliberately, and against the
+rest of this module. §4.2.2.2 states a continuous ODE and is answered with
+RK4; §4.2.5.2 states a *recursion* with a non-negativity clip and a step
+ceiling. Reproducing the code's answer means reproducing its recursion, so a
+test measures the convergence order and asserts $\approx 1$: "improving" this
+to RK4 fails the suite, because a fire-resistance duration quoted against a
+different integrator than the code's is not a code-compliant duration.
+
+The clip is load-bearing on the very first step. ISO 834 jumps from 20 °C to
+~261 °C in 30 s, so the $-(e^{\mu/10}-1)\Delta\theta_g$ time-delay term
+outweighs a heating term that starts from $\theta_g - \theta_a = 0$ and the
+raw increment is *negative*; without the clip a protected member would predict
+a temperature below ambient while the fire is climbing. During a decaying
+(parametric) fire the clip does not apply and the member cools, which a test
+pins so the model cannot become a ratchet.
+
+$k_{sh}$ defaults to $1.0$ (contour protection), the conservative choice since
+it multiplies the heating term; `box_protection_shadow_factor` computes the
+$0.9\,(A_p/V)_{box}/(A_p/V)$ reduction of §4.2.5.2(2) and rejects reversed
+arguments, which would otherwise give $k_{sh} > 1$ — a less conservative
+temperature from a call that looks valid.
+
+The shipped material catalogue is a **secondary source**: representative
+literature values, not code-mandated numbers and not product data. It carries
+no temperature dependence of $\lambda_p$ or $c_p$, so gypsum's endothermic
+dehydration plateau near 100–200 °C is absent and a gypsum-protected member is
+predicted to heat *faster* than it really does — the safe direction, but an
+approximation. No intumescent coatings (whose effective thickness is a
+function of temperature and time), no cavity or multi-layer build-up.
+
+### 10.6 When the lumped assumption stops holding (round-6 B7)
+
+Both heating models assume a uniform cross-section temperature. That is valid
+while the Biot number is small:
+
+$$
+Bi = \frac{h_{\text{eff}}\,(V/A_m)}{\lambda_a} \ll 0.1
+$$
+
+`lumped_capacity_biot` derives $h_{\text{eff}}$ from the module's own
+`h_net` linearised about a representative exposure (800 °C gas against the
+member's initial temperature), so it carries the radiative term that dominates
+a real compartment fire rather than assuming a constant film coefficient.
+$\lambda_a$ is evaluated at that reference temperature, not at ambient: steel
+conductivity falls with temperature and the lower value gives the larger,
+conservative Biot number.
+
+`steel_temperature` warns below $A_m/V = 50\ \mathrm{m}^{-1}$, the reference
+threshold for a "thick" section. The message quotes both numbers and their
+relationship, because the classical $Bi < 0.1$ criterion is reached at
+$A_m/V \approx 34\ \mathrm{m}^{-1}$ for this exposure — i.e. the code
+threshold is the *conservative* of the two and fires first. A warning that
+quoted a Biot number passing its own stated criterion (what a bare
+50-threshold warning does at $A_m/V = 45$) would be self-contradicting.
 
 ## 11. Reliability-layer conventions (`reliability.py`, `uncertainty/sampling.py`)
 
@@ -937,9 +1126,13 @@ formally, not implicitly.
 | Member buckling capacity | supported (Euler/$\chi$, flexural, fire & ambient curves) | §4 |
 | System bifurcation under prestress | supported (linearised) | §9 |
 | Reliability (crude MC, LHS, rank correlation) | supported; rare-event methods not | §11 |
-| Thermal transient conduction through the section | **not supported** (uniform temperature only) | §10.2 scope |
+| Thermal transient conduction through the section | **not supported** (uniform temperature only); validity now *measured* via the Biot number and warned below $A_m/V = 50\ \mathrm{m}^{-1}$ | §10.6 |
+| Protected / insulated members | supported (EN 1993-1-2 §4.2.5.2, explicit-Euler recursion, single homogeneous layer) | §10.5 |
+| Parametric (natural) fire curves | supported (EN 1991-1-2 Annex A main clause; the A.1(1)-note office variant is not) | §10.4 |
 | Geometric nonlinearity (P-Δ, large displacement) | **not supported**; validity guarded by `LargeDisplacementWarning` and diagnosable via §9 | §9.3 scope |
-| Post-buckling / snap-through / imperfection sensitivity | **not supported** | §9.3 |
+| Imperfection sensitivity | supported as a *linearised sweep* over imposed geometric imperfections, both signs, adverse reported | §9.5 |
+| Post-buckling / snap-through / arc-length continuation | **not supported** | §9.3, §9.5 |
+| Large-model bifurcation ($n_{\text{free}} \ge 400$) | supported via sparse Lanczos; agreement with the dense path $<2\times10^{-13}$ | §9.4 |
 | Material nonlinearity (plasticity, redistribution) | **not supported** (capacity checks are code-model, not incremental analysis) | §4 |
 | Creep & transient thermal strain | **not supported** (deferred, see below) | — |
 | Torsional / torsional-flexural buckling | **not supported** (needs $I_z, I_t, I_w$ absent from the section model) | — |
@@ -953,3 +1146,14 @@ subsystem with its own validation burden; nonlinear continuation (Newton–
 Raphson arc-length) supersedes — not extends — the linearised §9 check and
 belongs to a dedicated release. Each deferral is recorded in CHANGELOG 2.8.0
 so the boundary is versioned, not vibes.
+
+**Round-6 additions to the boundary:** protected-member heating (§10.5) and
+parametric fire curves (§10.4) move two rows from *not supported* to
+*supported*, each with its own stated limits. Imperfection sensitivity (§9.5)
+is supported as a linearised sweep — it quantifies how far $\lambda_{cr}$ can
+be trusted without becoming a post-buckling analysis, which is still out.
+Exact-tangent verification (`tangent_verification.py`) does not extend the
+boundary but *measures* it: `verify_linearization_convergence` reports that the
+relative Frobenius gap between the library's $K_E + K_G$ and the exact tangent
+closes at fitted order **1.000** over a 16× load range, which is the precise
+sense in which §9 is a linearised theory.
