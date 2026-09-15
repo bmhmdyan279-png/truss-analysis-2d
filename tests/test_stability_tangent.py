@@ -10,10 +10,14 @@ from truss_analysis.model import Node, Element
 
 
 def make_simple_truss():
-    """Creates a simple 2-bar truss under compression for testing."""
+    """Creates a simple 2-bar truss under compression for testing.
+    
+    Note: The truss must be non-collinear to avoid being a mechanism
+    under vertical load. Node n1 is raised slightly to ensure stability.
+    """
     nodes = [
         Node(id='n0', x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
-        Node(id='n1', x=2.0, y=0.0, is_support=False, support_dx=False, support_dy=False),
+        Node(id='n1', x=2.0, y=1.0, is_support=False, support_dx=False, support_dy=False),
         Node(id='n2', x=4.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
     ]
     
@@ -67,18 +71,25 @@ class TestTangentStiffnessValidation:
         Verifies that the analytical elastic stiffness (K_E) matches 
         the Finite Difference approximation within numerical tolerance.
         """
-        nodes, elements, loads = make_simple_truss()
+        nodes, elements, loads_low = make_simple_truss()
+        
+        # Build K and F manually as the solver expects
+        from truss_analysis.assembly import assemble_global_matrices
+        from truss_analysis.solver import solve
+        
+        K_E, F_ext, F_mech, fixed = assemble_global_matrices(nodes, elements)
+        
+        # Apply mechanical load
+        F = F_ext.copy()
+        # Node n1 is index 1, so DOFs are 2,3
+        F[3] = loads_low['n1']['fy']  # Fy at node n1
         
         # Solve to get displacement state
-        result = solve(nodes, elements, loads)
-        u_current = result.displacements
-        
-        # Compute Analytical Elastic Stiffness
-        K_E, _, _, fixed = assemble_global_matrices(nodes, elements)
-        free_dofs = [d for d in range(len(u_current)) if d not in fixed]
+        u_current = solve(K_E, F, fixed)
         
         # Check a free DOF
-        test_dof = free_dofs[0] if free_dofs else 0
+        free_dofs = [d for d in range(len(u_current)) if d not in fixed]
+        test_dof = free_dofs[0] if free_dofs else 2  # DOF 2 or 3 is free
         
         k_fd = self.compute_finite_difference_tangent(nodes, elements, u_current, test_dof)
         k_ana = K_E[:, test_dof]
@@ -105,16 +116,32 @@ class TestTangentStiffnessValidation:
         # High load case
         loads_high = {'n1': {'fy': -50000.0}}  # High compression
         
-        # Solve both cases
-        result_low = solve(nodes, elements, loads_low)
-        result_high = solve(nodes, elements, loads_high)
+        # Build K and F manually
+        from truss_analysis.assembly import assemble_global_matrices
+        from truss_analysis.solver import solve
         
-        # Get axial forces from results
-        forces_low = {m.id: m.axial_force for m in result_low.members}
-        forces_high = {m.id: m.axial_force for m in result_high.members}
+        K_E, F_ext, F_mech, fixed = assemble_global_matrices(nodes, elements)
+        
+        # Solve low load case
+        F_low = F_ext.copy()
+        F_low[3] = loads_low['n1']['fy']
+        u_low = solve(K_E, F_low, fixed)
+        
+        # Solve high load case
+        F_high = F_ext.copy()
+        F_high[3] = loads_high['n1']['fy']
+        u_high = solve(K_E, F_high, fixed)
+        
+        # Compute member forces for both states using the engine
+        from truss_analysis.criticality.engine import build_engine, member_forces
+        setup = build_engine(nodes, elements, loads_low, temps=None)
+        n_low = member_forces(setup, u_low)
+        n_high = member_forces(setup, u_high)
+        
+        forces_low = {e.id: float(n_low[i]) for i, e in enumerate(elements)}
+        forces_high = {e.id: float(n_high[i]) for i, e in enumerate(elements)}
         
         # Fixed DOFs
-        _, _, _, fixed = assemble_global_matrices(nodes, elements)
         free_dofs = [d for d in range(2*len(nodes)) if d not in fixed]
         
         # Compute K_G for both states

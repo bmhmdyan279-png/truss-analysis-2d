@@ -16,7 +16,7 @@ import numpy.typing as npt
 
 from .model import Element, Node
 
-__all__ = ["plot_truss"]
+__all__ = ["plot_truss", "plot_buckling_mode"]
 
 
 def _persian(text: str) -> str:
@@ -116,6 +116,127 @@ def plot_truss(
     ax.set_title(_persian(title))
     ax.set_aspect("equal")
     ax.grid(alpha=0.3)
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+    else:
+        plt.show()
+    return save_path
+
+
+def plot_buckling_mode(
+    nodes: Sequence[Node],
+    elements: Sequence[Element],
+    mode: npt.ArrayLike,
+    title: str = "Buckling Mode",
+    save_path: str | Path | None = None,
+) -> str | Path | None:
+    """Plot a buckling mode shape on the undeformed truss geometry.
+    
+    Visualizes the critical buckling mode from a linearized stability
+    analysis by overlaying the deformed shape (scaled) on the original
+    geometry. The mode is shown with dashed lines, colored by the 
+    displacement magnitude.
+    
+    Parameters
+    ----------
+    nodes : Sequence[Node]
+        Truss nodes in the same order as used in the stability analysis.
+    elements : Sequence[Element]
+        Truss elements connecting the nodes.
+    mode : array_like
+        Buckling mode vector of shape ``(2n,)`` containing displacements
+        for each DOF. Fixed DOFs should be exactly zero.
+    title : str, optional
+        Plot title; Persian text is reshaped automatically. Can include
+        the critical load factor, e.g. ``"Buckling Mode (λ_cr = 2.34)"``.
+    save_path : str, Path or None, optional
+        When given, the figure is saved to this path (Agg backend) instead
+        of being shown interactively.
+    
+    Returns
+    -------
+    str, Path or None
+        ``save_path`` when the figure was saved, otherwise ``None``.
+    
+    Notes
+    -----
+    Addresses Issue B6: ``plot_buckling_mode()`` missing from 
+    ``visualization.py`` (C2(⚠️ج)).
+    
+    Examples
+    --------
+    >>> from truss_analysis.stability import linearized_buckling_load_factor
+    >>> from truss_analysis.visualization import plot_buckling_mode
+    >>> result = linearized_buckling_load_factor(nodes, elements, forces)
+    >>> plot_buckling_mode(nodes, elements, result.mode, 
+    ...                    title=f"Buckling Mode (λ_cr = {result.lambda_cr:.2f})")
+    """
+    import matplotlib
+
+    if save_path:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    coords = {n.id: i for i, n in enumerate(nodes)}
+    mode_arr = np.asarray(mode, dtype=np.float64)
+    
+    # Compute scale for visualization (15% of structure extent)
+    xs = [n.x for n in nodes]
+    ys = [n.y for n in nodes]
+    span = max(max(xs) - min(xs), max(ys) - min(ys), 1e-9)
+    max_disp = float(np.max(np.abs(mode_arr)))
+    scale = 0.15 * span / max(max_disp, 1e-12)
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Plot original geometry in light gray
+    for e in elements:
+        ni, nj = nodes[coords[e.node_i]], nodes[coords[e.node_j]]
+        ax.plot([ni.x, nj.x], [ni.y, nj.y], color="lightgray", lw=1.5, alpha=0.7)
+    
+    # Plot buckling mode (deformed shape) with color based on displacement magnitude
+    disp_magnitude = np.sqrt(mode_arr[::2]**2 + mode_arr[1::2]**2)
+    max_node_disp = np.max(disp_magnitude)
+    
+    for i, e in enumerate(elements):
+        ni, nj = nodes[coords[e.node_i]], nodes[coords[e.node_j]]
+        idx_i, idx_j = coords[e.node_i], coords[e.node_j]
+        
+        # Deformed positions
+        x_i_def = ni.x + mode_arr[2 * idx_i] * scale
+        y_i_def = ni.y + mode_arr[2 * idx_i + 1] * scale
+        x_j_def = nj.x + mode_arr[2 * idx_j] * scale
+        y_j_def = nj.y + mode_arr[2 * idx_j + 1] * scale
+        
+        # Color by average displacement magnitude of element nodes
+        avg_disp = (disp_magnitude[idx_i] + disp_magnitude[idx_j]) / 2
+        color_intensity = avg_disp / max_node_disp if max_node_disp > 1e-12 else 0.5
+        
+        ax.plot(
+            [x_i_def, x_j_def],
+            [y_i_def, y_j_def],
+            color=plt.cm.viridis(color_intensity),
+            lw=2.5,
+            alpha=0.9,
+            label="Buckling mode" if i == 0 else None,
+        )
+    
+    # Add node markers sized by displacement magnitude
+    for i, n in enumerate(nodes):
+        node_disp = disp_magnitude[i]
+        size = 50 * (node_disp / max_node_disp if max_node_disp > 1e-12 else 0.5) + 30
+        ax.plot(n.x, n.y, "o", color="red", ms=size, alpha=0.7)
+    
+    ax.set_title(_persian(title))
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.3)
+    
+    # Add colorbar for displacement magnitude
+    sm = plt.cm.ScalarMappable(cmap="viridis", norm=plt.Normalize(0, max_node_disp))
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax, label="Displacement magnitude (a.u.)")
+    
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
