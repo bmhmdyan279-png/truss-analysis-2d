@@ -32,7 +32,6 @@ from truss_analysis.criticality.engine import (
     MechanismError,
     base_displacement,
     build_engine,
-    load_vector as engine_load_vector,
     member_forces,
     total_load_vector,
 )
@@ -413,62 +412,64 @@ def test_fully_restrained_model_raises() -> None:
 
 def test_geometric_stiffness_finite_difference_tangent() -> None:
     """Verify that K_G is the exact tangent of the internal force residual.
-    
+
     The geometric stiffness is defined as the derivative of the internal
     force vector with respect to nodal displacements, evaluated at the
     prestressed base state:
-    
+
         K_G = d(N_int) / du
-    
+
     This test verifies the identity:
-    
+
         u^T K_G u ≈ [N_int(u + ε·û) - N_int(u - ε·û)] · û / (2ε)
-    
+
     where û = u / ||u|| is the normalized direction. This is the strongest
     possible oracle for K_G correctness -- it checks that the matrix is
     the true linearization of the force operator, not just a plausible
     -looking formula.
-    
-    See C4#3: "هیچ تست finite-difference tangent برای K_G وجود ندارد — 
+
+    See C4#3: "هیچ تست finite-difference tangent برای K_G وجود ندارد —
     قوی‌ترین oracle باقی‌مانده"
     """
     nodes, elements, _loads = _toggle(0.2)
     forces = {"r1": -5.2e4, "r2": 3.1e4}
-    
+
     # Assemble K_G from the library
     K_G = np.asarray(geometric_stiffness(nodes, elements, forces))
-    
+
     # Get geometry for force computation
     geom = member_geometry(nodes, elements)
     n_dof = 2 * len(nodes)
     g = member_geometric_vectors(geom, n_dof)
-    
+
     # Test on random displacement directions
     rng = np.random.default_rng(42)
     for _ in range(30):
         u = rng.normal(size=n_dof)
-        
+
         # Direct quadratic form: u^T K_G u
         direct = float(u @ K_G @ u)
-        
+
         # Finite difference: directional derivative of internal forces
         eps = 1e-8 * max(1.0, np.linalg.norm(u))
         u_hat = u / np.linalg.norm(u) if np.linalg.norm(u) > 0 else u
-        
+
         def internal_force_work(displacement: np.ndarray) -> float:
             """Compute sum_e (N_e / L_e) * (g_e · u)^2 at given displacement."""
             transverse = g @ displacement
             coeffs = np.array([forces.get(e.id, 0.0) for e in elements]) / geom.lengths
             return float(np.sum(coeffs * transverse**2))
-        
+
         fd_plus = internal_force_work(u + eps * u_hat)
         fd_minus = internal_force_work(u - eps * u_hat)
         fd_directional = (fd_plus - fd_minus) / (2 * eps)
-        
+
         # For W(u) = u^T K_G u (quadratic form), directional derivative is:
         # dW/du [û] = 2 * u^T K_G û = 2 * (u^T K_G u) / ||u||
-        expected_fd = 2.0 * direct / np.linalg.norm(u) if np.linalg.norm(u) > 1e-14 else 0.0
-        
+        expected_fd = (
+            2.0 * direct / np.linalg.norm(u) if np.linalg.norm(u) > 1e-14 else 0.0
+        )
+
         assert fd_directional == pytest.approx(expected_fd, rel=1e-5, abs=1e-6), (
             f"FD mismatch: {fd_directional:.6e} vs {expected_fd:.6e}, "
             f"direct={direct:.6e}"
@@ -478,37 +479,39 @@ def test_geometric_stiffness_finite_difference_tangent() -> None:
 def test_geometric_stiffness_second_order_work_identity_fd() -> None:
     """Cross-check: the second-order work computed via K_G matches
     the finite-difference curvature of the potential energy.
-    
+
     For a quadratic form W(u) = u^T K_G u, the second directional
     derivative along any unit vector v is:
-    
+
         d²W/ds² [s=0] = 2 * v^T K_G v
-    
+
     This test computes the same quantity by finite differences and
     verifies agreement.
     """
     nodes, elements, _loads = _fan(dl_free=1e-4)
-    
+
     # Get base state forces
     setup = build_engine(nodes, elements, {"A": {"Fx": 0.0, "Fy": -50.0}})
     free = list(setup.free_dofs)
-    u_total = base_displacement(setup, total_load_vector(nodes, {"A": {"Fx": 0.0, "Fy": -50.0}}, setup))
+    u_total = base_displacement(
+        setup, total_load_vector(nodes, {"A": {"Fx": 0.0, "Fy": -50.0}}, setup)
+    )
     n_total = member_forces(setup, u_total)
     forces = {e.id: float(n_total[i]) for i, e in enumerate(elements)}
-    
+
     K_G_full = np.asarray(geometric_stiffness(nodes, elements, forces))
     K_G = K_G_full[np.ix_(free, free)]
-    
+
     geom = member_geometry(nodes, elements)
     g_all = member_geometric_vectors(geom, 2 * len(nodes))
     g_free = g_all[:, free]
-    
+
     def second_order_work(displacement_free: np.ndarray) -> float:
         """Compute sum_e (N_e / L_e) * phi_e^2 for given free DOF displacement."""
         transverse = g_free @ displacement_free
         coeffs = np.array([forces.get(e.id, 0.0) for e in elements]) / geom.lengths
         return float(np.sum(coeffs * transverse**2))
-    
+
     rng = np.random.default_rng(123)
     for _ in range(20):
         v = rng.normal(size=len(free))
@@ -516,20 +519,67 @@ def test_geometric_stiffness_second_order_work_identity_fd() -> None:
         if v_norm < 1e-10:
             continue
         v_hat = v / v_norm
-        
+
         # Direct: v^T K_G v
         direct = float(v_hat @ K_G @ v_hat)
-        
+
         # FD: second derivative of W along v
         eps = 1e-7
         w_plus = second_order_work(eps * v_hat)
         w_zero = second_order_work(np.zeros_like(v))
         w_minus = second_order_work(-eps * v_hat)
-        
+
         # Second derivative: [W(ε) - 2W(0) + W(-ε)] / ε²
-        fd_second = (w_plus - 2 * w_zero + w_minus) / (eps ** 2)
-        
+        fd_second = (w_plus - 2 * w_zero + w_minus) / (eps**2)
+
         # For W(u) = u^T K u (no 0.5 factor), second derivative = 2 * v^T K v
         assert fd_second == pytest.approx(2.0 * direct, rel=1e-4, abs=1e-5), (
-            f"Second-derivative mismatch: FD={fd_second:.6e}, 2*direct={2.0*direct:.6e}"
+            f"Second-derivative mismatch: FD={fd_second:.6e}, "
+            f"2*direct={2.0 * direct:.6e}"
         )
+
+
+def test_geometric_stiffness_is_homogeneous_in_the_base_state() -> None:
+    """Matrix-level homogeneity: ``K_G(alpha N) = alpha K_G(N)``.
+
+    ``test_load_scaling_invariance`` pins the *eigenvalue* consequence of
+    linearity; this pins the *assembly* consequence.  Two base states are
+    solved independently through the engine (so the axial forces come from
+    the production demand path, not from a hand-written dictionary) at a
+    50x load ratio, and the assembled ``K_G`` matrices must obey the same
+    ratio exactly -- a scalar slip in ``(N_e / L_e) g_e g_e^T`` would show
+    up here while leaving the eigenvector test indifferent.
+
+    Folded in from the round-6 audit: the stand-alone
+    ``tests/test_stability_tangent.py`` module duplicated the
+    finite-difference tangent oracle already present above (A5) and called
+    :func:`member_forces` with the full displacement vector instead of the
+    free-DOF slice; its one non-redundant assertion is kept here.
+    """
+    nodes, elements, loads = _toggle(0.2)
+    free = None
+    forces_by_scale: dict[float, dict[str, float]] = {}
+    for scale in (1.0, 50.0):
+        scaled_loads = {"A": {"Fx": 0.0, "Fy": scale * loads["A"]["Fy"]}}
+        setup = build_engine(nodes, elements, scaled_loads)
+        free = list(setup.free_dofs)
+        u_free = base_displacement(setup, total_load_vector(nodes, scaled_loads, setup))
+        n_mem = member_forces(setup, u_free)
+        forces_by_scale[scale] = {e.id: float(n_mem[i]) for i, e in enumerate(elements)}
+
+    assert free is not None
+    k_g_low = np.asarray(geometric_stiffness(nodes, elements, forces_by_scale[1.0]))
+    k_g_high = np.asarray(geometric_stiffness(nodes, elements, forces_by_scale[50.0]))
+
+    # Homogeneity of the assembled matrix on the free sub-block.
+    assert np.allclose(
+        k_g_high[np.ix_(free, free)],
+        50.0 * k_g_low[np.ix_(free, free)],
+        rtol=1e-12,
+    )
+    # ... and the contribution is not vacuous: high compression must visibly
+    # erode the tangent stiffness relative to the elastic matrix.
+    k_e, _, _, _ = assemble_global_matrices(nodes, elements)
+    k_t = k_e[np.ix_(free, free)] + k_g_high[np.ix_(free, free)]
+    assert np.linalg.norm(k_g_high[np.ix_(free, free)]) > 1e-3
+    assert np.linalg.norm(k_t) < np.linalg.norm(k_e[np.ix_(free, free)])

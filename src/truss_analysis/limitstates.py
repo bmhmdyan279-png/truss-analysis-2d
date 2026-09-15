@@ -636,28 +636,30 @@ def dcr_field(
     result = _limit_states_from_forces(
         nodes, elements, forces, temps, f_y, buckling_model, buckling_curve
     )
-    
+
     # A1: Connect lambda_cr to dcr_field for system stability
     if check_system_stability:
         try:
-            buckling_result = linearized_buckling_load_factor(nodes, elements, loads, temps)
+            buckling_result = linearized_buckling_load_factor(
+                nodes, elements, loads, temps
+            )
             lambda_cr = buckling_result.lambda_cr
-            
+
             # If lambda_cr < 1, the system is unstable at current load level
             # Adjust DCR for compression members to reflect this
             if lambda_cr < 1.0:
                 stability_factor = 1.0 / lambda_cr
-                for member_id, ls in result.items():
+                for ls in result.values():
                     if ls.compression and ls.p_cr is not None:
                         # Scale DCR by stability factor
                         # This ensures DCR > 1 when system is unstable
-                        object.__setattr__(ls, 'dcr', ls.dcr * stability_factor)
+                        object.__setattr__(ls, "dcr", ls.dcr * stability_factor)
         except MechanismError:
             # Base state already unstable - all compression members should fail
-            for member_id, ls in result.items():
+            for ls in result.values():
                 if ls.compression:
-                    object.__setattr__(ls, 'dcr', float('inf'))
-    
+                    object.__setattr__(ls, "dcr", float("inf"))
+
     return result
 
 

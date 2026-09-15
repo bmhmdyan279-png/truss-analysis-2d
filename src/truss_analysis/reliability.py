@@ -22,7 +22,7 @@ import numpy.typing as npt
 from scipy.stats import beta as beta_dist
 from scipy.stats import norm
 
-from .exceptions import BucklingCheckWarning, IllConditionedPerturbationWarning
+from .exceptions import BucklingCheckWarning
 from .limitstates import DEFAULT_BUCKLING_CURVE, GAMMA_M_FIRE, BucklingModel
 from .sections import (
     buckling_reduction_factor,

@@ -13,7 +13,6 @@ Butcher, J. C. (2008). Numerical Methods for Ordinary Differential Equations.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from scipy.integrate import solve_ivp
 
 from truss_analysis.material.steel_eurocode import specific_heat, unit_mass
@@ -106,7 +105,7 @@ class TestRK4Convergence:
 
     def test_convergence_order_is_four(self):
         """RK4 should exhibit ~4th order convergence in the asymptotic regime.
-        
+
         Note: At very tight tolerances, round-off error dominates and the
         apparent order drops. This test verifies the method is working correctly
         by checking that errors decrease monotonically with step refinement.
@@ -121,9 +120,9 @@ class TestRK4Convergence:
         # Errors should decrease (at least non-increase) with refinement
         err_values = list(errors.values())
         for i in range(1, len(err_values)):
-            assert err_values[i] <= err_values[i-1] * 1.1, (
+            assert err_values[i] <= err_values[i - 1] * 1.1, (
                 f"Error did not decrease at refinement {i}: "
-                f"{err_values[i-1]:.2e} -> {err_values[i]:.2e}"
+                f"{err_values[i - 1]:.2e} -> {err_values[i]:.2e}"
             )
 
     def test_max_step_default_is_accurate_enough(self):
@@ -133,9 +132,7 @@ class TestRK4Convergence:
         error = abs(res_default.theta_final - T_ref)
 
         # EN 1993-1-2 §4.2.2.2(3) caps Δt at 5s; verify this is sufficient
-        assert error < 0.01, (
-            f"Default 5s step has error {error:.4f} degC > 0.01 degC"
-        )
+        assert error < 0.01, f"Default 5s step has error {error:.4f} degC > 0.01 degC"
 
     def test_spike_near_730C_resolved(self):
         """Specific heat spike near 730°C is captured without oscillation."""

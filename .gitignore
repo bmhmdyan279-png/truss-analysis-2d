@@ -1,4 +1,3 @@
-```
 # Python
 __pycache__/
 *.pyc
@@ -22,8 +21,19 @@ wheels/
 *.egg
 MANIFEST
 
+# Generated version stamp (setuptools_scm `write_to`)
+src/truss_analysis/_version.py
+
 # Coverage
 .coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Test / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Environment
 .env
@@ -43,4 +53,3 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
-```

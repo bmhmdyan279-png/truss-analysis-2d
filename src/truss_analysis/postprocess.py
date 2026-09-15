@@ -8,7 +8,11 @@ from typing import Any
 
 import numpy as np
 
-from .exceptions import BucklingCheckWarning, LargeDisplacementWarning, ShallowSystemWarning
+from .exceptions import (
+    BucklingCheckWarning,
+    LargeDisplacementWarning,
+    ShallowSystemWarning,
+)
 from .model import Element, Node
 from .sections import euler_buckling_load
 

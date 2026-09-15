@@ -197,16 +197,16 @@ class SteelHeatingResult:
 
     def max_heating_rate(self) -> float:
         """Maximum instantaneous heating rate [degC/s].
-        
+
         Returns
         -------
         float
             Maximum value of d(theta)/dt over the entire time history.
             Computed via finite differences on the temperature history.
-        
+
         Notes
         -----
-        Addresses Issue B5: ``max_heating_rate()`` missing from 
+        Addresses Issue B5: ``max_heating_rate()`` missing from
         ``SteelHeatingResult`` (C2(⚠️ب)).
         """
         if len(self.time_s) < 2:
@@ -218,39 +218,39 @@ class SteelHeatingResult:
 
     def time_to_temperature(self, target_theta: float) -> float | None:
         """Time at which steel first reaches a target temperature.
-        
+
         Parameters
         ----------
         target_theta : float
             Target steel temperature [degC].
-        
+
         Returns
         -------
         float | None
             Time [s] when steel first reaches ``target_theta``, or ``None``
             if the target is never reached during the exposure.
-        
+
         Notes
         -----
-        Addresses Issue B5: ``time_to_temperature()`` missing from 
+        Addresses Issue B5: ``time_to_temperature()`` missing from
         ``SteelHeatingResult`` (C2(⚠️ب)).
         """
         # Find first index where temperature >= target
         above = np.where(self.theta_steel >= target_theta)[0]
         if len(above) == 0:
             return None
-        
+
         idx = above[0]
         if idx == 0:
             return float(self.time_s[0])
-        
+
         # Linear interpolation between previous and current point
         t1, t2 = self.time_s[idx - 1], self.time_s[idx]
         th1, th2 = self.theta_steel[idx - 1], self.theta_steel[idx]
-        
+
         if abs(th2 - th1) < 1e-10:
             return float(t2)
-        
+
         t_target = t1 + (target_theta - th1) * (t2 - t1) / (th2 - th1)
         return float(t_target)
 
