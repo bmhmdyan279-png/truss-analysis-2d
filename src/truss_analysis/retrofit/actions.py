@@ -17,6 +17,18 @@ Note on ``x=3``: enlarging the area changes BOTH the axial stiffness and the
 buckling capacity; ``I`` is recomputed through
 :func:`truss_analysis.sections.idealised_square_hss` (the idealised square
 HSS model), never through a solid-section ``A**2/12`` shortcut.
+
+Note on ``x=1``/``x=2`` (round-5 audit, C7-12): the fixed ``theta_offset``
+values are a **first-order decision proxy**, not a thermal model. A real
+protection layer's temperature drop depends on the section factor
+``A_m/V``, the insulation thickness/conductivity and the exposure time
+(see :mod:`truss_analysis.thermal.fire_curve` for the physics-based lumped
+capacitance path). The offsets here answer the triage question "which
+members deserve protection at all, under a common proxy budget?" -- they
+deliberately do NOT claim a specific insulation design. At scenario
+temperatures above ~700 degC a constant offset can misestimate the
+protected temperature by more than 150 degC; treat the ranking, not the
+absolute protected temperature, as the output.
 """
 
 from __future__ import annotations

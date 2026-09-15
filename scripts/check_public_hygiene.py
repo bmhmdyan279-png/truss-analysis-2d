@@ -98,9 +98,14 @@ ARTIFACT_NAME = re.compile(
     r"PKG-INFO|SOURCES\.txt|.*\.egg-info.*|_version\.py|\.baseline_perf|"
     r"structure\.txt|scm_version\.json|scm_file_list\.json|"
     r".*\.whl|.*\.log|test-report\.html|\.coverage(\..*)?|coverage\.xml|"
-    r"dependency_links\.txt|entry_points\.txt|requires\.txt|top_level\.txt"
+    r"dependency_links\.txt|entry_points\.txt|requires\.txt|top_level\.txt|"
+    r".*\.py[co]"
     r")$"
 )
+
+# Byte-code caches must never be tracked: they are non-reproducible build
+# artefacts (round-5 audit: 86 __pycache__ files had crept into the index).
+PYCACHE_PATH = re.compile(r"(^|/)__pycache__(/|$)")
 
 FORBIDDEN_PATH = re.compile(
     r"(^|/)(vault|STATE|uploads|PROJECT_DOCUMENTATION)(/|$)|"
@@ -155,6 +160,11 @@ def scan_file(rel: str) -> list[str]:
         problems.append(
             f"{rel}: build artifact must not be committed / "
             "آرتیفکت بیلد نباید کامیت شود"
+        )
+    if PYCACHE_PATH.search(rel):
+        problems.append(
+            f"{rel}: byte-code cache directory must not be committed / "
+            "پوشه __pycache__ نباید کامیت شود"
         )
     if FORBIDDEN_PATH.search(rel):
         problems.append(f"{rel}: forbidden private path / مسیر خصوصی ممنوع است")

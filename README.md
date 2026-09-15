@@ -8,7 +8,7 @@ per EN 1993-1-2, parametric topology generation, member criticality indices,
 uncertainty quantification and retrofit triage utilities.
 
 [![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
-![coverage](https://img.shields.io/badge/coverage-95.4%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-95.3%25-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 [![PyPI version](https://img.shields.io/pypi/v/truss-analysis.svg)](https://pypi.org/project/truss-analysis/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -43,20 +43,26 @@ solver it provides an engineering toolkit for steel trusses exposed to
 elevated temperatures:
 
 * material reduction factors and the constitutive law of **EN 1993-1-2**
-  (Table 3.1),
+  (Table 3.1), plus the **ISO 834 exposure curve** and the code's
+  lumped-capacitance **member-heating solver** (fire → steel temperature →
+  structural response in one chain),
+* **fire limit states** (DCR fields, critical temperatures labelled by
+  failure mode) and **linearised system stability** (geometric stiffness,
+  bifurcation load factors around the prestressed base state),
 * **parametric generators** for Warren, Pratt and Howe trusses,
 * a **member criticality index** computed with an exact rank-1 perturbation
   engine (one factorisation serves all members),
 * **uncertainty quantification** (Latin hypercube and Monte Carlo sampling
-  with optional copula-based rank correlation),
+  with stratification-preserving Iman–Conover rank correlation) and a
+  Monte Carlo reliability engine sharing the DCR chain's capacity model,
 * **retrofit triage** under a budget (greedy, exhaustive, robust and
   redundancy-aware strategies with three cost scenarios),
 * structural **graph validation** (connectivity, mechanisms, rank and
   condition number of the free-free stiffness matrix).
 
 Everything is deterministic given the inputs, fully type-annotated
-(`mypy --strict` clean) and covered by a test suite of 356 tests
-(95.4 % coverage, gate at 90 %). Results are always SI (m, N, Pa) regardless
+(`mypy --strict` clean) and covered by a test suite of 611 tests
+(95.3 % coverage, gate at 90 %). Results are always SI (m, N, Pa) regardless
 of the input unit system.
 
 ## Features
@@ -65,14 +71,15 @@ of the input unit system.
 |---|---|
 | Solver | Direct stiffness method; elimination (default) or penalty boundary conditions; sparse (CSR + SuperLU) or dense assembly; Cholesky-first factorisation for the SPD system; mechanism/singularity detection with rank, condition number and a `stable`/`ill_conditioned`/`singular` status |
 | Thermal | Per-member temperature change `delta_T`, free-length changes `delta_L_free` (fabrication fit); prestress work tracked separately |
-| Fire engineering | EN 1993-1-2 reduction factors `k_E(T)`, `k_y(T)`, `k_s(T)`, `k_p(T)`, strain limits and the full stress–strain law; compression capacity per §4.2.3.1 with the buckling reduction factor `chi` (not bare Euler); design resistance and demand–capacity ratio (DCR) fields; system critical temperature `theta_sys` by DCR sweep |
+| Fire engineering | EN 1993-1-2 reduction factors `k_E(T)`, `k_y(T)`, `k_s(T)`, `k_p(T)`, strain limits and the full stress–strain law; compression capacity per §4.2.3.1 with the buckling reduction factor `chi` (not bare Euler); design resistance and demand–capacity ratio (DCR) fields; system critical temperature `theta_sys` by DCR sweep, labelled by **failure mode** (material limit vs. stiffness collapse); ISO 834 exposure curve and the §4.2.2.2 **lumped-capacitance member-heating solver** (exposure → steel temperature → structural chain); secant thermal strain `effective_alpha(T)` from the standard's elongation curve |
 | Criticality | Exact rank-1 (Sherman–Morrison) perturbation engine: per-member CI / normalised CI, ranks, top-5 sets, Kendall tau-b rank stability against the ambient-temperature baseline; **multi-criteria indices** — displacement, peak member force, the member's own force, strain energy and support reaction — from the same perturbed field |
-| Uncertainty | Random-variable table (Gumbel live load, lognormal yield strength, truncated-normal fire intensity, deterministic E) with documented citation status; LHS + Monte Carlo; Gaussian copula correlation; streaming statistics; probabilistic ranking |
+| Uncertainty | Random-variable table (Gumbel live load, lognormal yield strength, truncated-normal fire intensity, deterministic E) with documented citation status; LHS + Monte Carlo; rank correlation by **Iman–Conover reordering** (Latin-hypercube stratification survives coupling) with a Gaussian-copula alternative; streaming statistics; probabilistic ranking; reliability margins on the **same `chi` capacity model as the DCR chain**; empirical failure probability with an exact Clopper–Pearson interval alongside the normal-approximation `Φ(−β̂)` |
 | Retrofit | Budgeted member upgrading; greedy / exhaustive / robust / redundant strategies; linear, quadratic and step cost scenarios; metric set: cost, `u_max`, `theta_sys`, members with DCR ≥ 1 |
 | Validation | Graph checks (orphans, duplicates, self-loops, connectivity, rank, condition); energy validation via the generalized Clapeyron theorem; equilibrium residuals; optional OpenSeesPy reference bridge (`validation` extra) |
 | Buckling | Euler critical load with effective-length factor; utilisation ratio per compressed member |
+| Stability | Geometric stiffness `K_G = Σ (N/L) g gᵀ` and **linearised bifurcation load factor** `λ_cr` around the prestressed (thermal/fabrication) base state, with mode shape — the system-level companion to the member-level checks; validated against the shallow-toggle closed form and an independent QZ eigensolve |
 | Units | SI and Imperial inputs (automatic conversion); outputs always SI |
-| Output | Console summary, JSON, CSV force table, Markdown report, PNG plot (Persian-aware text shaping with the `viz` extra) |
+| Output | Console summary, JSON (with a `solver_metadata` reproducibility block: versions, factorisation used, rank/condition of `K_ff`, tolerance policy), CSV force table, Markdown report, PNG plot (Persian-aware text shaping with the `viz` extra) |
 | Packaging | `py.typed` marker, strict typing, pinned tool chain, multi-stage Dockerfile, matrix CI (3 OS × 3 Python versions) |
 
 ## Installation
@@ -596,11 +603,13 @@ make lint           # ruff check + format check
 make type-check     # mypy (strict) on src/
 make check-all      # lint + type-check + test-cov (what CI runs)
 make build          # sdist + wheel + twine check
+make stats          # re-measure and patch the README test/coverage numbers
+make sync-requirements  # regenerate requirements*.txt from pyproject.toml
 ```
 
-Current status on this branch: **356 tests passing, 95.44 % coverage**
+Current status on this branch: **611 tests passing, 95.31 % coverage**
 (`pytest tests/`), `ruff` clean (extended rule set: E, F, I, W, UP, B, SIM,
-RUF, PT, N, D), `mypy --strict` clean on all 42 library modules.
+RUF, PT, N, D), `mypy --strict` clean on all 46 library modules.
 
 The pinned `pre-commit` chain runs ruff, mypy (src/), detect-secrets (with
 baseline), a repository hygiene scanner (forbidden artefacts/paths/size
@@ -616,17 +625,18 @@ src/truss_analysis/
 ├── model.py, fileio.py, units.py            # data contract + I/O + units
 ├── main.py                                  # CLI (analyze/validate/generate/version)
 ├── graph_validation.py                      # topology checks
-├── limitstates.py, degradation.py           # DCR, capacity, critical temperature
+├── limitstates.py, degradation.py           # DCR, capacity, critical temperature + failure mode
 ├── sections.py, heterogeneity.py            # section models
-├── material/                                # EN 1993-1-2 data + interpolators
-├── thermal/                                 # reduction-factor helpers
+├── material/                                # EN 1993-1-2 data + interpolators (+ secant alpha)
+├── thermal/                                 # ISO 834 curve + lumped-capacitance heating + legacy shims
+├── stability.py                             # geometric stiffness K_G + linearised bifurcation factor
 ├── criticality/                             # rank-1 CI engine, indices, ranking, scenarios
-├── uncertainty/                             # random variables, sampling, streaming, ranking
+├── uncertainty/                             # random variables, Iman-Conover/copula sampling, streaming, ranking
 ├── retrofit/                                # actions, costs, strategies
 ├── validation/                              # metrics, reference bridge, surrogate
-├── sensitivity.py, reliability.py           # gradients + reliability helpers
+├── sensitivity.py, reliability.py           # gradients + reliability helpers (chi-aligned margins)
 └── visualization.py                         # plotting (lazy matplotlib)
-tests/                                       # 356 tests incl. tests/validation/
+tests/                                       # 611 tests incl. tests/validation/
 docs/theory.md, docs/error_codes.md          # formulation + error reference
 examples/                                    # runnable example models
 scripts/                                     # repository utilities

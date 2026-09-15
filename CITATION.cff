@@ -5,7 +5,7 @@ message: "If you use this software, please cite it using the metadata below."
 title: "truss_analysis: linear 2D truss finite-element analysis for Python"
 authors:
   - alias: bmhmdyan279-png
-version: "2.7.0"
+version: "2.8.0"
 license: MIT
 type: software
 repository-code: "https://github.com/bmhmdyan279-png/truss-analysis-2d"

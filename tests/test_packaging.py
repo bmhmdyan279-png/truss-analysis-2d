@@ -108,3 +108,33 @@ def test_ruff_rules_extended() -> None:
     ruff_cfg = _pyproject()["tool"]["ruff"]["lint"]
     selected = set(ruff_cfg["select"])
     assert selected >= {"E", "F", "I", "W", "UP", "B", "SIM", "RUF", "PT", "N", "D"}
+
+
+def test_no_bytecode_tracked_in_git() -> None:
+    """Byte-code caches must never be in the git index (round-5 audit).
+
+    86 ``__pycache__/*.pyc`` files had crept into the tracked tree; the
+    hygiene scanner now rejects them, and this test pins the index itself
+    so a re-introduction fails the suite rather than a manual review.
+    """
+    import shutil
+
+    git = shutil.which("git")
+    if git is None or not (REPO_ROOT / ".git").exists():
+        import pytest
+
+        pytest.skip("git metadata not available")
+    proc = subprocess.run(
+        [git, "ls-files"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    tracked = proc.stdout.splitlines()
+    offenders = [
+        path
+        for path in tracked
+        if "__pycache__" in path or path.endswith((".pyc", ".pyo"))
+    ]
+    assert not offenders, f"tracked byte-code artifacts: {offenders[:5]}"

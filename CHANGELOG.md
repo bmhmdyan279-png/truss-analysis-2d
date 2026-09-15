@@ -7,6 +7,361 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.8.0] — 2026-09-15
+
+This release closes the fifth external audit round (nine independent
+critiques). As in rounds 1-4, every concrete finding was **reproduced
+against `d79f8c8` before being fixed**, each fix carries a pinning test,
+and findings that did not reproduce are recorded under *Not reproduced*
+with the measurement. Seven of the twelve rows in the most detailed
+code-level critique described the pre-2.7 codebase; they are answered
+with file/line evidence rather than changes. Items that **alter reported
+numbers** are marked ⚠ and collected under *Behaviour changes*.
+
+### Fixed
+
+- ⚠ **The reliability engine's buckling margin used bare Euler while the
+  DCR chain used the code-correct `chi` model** (critic 8, finding 1 -
+  reproduced). `_buckling_margin` computed `P_cr - |N|` with
+  `P_cr = pi^2 EI/(kL)^2`, the model `BucklingModel` itself documents as
+  optimistic (~15 % at `lambda_bar ~ 2`, far more near `lambda_bar ~ 1`).
+  On the reference member at `lambda_bar ~ 0.5` the Euler margin was
+  **6x** the `chi` margin (2.73 MN vs 0.45 MN), so every reported
+  buckling `beta` was systematically optimistic and inconsistent with the
+  library's own capacity model. The margin is now
+  `chi * A * f_y / gamma_M - |N|`, built from the *same*
+  `sections.non_dimensional_slenderness` +
+  `sections.buckling_reduction_factor` pair the limit-state layer uses
+  (fire imperfection factor above ambient, EN 1993-1-1 curve at 20 degC),
+  cross-pinned against `limitstates._member_limit_state` to 1e-12
+  (`test_buckling_margin_matches_limitstates_capacity_at_fire_temperature`).
+  `MemberResponse` gained a `temperature` field (default 20.0) that only
+  selects the code regime; `E` and `yield_stress` remain as-given.
+  `ReliabilityEngine(buckling_model=..., buckling_curve=...)` exposes the
+  choice; `EULER_ONLY` reproduces the legacy numbers bit-for-bit
+  (`test_buckling_margin_euler_only_is_bit_for_bit_legacy`). A missing
+  `yield_stress` now yields `NaN` under `EUROCODE_CHI` (no silent Euler
+  fallback - that would re-create the two-capacity-models split).
+- **`perturb_multi` emitted garbage instead of failing when simultaneous
+  damage created a mechanism** (critic 8 - reproduced). Deleting two
+  members of a determinate triangle leaves the Woodbury core
+  *mathematically* singular but *numerically* invertible (~1e-17 pivot):
+  `np.linalg.solve` returned a finite displacement vector instead of
+  raising, and the exactly-singular single-member case leaked a raw
+  `LinAlgError` instead of the library's `MechanismError` contract. The
+  core is now screened with the same relative criterion as the base state
+  (`_check_lu`, now parameterised by context), so both cases raise
+  `MechanismError` naming the perturbed members
+  (`test_perturb_multi_raises_mechanism_error_not_linalg`).
+- **`scf_alpha_min` silently meant "last probed alpha", not "smallest
+  alpha"** (critic 8 - reproduced). `DamageOperator` took `scfs[-1]`,
+  which only equals the documented "response ratio at the smallest
+  non-singular alpha" when the caller passes `alphas` in descending order.
+  The point is now selected by value (`np.argmin`), making the profile
+  order-invariant (`test_scf_alpha_min_is_order_invariant`).
+- **`ThermalDegradation.apply` raised a bare `KeyError` for members
+  missing from the temperature map** (critic 8 - reproduced). Now a
+  `ValueError` naming every missing member id and the fix
+  (`test_thermal_degradation_missing_temperature_names_members`).
+- **The Gaussian copula accepted asymmetric and non-unit-diagonal targets
+  silently** (critic 8, finding 8 - reproduced; the Cholesky reads only
+  the lower triangle). `_kruskal_inverse` now validates squareness,
+  symmetry (1e-12), unit diagonal and off-diagonal range before mapping,
+  in both correlated-sampling paths
+  (`test_correlation_validation_rejects_asymmetric_and_bad_diagonal`).
+- **`DamageOperator._check_mechanism` ran a full `O(n^3)` SVD per member
+  with a hard-coded `1e-5` rank cutoff** (critic 8, perf finding 3 -
+  reproduced). Replaced with the Cholesky + LAPACK `dpocon` pattern the
+  criticality engine already uses (factorisation failure = hard mechanism;
+  `rcond < _KEY_ELEMENT_RCOND` = near-mechanism at the `alpha = 1e-6`
+  probe scale). Classification verified **identical on every member of
+  both regression fixtures** (essential: `rcond ~ 1e-7`; redundant:
+  `rcond ~ 6e-2`; threshold sits mid-gap) and the threshold is now a named
+  constant documented as probe-calibrated, deliberately distinct from the
+  `NumericalTolerances` policy cutoffs
+  (`test_key_element_detection_matches_mechanism_semantics`).
+- **`DamageOperator._solve` re-implemented member-force recovery by
+  hand** - the exact "two implementations of one physics" pattern that
+  produced the 2.6.0 demand-chain bugs (critic 8 - reproduced). Forces now
+  come from `postprocess.calculate_element_forces`, the canonical path
+  (`test_solve_forces_match_postprocess`, with thermal + fabrication
+  strain active so the prestress convention is exercised).
+- **`sensitivity.compute_all` re-assembled the global matrix it had just
+  solved** (critic 8, perf - reproduced). One shared
+  `_assemble_and_solve` feeds both `compute_baseline` and the DDM pass.
+- **`load_vector` rebuilt the node-index dict inside the load loop**
+  (critic 8, perf - reproduced); hoisted.
+- **`UniformForceScan.forces_at` re-imported `MechanismError` locally**
+  although the module imports it top-level (critic 8 - reproduced);
+  removed.
+- ⚠ **Correlated Latin-hypercube draws lost their stratification**
+  (critic 8, finding 3 - reproduced). `sample_spec_matrix` coupled the
+  design through `gaussian_copula_correlate`, whose linear mix
+  `z @ L.T` recombines all columns: marginals stayed uniform but the
+  "exactly one sample per stratum per dimension" property - the entire
+  variance reduction LHS provides - was destroyed. The pipeline now uses
+  **Iman-Conover rank reordering** (`iman_conover_correlate`): each output
+  column is an exact permutation of the input column (stratification
+  provably preserved, `test_iman_conover_preserves_lhs_stratification_exactly`),
+  the realised Spearman correlation reproduces the target within sampling
+  noise (0.6 -> 0.5964 at n=2e4, same accuracy as the copula path), and
+  the transform is deterministic given `(u, correlation)` - no extra seed,
+  consistent with the library's reproducibility rule.
+  `gaussian_copula_correlate` remains for non-LHS inputs with an explicit
+  docstring warning about stratification.
+- **86 `__pycache__/*.pyc` files were tracked in git** (critic 8, hygiene -
+  reproduced: `git ls-files | grep __pycache__ | wc -l` = 86, cpython-312
+  bytecode in history). Purged from the index; `check_public_hygiene.py`
+  now rejects `.pyc/.pyo` names and `__pycache__` paths; and
+  `test_no_bytecode_tracked_in_git` pins the index itself so
+  re-introduction fails the suite.
+- **README/badge/version drift** (critic 8, hygiene - reproduced: README
+  advertised "356 tests / 95.44 %" while HEAD ran 539 tests at 95.06 %,
+  and `__init__.py`'s version fallback was stuck at "2.5.0"). New
+  `scripts/update_readme_stats.py` (Makefile target `stats`) measures the
+  real values (one coverage run + one mypy run) and patches all nine
+  quoted locations across both READMEs (English digits and Persian);
+  the fallback chain is `_version.py` -> `importlib.metadata` -> literal,
+  so a stale hardcode can no longer outlive two release cycles.
+
+### Added
+
+- **`stability.py` - geometric stiffness and linearised bifurcation**
+  (critics 2-A, 5-1, 6-2: the top scientific gap; round-5 scope decision:
+  linearised system bifurcation now, nonlinear continuation deferred).
+  `geometric_stiffness()` assembles `K_G = sum (N_e/L_e) g_e g_e^T` from
+  the shared `MemberGeometry` (dense or CSR-sparse, full or free-DOF);
+  `linearized_buckling_load_factor()` solves
+  `[K_E + K_G(N_imposed) + lambda K_G(N_mech)] u = 0` for the smallest
+  positive `lambda` via symmetric whitening (`C = L^-1 B L^-T`,
+  `lambda_cr = 1/nu_max`), returning `BucklingResult(lambda_cr, mode,
+  n_compressed, base_forces)`. Temperature fields feed the *same*
+  `build_engine` setup the fire chain uses, so bifurcation and DCR cannot
+  disagree about the base state; an imposed-force state that is itself
+  unstable raises `MechanismError` instead of returning a factor.
+  Verification (docs/theory.md §9, matrix rows): shallow-toggle closed
+  form `P_cr = 2EAh^3/(b^2 L_0)` matched to 1e-10 relative at four rise
+  ratios; dense LAPACK QZ eigensolve cross-check on eight campaign
+  topologies; `b ⟂ g` orthogonality and the `u^T K_G u = sum N L phi^2`
+  energy identity; single-member golden 4x4; rigid-motion and load-scaling
+  invariance; tension-only `inf`; zero-force irrelevance; mode residual
+  < 1e-10; and the headline physics - a redundant shallow fan under
+  growing fabrication misfit loses its load factor monotonically
+  (297 -> 214 -> 131 -> 48 -> 6.4) and then destabilises, exactly the
+  restrained-prestress effect a first-order DCR chain cannot see.
+- **`thermal/fire_curve.py` - ISO 834 exposure and EN 1993-1-2 §4.2.2.2
+  lumped-capacitance member heating** (critics 1-9, 3-9, 6-3 - the
+  exposure-to-temperature layer whose absence made "fire analysis" claims
+  incomplete; critic 4's layering demand). `iso_834_temperature()` matches
+  the six published table points (576/679/739/842/945/1049 degC) to
+  < 1 degC; `steel_temperature()` integrates
+  `rho_a c_a(theta_a) V dtheta/dt = k_sh A_m h_net` with RK4 at <= 5 s
+  steps and the standard's temperature-dependent `c_a` (including the
+  ~735 degC endothermic spike) from the existing Table 3.1 fixture.
+  Oracles: constant-property convection limit matches the closed-form
+  exponential to 1e-10 relative; independent `solve_ivp` RK45 at tight
+  tolerance matches to 2e-4 degC; surface heat input closes the enthalpy
+  balance `rho int c_a dtheta` to 5e-5 relative; monotonicity, gas bound,
+  `A_m/V` and `k_sh` orderings, step-halving convergence (2e-4 degC
+  spread), custom-curve acceptance, and an end-to-end bridge test where a
+  fire-heated restrained bar reproduces the analytical
+  `N = -k_E(theta) E A alpha dT` to 1e-12. Scope documented: uniform
+  section temperature, unprotected steel, gas temperature given - no
+  through-thickness conduction, no zone model.
+- **`thermal_strain()` / `effective_alpha()` in the material layer**
+  (critic 8, finding 4 - reproduced by measurement: the ambient constant
+  `1.2e-5` understates the standard's elongation by **+20.7 %** at
+  600 degC, secant slope `1.448e-5`). `effective_alpha(theta, theta_0)`
+  is the chord slope of the clause-3.4.1.1 elongation curve; setting
+  `elem.alpha = effective_alpha(T)` makes the framework's existing
+  `alpha * delta_T * L` prestress term reproduce the standard's free
+  thermal elongation *exactly* (dense-grid identity test). Element
+  defaults are unchanged, so models without imposed strain stay
+  bit-for-bit; the correction is an explicit, documented user choice.
+- **`failure_mode` on critical temperatures** (critic 8, finding 5 -
+  reproduced: an essentially unloaded member's scan ends at the `k_E = 0`
+  table endpoint and pre-2.8 reported ~1200 degC as its "critical
+  temperature" with no way to tell system collapse from a material limit
+  state). New `FailureMode` enum (`material` / `stiffness_collapse` /
+  `none`), `CriticalTemperatureResult(theta, failure_mode)`, and
+  `member_critical_temperature_detailed` /
+  `system_critical_temperature_detailed`; the legacy scalar functions
+  delegate and are bit-for-bit unchanged. Under the real Eurocode law
+  `k_y` vanishes before `k_E`, so loaded members fail in `material` mode
+  first - pinned by tests on both branches.
+- **`pf_empirical` + exact Clopper-Pearson interval on every margin
+  statistic** (critics 7, 8-2 - reproduced: `pf_approx = Phi(-beta_hat)`
+  silently assumes a normal margin while the input models are lognormal /
+  Gumbel). `MarginStatistics` now carries the assumption-free observed
+  rate and its 95 % exact-binomial interval; at zero observed failures the
+  upper bound (~3/n) states the study's resolution instead of implying
+  safety. `pf_approx` is relabelled in the docstring as a first-order
+  normal approximation.
+- **`solver_metadata` in the analysis result and JSON export** (critic
+  1-12): library/python/numpy/scipy versions, BC method and penalty value,
+  sparse flag, model counts, the factorisation actually used, rank and
+  estimated condition number of `K_ff`, the numerical-status verdict, and
+  the full `NumericalTolerances` policy - every number needed to
+  reproduce and interpret a report. `run()` now takes its solve through
+  `solve_with_diagnostics` (to which `solve` already delegates, so the
+  computation is bit-for-bit identical). Non-finite values are exported as
+  JSON `null`; the export stays strict JSON (no `Infinity`/`NaN` tokens).
+- **`LargeDisplacementWarning` + `check_displacement_magnitude`**
+  (critics 2, 5-1, 9-8.3): the linear-kinematics validity boundary is now
+  observable. `run()` warns when `max|u|` exceeds 10 % of the
+  characteristic length (bounding-box diagonal, the same measure the
+  buckling report uses). The three golden-analytical tests whose unit-like
+  numbers legitimately trip the guard suppress it locally, documented.
+- **`BucklingCheckWarning` in the fire chain for compressed members with
+  `I_sec <= 0`** (critic 7 conceptual-3, direction corrected - see *Not
+  reproduced*): `dcr_field` and friends were silent while reporting
+  `DCR = +inf`; the static-report path already refused to pass such
+  members quietly. Both paths are now equally loud, with the member ids in
+  the message.
+- **Dimensional-similarity (scaling) invariance tests** (critic 4, #12):
+  geometry x s, areas x s^2, loads x s^2 => displacements x s, forces
+  x s^2, stresses exactly invariant - including a restrained-thermal
+  variant. The dimensional-analysis oracle that catches unit/exponent bugs
+  coverage cannot see.
+
+### Changed
+
+- `docs/theory.md` gains §9 (geometric stiffness and bifurcation, with the
+  toggle derivation), §10 (fire layering, ISO 834, lumped capacitance,
+  secant strain), §11 (reliability conventions: one capacity model,
+  empirical pf, Iman-Conover, failure modes) and §12 (**Physics Boundary**
+  - the formal supported/not-supported matrix critic 4 asked for, with the
+  deferred-feature rationale versioned). The §8 verification matrix grows
+  eleven rows for the new subsystems; the honest-gaps paragraph is updated
+  to say exactly what is now covered (linearised bifurcation, exposure ->
+  member temperature) and what remains open (nonlinear continuation,
+  section gradients, rare-event reliability, experimental benchmarks).
+- `DamageOperator` probe threshold documented as probe-calibrated
+  (`_KEY_ELEMENT_RCOND`, tied to the `alpha = 1e-6` probe magnitude) and
+  deliberately separate from the `NumericalTolerances` policy; mechanism
+  probes cost one Cholesky + `O(n^2)` `dpocon` instead of a full SVD.
+- `retrofit/actions.py` now labels the `theta_offset` protection levels as
+  the **first-order decision proxy** they are (critic 7-12): constant
+  offsets independent of section factor, thickness and exposure time,
+  valid for triage ranking, not insulation design; above ~700 degC the
+  misestimate can exceed 150 degC, and `thermal/fire_curve.py` is named as
+  the physics-based path.
+- The criticality engine module docstring states its **dense memory
+  ceiling** explicitly (critic 8, perf 1): `O(n_free x n_members)` for
+  `z` and `u_pert`, ~1.6 GB for a 10k-member truss, with the sparse
+  assembly/solve layers scaling beyond it - the scope limit is now
+  documented where the earlier silence implied otherwise.
+- `sensitivity.SensitivityResult.ddm_sensitivity` documents two silent
+  conventions (critic 8, finding 7): the derivative is a **subgradient**
+  of `max|u|` at the base-state argmax node (ties/node switches are
+  kinks), and the `d_max < 1e-15 -> 1.0` floor switches the reported
+  quantity to the un-normalised numerator with no physical unit.
+- `pyproject.toml` `fallback_version` and the README status blocks are
+  regenerated from measurement, not handwriting.
+
+### Not reproduced (recorded with the measurement)
+
+- **Critic 7's table rows 1, 2, 3, 4, 5, 6, 8, 9 describe the pre-2.7
+  codebase.** At HEAD (`d79f8c8`): `solver.py` factorises Cholesky-first
+  with LU fallback (row 1); `limitstates` uses `chi * n_rd` under the
+  default `BucklingModel.EUROCODE_CHI` with the legacy `min(P_cr, N_Rd)`
+  retained only behind `EULER_ONLY` (row 2); `numerics.NumericalTolerances`
+  unifies the rank thresholds and *enforces* their ordering in
+  `__post_init__` (row 3 - the 1e-13/1e-9 pair is deliberate: hard gate vs
+  diagnostic, documented); `check_energy` tests the unified Clapeyron form
+  with a relative `energy_scale` floor and no absolute-joule branch (row 4
+  - its docstring even derives the self-equilibrated identity the critique
+  re-derives); `sensitivity.py` reports mechanical and total strain energy
+  separately (row 5, fixed in 2.7.0); assembly is vectorised COO->CSR with
+  C-level duplicate summation (row 6); `tests/test_uniform_invariance.py`
+  pins the `tau = 1` uniform-temperature invariance (row 8);
+  `postprocess.calculate_buckling` delegates to
+  `sections.euler_buckling_load(..., effective_length_factor)` and reports
+  `k_factor` (row 9). "theory.md is 26 lines": it is 729 lines at HEAD.
+  "48 refactorisations per theta_sys scan": `UniformForceScan` serves the
+  whole grid from ONE ambient factorisation (counted in its tests).
+- **Row 10 (copula PSD guard)** was fixed in 2.7.0 (Kruskal inverse +
+  `ValueError` naming the mapping); the *residual* asymmetry/diagonal gap
+  was real and is fixed this round (see Fixed).
+- **Row 11 (asymmetric scenario partition)** does not reproduce: both
+  boundaries snap toward `mid` within `relative_eps`, and the half-open
+  intervals `[0, L/3) | [L/3, 2L/3] | (2L/3, L]` are mirror-symmetric - a
+  member at either exact boundary lands in `mid`, and the assignment is
+  invariant under `x -> max_x + min_x - x`. Pinned by
+  `tests/test_scenario_partition.py`.
+- **Row 7 (`perturb_multi` not wired into retrofit)** is factually correct
+  but the proposed wiring does not remove any solves: `evaluate()` needs
+  the full `dcr_field` and `theta_sys` per decision, not just perturbed
+  displacements, so a Woodbury rank-r update cannot replace the re-solve
+  there. Recorded as analysed-and-declined rather than silently ignored.
+- **Critic 9 §4.2's direction is reversed for `I_sec = 0`:** such members
+  were *not* evaluated as "yield only" - `lambda_bar -> inf`, `chi -> 0`,
+  capacity 0, `DCR = +inf`: they fail hard. The real gap was silence, now
+  closed by the fire-chain `BucklingCheckWarning` (see Added).
+- **Critic 6's "unsymmetric K under thermal loads"** does not reproduce:
+  thermal effects enter the right-hand side (equivalent nodal forces),
+  never the matrix; `K` stays symmetric positive definite and
+  Cholesky-first with LU fallback and penalty-scale warnings (visible in
+  `test_penalty_bc_and_options.py`) is exactly the requested behaviour.
+  Penalty `beta`-sweep sensitivity is measured across four decades in
+  `test_penalty_error_and_conditioning_trade_off`.
+- **Critic 1's rows 5-7** (solver strategy parameter, COO assembly,
+  bisection on `DCR(T)-1`) were landed in 2.7.0; `solver_metadata` now
+  also *reports* which factorisation ran. Critic 1-8's tunable guard
+  exists as `EngineSetup.guard_tol` + `ci_sweep(guard_tol=...)` with
+  condition-scaled default, and `flagged` already reports brute-force
+  routing.
+- **Critic 3's "iterative thermo-mechanical equilibrium"** is unnecessary
+  for this model class: with linear kinematics and eigenstrain loads the
+  coupled thermal-mechanical solve is *exact in one step*; iteration would
+  only be needed for the (out-of-scope) geometric/material nonlinearity.
+
+### Deferred with rationale (recorded, not dropped)
+
+- Nonlinear continuation (Newton-Raphson / arc-length, post-buckling,
+  snap-through): supersedes rather than extends the §9 linearised check;
+  needs its own verification suite. The validity boundary is now guarded
+  (`LargeDisplacementWarning`) and diagnosable (`lambda_cr`).
+- Creep and transient thermal strain: requires time-dependent material
+  laws plus validation data beyond the Table 3.1 fixture.
+- Torsional-flexural buckling: needs `I_z, I_t, I_w` in the section model.
+- PCE / Sobol / subset simulation / FORM-SORM: a UQ subsystem with its own
+  validation burden; `pf_empirical` + exact CI covers the honest-reporting
+  gap in the meantime.
+- Gumbel/Clayton/vine copulas: the Gaussian path now validates its input
+  and preserves designs; tail-dependence families change the reliability
+  semantics and belong with the UQ rework.
+- Per-DOF CI vectors, `ci_sweep` blocking, sparse rank-1 updates,
+  `scaled_engine` for uniform fields: the dense ceiling is documented;
+  chunking changes the `CiSweep` contract and needs an API design pass.
+- Aluminium/concrete materials, 3D, frames, semi-rigid joints, distributed
+  loads, section thermal gradients, experimental benchmarks (Cardington),
+  OpenSeesPy in public CI: outside the declared scope or blocked on
+  external assets; the §12 boundary matrix states each.
+
+### Behaviour changes ⚠
+
+Collected for quick scanning; each is detailed under *Fixed*/*Added* above.
+
+1. **Reliability buckling margins** under the new default
+   `BucklingModel.EUROCODE_CHI` are *smaller* (conservative) wherever
+   `lambda_bar > 0`; reported `beta_buckling` and `pf` move accordingly.
+   `ReliabilityEngine(buckling_model=BucklingModel.EULER_ONLY)` restores
+   pre-2.8 numbers bit-for-bit.
+2. **Correlated `sample_spec_matrix` draws** use Iman-Conover reordering:
+   same target rank correlation, exact LHS marginals, different sample
+   values than the pre-2.8 copula mix (still a pure function of the seed).
+   Uncorrelated draws are untouched.
+3. **`run()` results and JSON exports** carry a `solver_metadata` block
+   (additive; strict JSON preserved).
+4. **New warnings, no silent number changes:** `LargeDisplacementWarning`
+   for gross displacements, `BucklingCheckWarning` from the fire chain for
+   compressed members with `I_sec <= 0`, `ValueError` (instead of
+   `KeyError`) for missing degradation temperatures, `MechanismError`
+   (instead of garbage or `LinAlgError`) from `perturb_multi`.
+5. Models **without** imposed strain, uncorrelated sampling, and all
+   legacy scalar APIs remain **bit-for-bit identical**.
+
 ## [2.7.0] — 2026-09-15
 
 This release closes the fourth external audit round (six independent

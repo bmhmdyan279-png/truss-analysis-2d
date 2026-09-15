@@ -1,7 +1,7 @@
 # Makefile — development shortcuts for truss-analysis-2d
 # All quality gates mirror the CI pipeline (.github/workflows/ci.yml).
 
-.PHONY: install test test-cov lint format type-check check-all build clean \
+.PHONY: install test test-cov lint format type-check check-all build clean stats \
         pre-commit-setup sync-requirements
 
 ## Install runtime + dev dependencies and the pre-commit hooks
@@ -35,6 +35,10 @@ type-check:
 ## Regenerate requirements*.txt mirrors from pyproject.toml
 sync-requirements:
 	python scripts/sync_requirements.py
+
+## Re-measure and patch the test/coverage/module stats quoted in both READMEs
+stats:
+	python scripts/update_readme_stats.py
 
 ## Everything CI runs, locally
 check-all: lint type-check test-cov

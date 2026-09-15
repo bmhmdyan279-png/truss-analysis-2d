@@ -722,8 +722,234 @@ verifies.
 | Uniform-force scan (`UniformForceScan`) | — | ✓ (≡ per-point `member_axial_forces`) | ✓ (one factorisation per scan, counted) | — | ✓ |
 | Uniform-$T$ ranking invariance | ✓ (proved, with the §5.4 precondition) | — | ✓ + antifake providers | — | ✓ |
 | OpenSeesPy cross-check | — | ✓ (optional extra) | — | — | ✓ |
+| Geometric stiffness $\mathbf{K}_G$ (§9) | ✓ (single-member golden) | ✓ (dense QZ eigensolve) | ✓ ($b \perp g$, energy identity, rigid motion) | — | ✓ (prestressed base state) |
+| Bifurcation load factor (§9) | ✓ (toggle closed form, 4 geometries, rel $10^{-10}$) | ✓ (QZ on 8 campaign topologies) | ✓ (load scaling, tension-only ∞, zero-force irrelevance) | ✓ (mode residual $<10^{-10}$) | ✓ (imposed compression erodes λ) |
+| ISO 834 curve (§10) | ✓ (6 published table points ±1 °C) | — | ✓ (monotone, $t=0$ anchor) | — | — |
+| Lumped-capacitance heating (§10) | ✓ (constant-property exponential limit, rel $10^{-10}$) | ✓ (`solve_ivp` RK45, 0.01 °C) | ✓ (monotone, gas bound, $A_m/V$ & $k_{sh}$ orderings, step-halving) | — | ✓ (energy balance rel $2·10^{-4}$) |
+| Secant thermal strain $\bar\alpha$ (§10.3) | ✓ (fixture polynomials) | — | ✓ ($\bar\alpha·Δθ ≡ ε_{th}$ dense grid) | — | ✓ |
+| Reliability $\chi$-margin (§11.1) | — | ✓ (≡ limitstates capacity) | ✓ (EULER_ONLY bit-for-bit legacy) | — | ✓ (fire curve above ambient) |
+| Empirical $p_f$ + Clopper–Pearson (§11.2) | ✓ (exact binomial bounds) | — | ✓ (count identity, $k=0$ band) | — | — |
+| Iman–Conover correlation (§11.3) | — | — | ✓ (exact permutation/stratification, realised $\rho_S$ within noise) | — | — |
+| `failure_mode` labels (§11.4) | ✓ (unloaded tie collapses at $k_E=0$) | — | ✓ (legacy facades bit-for-bit) | — | ✓ |
+| Dimensional similarity | — | — | ✓ ($s$, $s^2$ scaling oracle, thermal variant) | — | ✓ |
 
 Gaps that are honestly open: no experimental benchmark (e.g. the Cardington
-fire tests), no FORM/SORM for small failure probabilities, no nonlinear
-geometric or material solve, and the OpenSeesPy bridge is an optional extra so
-public CI does not run it.
+fire tests), no FORM/SORM for small failure probabilities, no *nonlinear*
+post-buckling / snap-through or material-nonlinear solve (the linearised
+bifurcation check of §9 is now covered; the nonlinear continuation is not),
+no transient heat conduction through the section (the lumped-capacitance
+model of §10 assumes a uniform member temperature, as EN 1993-1-2 §4.2.2.2
+itself does for unprotected members), and the OpenSeesPy bridge is an
+optional extra so public CI does not run it.
+
+---
+
+## 9. Geometric Stiffness and Linearised Bifurcation (`stability.py`)
+
+### 9.1 Why a first-order solver needs a stability companion
+
+The static chain is first-order: forces come from $\mathbf{K}_E\mathbf{u} =
+\mathbf{F}$ assembled on the *undeformed* geometry. Axial force nonetheless
+changes a pin-jointed assembly's transverse stiffness — compression softens
+it, tension stiffens it. That second-order effect lives in the **geometric
+stiffness**
+
+$$
+\mathbf{K}_G = \sum_e \frac{N_e}{L_e}\,\mathbf{g}_e \mathbf{g}_e^T,
+\qquad
+\mathbf{g}_e\cdot\mathbf{u} = \text{transverse relative displacement of } e,
+$$
+
+with $\mathbf{g}_e = [s, -c, -s, c]$ on the member DOFs. Two structural facts
+make this fit the existing formulation exactly:
+
+* $\mathbf{g}_e \perp \mathbf{b}_e$ (the elastic elongation vector): the
+  elastic dyad $k_e \mathbf{b}_e\mathbf{b}_e^T$ acts on the axial relative
+  displacement, the geometric dyad on the transverse one. Verified to machine
+  precision in `test_geometric_vectors_orthogonal_to_elastic_vectors`.
+* $\mathbf{u}^T\mathbf{K}_G\mathbf{u} = \sum_e N_e L_e \varphi_e^2$ with
+  $\varphi_e$ the chord rotation — twice the second-order work of the axial
+  forces, the classical potential-energy statement
+  (`test_geometric_stiffness_energy_identity`).
+
+### 9.2 The bifurcation problem
+
+Around the **prestressed base state** the tangent stiffness is
+$\mathbf{K}_E + \mathbf{K}_G(\mathbf{N})$. Splitting the demand into imposed
+(thermal/fabrication eigenstrain, held fixed) and mechanical (the load pattern
+$\lambda$ amplifies),
+
+$$
+\big[\mathbf{K}_E + \mathbf{K}_G(\mathbf{N}_{imp}) + \lambda\,\mathbf{K}_G(\mathbf{N}_{mech})\big]\mathbf{u} = \mathbf{0},
+$$
+
+$\lambda_{cr}$ is the smallest positive root. With
+$\mathbf{A} = \mathbf{K}_E + \mathbf{K}_G(\mathbf{N}_{imp}) = \mathbf{L}\mathbf{L}^T$
+and $\mathbf{B} = -\mathbf{K}_G(\mathbf{N}_{mech})$ the problem becomes
+$\mathbf{A}\mathbf{u} = \lambda\mathbf{B}\mathbf{u}$, solved through the
+symmetric whitened form $\mathbf{C} = \mathbf{L}^{-1}\mathbf{B}\mathbf{L}^{-T}$,
+$\nu = 1/\lambda$, so $\lambda_{cr} = 1/\nu_{\max}$ from one symmetric
+eigensolve. $\mathbf{A}$ not positive definite ⇒ the imposed state *alone* has
+already reached a critical point ⇒ `MechanismError`, never a silent factor.
+
+### 9.3 Verification and scope
+
+* **Closed form:** the shallow two-bar toggle has $P_{cr} = 2EAh^3/(b^2 L_0)$
+  (symmetric mode) and $2EAb^2/(hL_0)$ (antisymmetric); the eigenproblem
+  reproduces the smaller to $10^{-10}$ relative across four rise ratios.
+* **Independent algorithm:** a dense LAPACK QZ generalised eigensolve
+  (`scipy.linalg.eig(A, B)`) agrees with the whitened symmetric path on eight
+  campaign topologies.
+* **Prestress physics:** a redundant shallow fan with growing fabrication
+  misfit shows $\lambda_{cr}$ falling monotonically (297 → 214 → 131 → 48 →
+  6.4) and then the base state losing positive definiteness — precisely the
+  restrained-thermal destabilisation a first-order DCR chain cannot see.
+
+**Scope (deliberate):** system bifurcation of the pin-jointed assembly, *not*
+member code checks (those remain the $\chi$ model of §4), *not* post-buckling,
+snap-through or imperfection sensitivity. For shallow systems the true
+collapse is a limit point the linearised factor approximates from the base
+configuration ($O(\theta_0^2)$ apart for the toggle).
+
+---
+
+## 10. Fire Exposure and Member Heating (`thermal/fire_curve.py`)
+
+### 10.1 The layering this closes
+
+Before this module the library consumed a *prescribed* steel temperature and
+produced structural response — "fire resistance for prescribed temperature
+states", not fire analysis. The missing layer was exposure → member
+temperature:
+
+$$
+\text{fire exposure } \theta_g(t)
+\;\longrightarrow\; \theta_a(t) \text{ (member)}
+\;\longrightarrow\; E(\theta_a), f_y(\theta_a)
+\;\longrightarrow\; \text{structural response}.
+$$
+
+### 10.2 ISO 834 and lumped capacitance
+
+The standard curve $\theta_g(t) = 345\log_{10}(8t+1) + \theta_0$ ($t$ in
+minutes) reproduces the published table points (576/679/739/842/945/1049 °C at
+5/10/15/30/60/120 min) to better than 1 °C. Member heating follows EN
+1993-1-2 §4.2.2.2 for **unprotected** steel:
+
+$$
+\rho_a c_a(\theta_a)\,V\,\dot\theta_a = k_{sh} A_m\, h_{net},
+\qquad
+h_{net} = \alpha_c(\theta_g - \theta_a) + \varepsilon_{res}\sigma\big[(\theta_g{+}273)^4 - (\theta_a{+}273)^4\big],
+$$
+
+integrated with RK4 at ≤ 5 s steps (the code's own cap on $\Delta t$), with
+$c_a(\theta_a)$ the standard's temperature-dependent specific heat — including
+the endothermic spike near 735 °C — from the same Table 3.1 fixture the whole
+material layer uses. Verification: constant-property convection limit matches
+the closed-form exponential to $10^{-10}$; an independent `solve_ivp` RK45 at
+tight tolerance matches to 0.01 °C; the surface heat input closes the enthalpy
+balance $\rho_a\int c_a\,d\theta$ to $2·10^{-4}$.
+
+**Scope:** uniform member temperature (no through-thickness gradient — the
+lumped assumption the code itself endorses for unprotected members), gas
+temperature given (no zone model), unprotected steel ($k_{sh}=1$ default;
+protected members need the conduction solution and remain out of scope).
+
+### 10.3 Secant thermal strain (the constant-$\alpha$ trap)
+
+The standard defines thermal **elongation** $\Delta l/l = \alpha(\theta)$
+(clause 3.4.1.1), a convex curve. The framework's prestress term
+`alpha * delta_T * L` uses `Element.alpha` as a *constant* coefficient; with
+the ambient value $1.2·10^{-5}$ this understates restrained thermal strain by
+~21 % at 600 °C (secant slope $1.448·10^{-5}$). `thermal_strain(θ, θ₀)` and
+`effective_alpha(θ, θ₀) = ε_{th}/(θ-θ₀)` expose the exact curve-based
+quantities; setting `elem.alpha = effective_alpha(T)` makes the existing
+prestress term reproduce the standard's elongation *exactly*
+(`test_effective_alpha_reproduces_thermal_strain_exactly`). Element defaults
+are deliberately unchanged: models without imposed strain stay bit-for-bit,
+and the correction is an explicit, documented user choice.
+
+---
+
+## 11. Reliability-layer conventions (`reliability.py`, `uncertainty/sampling.py`)
+
+### 11.1 One capacity model everywhere
+
+The buckling safety margin is $\chi A f_y/\gamma_M - |N|$ with $\chi$ from the
+*same* `sections.buckling_reduction_factor` the DCR chain uses (fire
+imperfection factor $0.65\alpha$ above ambient, EN 1993-1-1 curve at 20 °C),
+cross-pinned against `limitstates._member_limit_state` to $10^{-12}$. The
+pre-2.8 bare-Euler margin was optimistic by up to ~6× at $\bar\lambda \approx
+0.5$; `BucklingModel.EULER_ONLY` reproduces legacy numbers bit-for-bit.
+`MemberResponse.E` and `.yield_stress` are taken **as given** (the analysis
+callback decides on temperature reduction); `.temperature` only selects the
+code regime for $\chi$.
+
+### 11.2 Empirical failure probability
+
+`pf_approx = Φ(−β̂)` assumes a normal margin; margins built from skewed
+inputs (lognormal $f_y$, Gumbel load) are skewed exactly where $p_f$ lives.
+`pf_empirical = mean(margin < 0)` is assumption-free but resolution-limited;
+its Clopper–Pearson 95 % interval (`pf_empirical_ci`) is the honest output —
+at zero observed failures the upper bound is $\approx 3/n$, the study's
+resolution, not a claim of safety.
+
+### 11.3 Rank correlation without destroying the design
+
+`sample_spec_matrix` correlates its Latin hypercube through **Iman–Conover**
+rank reordering: every output column is an exact permutation of the input
+column, so stratification (the variance reduction LHS exists for) survives,
+while the realised Spearman correlation reproduces the target within sampling
+noise. The Gaussian-copula linear mix remains available for non-LHS inputs;
+its docstring now states plainly that mixing destroys stratification. Both
+paths share one target semantics (Spearman, Kruskal-mapped to normal-space
+Pearson before factorisation) and one input validation (symmetric, unit
+diagonal, positive definite).
+
+### 11.4 Critical temperatures carry their failure mode
+
+`member_critical_temperature_detailed` /
+`system_critical_temperature_detailed` return
+`(theta, failure_mode ∈ {material, stiffness_collapse, none})`. A lightly
+loaded member whose scan ends at the $k_E = 0$ table endpoint is reported as
+`stiffness_collapse`, never as a material critical temperature — the two have
+different engineering meanings. The legacy scalar facades delegate and remain
+bit-for-bit identical. Under the real Eurocode law $k_y$ reaches zero before
+$k_E$, so any *loaded* member fails in `material` mode first; `stiffness_
+collapse` is reached by essentially unloaded members or grids that include
+1200 °C.
+
+---
+
+## 12. Physics Boundary — what this solver is and is not
+
+The round-5 audit's strongest process demand: state the validity envelope
+formally, not implicitly.
+
+| Phenomenon | Status | Where |
+|---|---|---|
+| Linear truss statics (small displacement) | exact within numerical tolerance | §1, full verification matrix |
+| Thermal / fabrication eigenstrain | supported, closed-form verified | §1, restrained & free limits |
+| Temperature-dependent $E(\theta), f_y(\theta)$ | supported (Table 3.1 single source) | §4, material goldens |
+| Secant thermal strain $\bar\alpha(\theta_0,\theta)$ | supported (opt-in via `effective_alpha`) | §10.3 |
+| Fire exposure → member temperature | supported (ISO 834 + lumped capacitance, unprotected, uniform section temperature) | §10 |
+| Fire resistance at prescribed temperature | supported (EN 1993-1-2 §4.2.3.1 $\chi$ model) | §4 |
+| Member buckling capacity | supported (Euler/$\chi$, flexural, fire & ambient curves) | §4 |
+| System bifurcation under prestress | supported (linearised) | §9 |
+| Reliability (crude MC, LHS, rank correlation) | supported; rare-event methods not | §11 |
+| Thermal transient conduction through the section | **not supported** (uniform temperature only) | §10.2 scope |
+| Geometric nonlinearity (P-Δ, large displacement) | **not supported**; validity guarded by `LargeDisplacementWarning` and diagnosable via §9 | §9.3 scope |
+| Post-buckling / snap-through / imperfection sensitivity | **not supported** | §9.3 |
+| Material nonlinearity (plasticity, redistribution) | **not supported** (capacity checks are code-model, not incremental analysis) | §4 |
+| Creep & transient thermal strain | **not supported** (deferred, see below) | — |
+| Torsional / torsional-flexural buckling | **not supported** (needs $I_z, I_t, I_w$ absent from the section model) | — |
+| 3D, frames, semi-rigid joints, distributed loads | **not supported** (2D pin-jointed, nodal loads) | §1 |
+| FORM/SORM, PCE, Sobol indices, subset simulation | **not supported** (deferred) | §11.2 |
+
+**Deferred with rationale (round-5):** creep/transient-strain models and
+torsional-flexural buckling need material/section data and validation sources
+beyond the current fixture; PCE/Sobol/subset simulation constitute a UQ
+subsystem with its own validation burden; nonlinear continuation (Newton–
+Raphson arc-length) supersedes — not extends — the linearised §9 check and
+belongs to a dedicated release. Each deferral is recorded in CHANGELOG 2.8.0
+so the boundary is versioned, not vibes.

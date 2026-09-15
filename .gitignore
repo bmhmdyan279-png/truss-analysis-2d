@@ -199,3 +199,4 @@ src/truss_analysis/_version.py
 docs/api/generated/
 docs/_build/
 docs/.doctrees/
+AUDIT_ROUND5.md
