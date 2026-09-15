@@ -640,8 +640,12 @@ def dcr_field(
     # A1: Connect lambda_cr to dcr_field for system stability
     if check_system_stability:
         try:
+            # warn_shallow=False: this is a member-level code check that
+            # borrows lambda_cr for a system-stability DCR adjustment.  The
+            # shallow-geometry advisory belongs to a deliberate stability
+            # study, not to every dcr_field() call on every model shape.
             buckling_result = linearized_buckling_load_factor(
-                nodes, elements, loads, temps
+                nodes, elements, loads, temps, warn_shallow=False
             )
             lambda_cr = buckling_result.lambda_cr
 

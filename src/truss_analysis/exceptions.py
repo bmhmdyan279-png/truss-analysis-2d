@@ -32,6 +32,21 @@ class UnitConversionError(TrussError):
     """Raised for unknown unit systems or unknown quantity keys."""
 
 
+class EigenConvergenceError(TrussError):
+    """Raised when an iterative eigensolver fails to converge.
+
+    Emitted by :func:`truss_analysis.stability.linearized_buckling_load_factor`
+    on the sparse Lanczos path (large models, ``eigen_solver="sparse"``) when
+    ARPACK exhausts its iteration budget and the dense fallback is not
+    affordable.  The buckling load factor is a safety-critical quantity, so a
+    non-converged iteration is reported as an error rather than returned as a
+    best-effort Ritz value: an unconverged ``lambda_cr`` is indistinguishable
+    from a converged one to the caller, and silently optimistic is the worst
+    possible failure mode.  Retry with ``eigen_solver="dense"``, more modes,
+    or a coarser model.
+    """
+
+
 class IllConditionedWarning(UserWarning):
     """Warning issued when cond(K_ff) exceeds the screening threshold."""
 
@@ -108,10 +123,16 @@ class AmbiguousModeWarning(UserWarning):
 
 
 class IllConditionedPerturbationWarning(UserWarning):
-    """Warning issued when perturbation analysis encounters near-singular LU factors.
+    """Warning issued when a Woodbury perturbation solve is numerically weak.
 
-    Raised by :func:`truss_analysis.reliability.perturb_multi` when the core
-    stiffness matrix is close to singular (condition number exceeds threshold).
-    The perturbation results may be unreliable; engineers should verify with
-    alternative methods or refine the model (round-5 audit C8#4).
+    Issued (not raised) by
+    :func:`truss_analysis.criticality.engine.perturb_multi` when the ``r x r``
+    Woodbury core is ill-conditioned
+    (``cond > PERTURB_COND_WARN``) or the solve fails its backward-error
+    check (``relative residual > PERTURB_RESID_WARN``).  Such a core passes
+    the singularity gate but returns digits that are largely noise, and the
+    caller -- retrofit triage, multi-member criticality -- would rank members
+    on them.  Verify against
+    :func:`~truss_analysis.criticality.engine.brute_force_ci` or split the
+    simultaneous perturbation (round-5 audit C8#4, wired up in round 6).
     """

@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
 from .assembly import assemble_global_matrices
-from .model import Element, Node
+from .model import Element, Node, fixed_dof_indices
 from .numerics import (
     DEFAULT_TOLERANCES,
     NumericalStatus,
@@ -45,6 +46,8 @@ __all__ = [
     "COND_WARNING_THRESHOLD",
     "TopologyReport",
     "TopologyValidationError",
+    "model_indeterminacy",
+    "static_indeterminacy",
     "structural_report",
     "validate_topology",
 ]
@@ -206,6 +209,63 @@ def _symmetric(model: dict[str, Any]) -> bool:
     return True
 
 
+def static_indeterminacy(n_members: int, n_reactions: int, n_nodes: int) -> int:
+    """Degree of static indeterminacy of a planar truss: ``m + r - 2j``.
+
+    This is *the* definition, shared by :func:`structural_report` (which
+    counts reactions from the JSON support flags) and
+    :func:`model_indeterminacy` (which counts them from the DOF map), so the
+    topology report and the criticality engine cannot disagree about how
+    much redundancy a model has.
+
+    Parameters
+    ----------
+    n_members : int
+        Number of bars ``m``.
+    n_reactions : int
+        Number of restrained DOFs ``r`` (1 per roller direction, 2 per pin).
+    n_nodes : int
+        Number of joints ``j``.
+
+    Returns
+    -------
+    int
+        ``m + r - 2j``: ``0`` statically determinate, ``> 0`` the degree of
+        redundancy, ``< 0`` under-braced (a mechanism).
+
+    See Also
+    --------
+    model_indeterminacy : the same count for a ``Node``/``Element`` model.
+    """
+    return int(n_members) + int(n_reactions) - 2 * int(n_nodes)
+
+
+def model_indeterminacy(nodes: Sequence[Node], elements: Sequence[Element]) -> int:
+    """Degree of static indeterminacy of a model, from its own DOF map.
+
+    Uses :func:`truss_analysis.model.fixed_dof_indices` -- the single
+    definition of "restrained" the assembler itself applies -- so the count
+    stays consistent with the stiffness matrix that is actually built.
+
+    Parameters
+    ----------
+    nodes : Sequence[Node]
+        Model nodes; node ordering defines the DOF map.
+    elements : Sequence[Element]
+        Model elements.
+
+    Returns
+    -------
+    int
+        ``m + r - 2j``.  Equivalently ``m - n_free``, the form the
+        criticality engine uses because a factorised setup carries the free
+        DOF count but not the reaction count.
+    """
+    node_list = list(nodes)
+    n_reactions = len(fixed_dof_indices(node_list))
+    return static_indeterminacy(len(elements), n_reactions, len(node_list))
+
+
 def structural_report(model: dict[str, Any]) -> TopologyReport:
     """Full structural report including SVD rank and condition of K_ff."""
     orphans, zero_len, dups, loops, connected = _graph_checks(model)
@@ -217,7 +277,7 @@ def structural_report(model: dict[str, Any]) -> TopologyReport:
         if n.get("is_support")
     )
     n_dof_free = 2 * n_nodes - n_reactions
-    indeterminacy = n_members + n_reactions - 2 * n_nodes
+    indeterminacy = static_indeterminacy(n_members, n_reactions, n_nodes)
 
     if orphans or zero_len or dups or loops or not connected:
         # graph-level defects: object conversion / stiffness assembly are not

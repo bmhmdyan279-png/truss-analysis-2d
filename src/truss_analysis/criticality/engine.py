@@ -100,6 +100,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.linalg import LinAlgWarning, lapack, lu_factor, lu_solve
 
+from ..exceptions import IllConditionedPerturbationWarning
 from ..material.steel_eurocode import FloatOrArray
 from ..material.steel_eurocode import k_E as eurocode_k_E
 from ..model import Element, Node, fixed_dof_indices
@@ -113,6 +114,8 @@ __all__ = [
     "GUARD_COND_COEF",
     "GUARD_TOL",
     "GUARD_TOL_MAX",
+    "PERTURB_COND_WARN",
+    "PERTURB_RESID_WARN",
     "CiSweep",
     "EngineSetup",
     "MechanismError",
@@ -128,6 +131,7 @@ __all__ = [
     "member_matrices",
     "perturb_multi",
     "prestress_lengths",
+    "setup_indeterminacy",
     "total_load_vector",
 ]
 
@@ -140,6 +144,18 @@ GUARD_COND_COEF = 100.0
 #: the cap keeps an extreme ``cond`` estimate from routing the whole sweep.
 GUARD_TOL_MAX = 1e-4
 _SINGULAR_TOL = 1e-12
+
+#: Condition number of the Woodbury core above which
+#: :func:`perturb_multi` issues an
+#: :exc:`~truss_analysis.exceptions.IllConditionedPerturbationWarning`.
+#: ``1e10`` leaves ~6 trustworthy digits in double precision -- enough for
+#: ranking, not enough to quote as an answer (round-6 audit C2).
+PERTURB_COND_WARN = 1e10
+#: Backward (relative residual) error above which the same warning fires.
+#: This is the *measured* quality of the solve rather than an estimate of
+#: how bad the matrix could be, so it catches cores that are ill-conditioned
+#: in a direction the right-hand side happens to excite.
+PERTURB_RESID_WARN = 1e-8
 
 
 class MechanismError(RuntimeError):
@@ -274,6 +290,35 @@ def prestress_lengths(
         delta_t = 0.0 if temps is None else float(temps[e.id]) - T_AMBIENT
         out[i] = e.alpha * delta_t * length + e.delta_L_free
     return out
+
+
+_TINY_DENOM = 1e-300
+
+
+def setup_indeterminacy(setup: EngineSetup) -> int:
+    """Return the static indeterminacy of a factorised setup: ``m - n_free``.
+
+    Identical to ``m + r - 2j`` from
+    :func:`truss_analysis.graph_validation.static_indeterminacy`, because
+    ``n_free = 2j - r`` by construction -- the setup simply does not carry
+    the reaction count, while the free-DOF count is exactly what its own
+    factorisation was built on.  Deriving the redundancy from the factorised
+    object rather than re-walking the model is what keeps this check
+    consistent with the matrix that will actually be solved.
+
+    Parameters
+    ----------
+    setup : EngineSetup
+        Factorised base state.
+
+    Returns
+    -------
+    int
+        Degrees of static redundancy; ``< 0`` means the base model is
+        already under-braced.
+    """
+    # m - n_free, which equals m + r - 2j because n_free = 2j - r.
+    return int(len(setup.ids) - len(setup.free_dofs))
 
 
 def _check_lu(
@@ -552,21 +597,84 @@ def perturb_multi(
     u: np.ndarray,
     indices: Sequence[int],
     alphas: Sequence[float],
+    condition_warning: bool = True,
 ) -> np.ndarray:
     """Woodbury rank-r update for simultaneous multi-member perturbations.
 
     ``K_pert = K + B_S Delta B_S^T`` with diagonal ``Delta``; used for retrofit
     studies where the rank-1 formula does not apply (see module docstring).
     The right-hand side carries the perturbed members' thermal equivalent
-    forces too, which — exactly as in the rank-1 case — replaces the total
+    forces too, which -- exactly as in the rank-1 case -- replaces the total
     elongation ``f_S`` with the mechanical one ``f_S - dL_S`` in the core
     solve.  ``u`` must come from :func:`total_load_vector`.
+
+    Parameters
+    ----------
+    setup : EngineSetup
+        Factorised base state from :func:`build_engine`.
+    u : numpy.ndarray
+        Base displacement on the free DOFs, from :func:`base_displacement`
+        applied to :func:`total_load_vector`.
+    indices : Sequence[int]
+        Positional member indices perturbed simultaneously.
+    alphas : Sequence[float]
+        Stiffness multipliers, one per entry of ``indices``.  ``alpha = 1``
+        is rejected (a no-op that would divide by zero); ``alpha <= 0``
+        removes the member outright.
+    condition_warning : bool, default True
+        Issue an
+        :exc:`~truss_analysis.exceptions.IllConditionedPerturbationWarning`
+        when the Woodbury core is ill-conditioned or the solve fails its
+        residual check.  Set to ``False`` inside tight loops that screen the
+        result themselves.
+
+    Returns
+    -------
+    numpy.ndarray
+        Perturbed displacement on the free DOFs.
+
+    Raises
+    ------
+    ValueError
+        If any ``alpha == 1``.
+    MechanismError
+        If the simultaneous removals exceed the system's static
+        indeterminacy (guaranteed mechanism, detected combinatorially before
+        any factorisation), or if the Woodbury core is singular to working
+        precision.
+
+    Warns
+    -----
+    IllConditionedPerturbationWarning
+        If ``cond(core) > PERTURB_COND_WARN`` or the backward error exceeds
+        ``PERTURB_RESID_WARN``.
     """
     idx = list(indices)
-    deltas = (np.asarray(alphas, dtype=float) - 1.0) * setup.k_axial[idx]
+    alpha_arr = np.asarray(alphas, dtype=float)
+    deltas = (alpha_arr - 1.0) * setup.k_axial[idx]
     if np.any(deltas == 0.0):
         msg = "perturb_multi: alpha=1.0 members are no-ops; drop them"
         raise ValueError(msg)
+
+    # --- C3: redundancy screen, before any linear algebra -----------------
+    # Removing a member outright (alpha <= 0) takes one bar away without
+    # changing the DOF count, so the perturbed assembly has redundancy
+    # (m - k) - n_free.  When that goes negative the structure is *certain*
+    # to be a mechanism -- no factorisation needed to know it -- and saying
+    # so in engineering terms beats letting a near-zero pivot surface as a
+    # LinAlgError or, worse, as a finite but meaningless answer.
+    n_removed = int(np.count_nonzero(alpha_arr <= 0.0))
+    redundancy = setup_indeterminacy(setup)
+    if n_removed > redundancy:
+        members = ", ".join(setup.ids[i] for i in idx)
+        msg = (
+            f"perturb_multi: {n_removed} member(s) removed ({members}) from a "
+            f"system with only {redundancy} degree(s) of static "
+            f"indeterminacy; the perturbed assembly is a mechanism "
+            f"({redundancy - n_removed} < 0 redundancy remains)"
+        )
+        raise MechanismError(msg)
+
     z_s = setup.z[:, idx]
     g_ss = setup.b_free[idx] @ z_s
     core = np.diag(1.0 / deltas) + g_ss
@@ -587,6 +695,35 @@ def perturb_multi(
         lu = lu_factor(core, check_finite=False)
     _check_lu(lu, f"after simultaneous perturbation of member(s) {members}")
     core_sol = lu_solve(lu, f_s)
+
+    # --- C2: measured quality of the Woodbury solve -----------------------
+    # _check_lu only rejects cores that are singular to working precision.
+    # A core with cond ~ 1e13 passes that gate and still returns digits that
+    # are mostly noise, and the caller (retrofit triage, multi-member
+    # criticality) would rank members on it.  The core is r x r with r the
+    # number of simultaneously perturbed members -- small enough that an
+    # exact condition number and an explicit residual are both cheap.
+    if condition_warning:
+        cond_core = float(np.linalg.cond(core))
+        residual = core @ core_sol - f_s
+        denom = max(
+            float(np.linalg.norm(core, 1)) * float(np.linalg.norm(core_sol, np.inf)),
+            float(np.linalg.norm(f_s, np.inf)),
+            _TINY_DENOM,
+        )
+        rel_resid = float(np.linalg.norm(residual, np.inf) / denom)
+        if cond_core > PERTURB_COND_WARN or rel_resid > PERTURB_RESID_WARN:
+            warnings.warn(
+                f"IllConditionedPerturbationWarning: Woodbury core for "
+                f"member(s) {members} is ill-conditioned "
+                f"(cond = {cond_core:.3e}, relative residual = "
+                f"{rel_resid:.3e}); the perturbed displacements may carry "
+                "fewer trustworthy digits than the ranking assumes. Verify "
+                "with brute_force_ci() or split the perturbation.",
+                IllConditionedPerturbationWarning,
+                stacklevel=2,
+            )
+
     perturbed: np.ndarray = u - z_s @ core_sol
     return perturbed
 
