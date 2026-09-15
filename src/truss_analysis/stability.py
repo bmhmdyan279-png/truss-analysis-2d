@@ -63,6 +63,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import List
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -78,6 +80,7 @@ from .criticality.engine import (
     member_forces,
     total_load_vector,
 )
+from .exceptions import AmbiguousModeWarning, ShallowSystemWarning
 from .model import Element, Node
 
 __all__ = [
@@ -213,6 +216,14 @@ class BucklingResult:
     mode : numpy.ndarray
         Buckling mode on the full DOF vector ``(2n,)``, unit 2-norm, fixed
         DOFs exactly zero. Arbitrary sign (eigenvectors are).
+    modes : list[numpy.ndarray]
+        All computed buckling modes (up to the number requested or all
+        positive eigenvalues). The first element equals ``mode``. Present
+        to support multiplicity detection and mode-shape exploration.
+    multiplicity : int
+        Number of eigenvalues within numerical tolerance of the critical
+        one. ``multiplicity > 1`` indicates repeated buckling loads and
+        triggers :exc:`~truss_analysis.exceptions.AmbiguousModeWarning`.
     n_compressed : int
         Number of members carrying compression in the base state beyond the
         library's force classification band.
@@ -223,6 +234,8 @@ class BucklingResult:
 
     lambda_cr: float
     mode: npt.NDArray[np.float64]
+    modes: list[npt.NDArray[np.float64]]
+    multiplicity: int
     n_compressed: int
     base_forces: dict[str, float]
 
@@ -232,6 +245,7 @@ def linearized_buckling_load_factor(
     elements: Sequence[Element],
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float] | None = None,
+    n_modes: int = 1,
 ) -> BucklingResult:
     """Smallest positive bifurcation load factor of the prestressed assembly.
 
@@ -254,11 +268,18 @@ def linearized_buckling_load_factor(
     temps : Mapping[str, float] or None, optional
         Member steel temperatures [degC]; ``None`` is the ambient
         (undegraded, no thermal strain) case.
+    n_modes : int, default 1
+        Number of buckling modes to compute. If ``n_modes > 1``, all
+        computed modes are returned in :attr:`BucklingResult.modes` and
+        multiplicity of the critical eigenvalue is detected.
 
     Returns
     -------
     BucklingResult
-        ``lambda_cr``, the mode shape and the base state it refers to.
+        ``lambda_cr``, the mode shape(s) and the base state it refers to.
+        If multiple eigenvalues are within numerical tolerance of the
+        critical one, :attr:`BucklingResult.multiplicity` > 1 and an
+        :exc:`~truss_analysis.exceptions.AmbiguousModeWarning` is issued.
 
     Raises
     ------
@@ -267,6 +288,10 @@ def linearized_buckling_load_factor(
         positive definite: the structure is *already* at or past a critical
         point before any load amplification (or is a mechanism outright),
         and a load factor is undefined.
+    ShallowSystemWarning
+        If the system is geometrically shallow (rise/span < 0.1), indicating
+        that linearised buckling may significantly underestimate the true
+        snap-through load.
     """
     setup = build_engine(nodes, elements, loads, temps)
     free = list(setup.free_dofs)
@@ -276,6 +301,19 @@ def linearized_buckling_load_factor(
             "there is no stability problem to solve"
         )
         raise MechanismError(msg)
+
+    # Check for shallow geometry (A4: ShallowSystemWarning)
+    node_coords = np.array([[n.x, n.y] for n in nodes])
+    x_span = float(np.ptp(node_coords[:, 0]))
+    y_rise = float(np.ptp(node_coords[:, 1]))
+    if x_span > 0 and y_rise / x_span < 0.1:
+        warnings.warn(
+            f"ShallowSystemWarning: rise/span ratio = {y_rise/x_span:.3f} < 0.1; "
+            "linearised buckling may significantly underestimate snap-through load. "
+            "Consider nonlinear geometric analysis for shallow systems.",
+            ShallowSystemWarning,
+            stacklevel=2,
+        )
 
     n_dof = 2 * len(nodes)
     geom = member_geometry(list(nodes), list(elements))
@@ -312,17 +350,56 @@ def linearized_buckling_load_factor(
     x = solve_triangular(chol, b_mat, lower=True, check_finite=False)
     c_mat = solve_triangular(chol, x.T, lower=True, check_finite=False).T
     c_mat = 0.5 * (c_mat + c_mat.T)  # kill round-off asymmetry
+    
+    # Compute eigenvalues/eigenvectors
     nu, vecs = eigh(c_mat)
-    nu_max = float(nu[-1])
-    if nu_max <= 0.0:
+    
+    # Find positive eigenvalues (corresponding to positive lambda)
+    pos_mask = nu > 1e-14
+    if not np.any(pos_mask):
         lam_cr = float("inf")
         mode_free = np.zeros(len(free))
+        modes_list = [mode_free.copy()]
+        multiplicity = 1
     else:
+        nu_pos = nu[pos_mask]
+        vecs_pos = vecs[:, pos_mask]
+        
+        # Sort by eigenvalue (ascending) to get smallest lambda first
+        sort_idx = np.argsort(nu_pos)
+        nu_sorted = nu_pos[sort_idx]
+        vecs_sorted = vecs_pos[:, sort_idx]
+        
+        # Critical eigenvalue is the largest nu (smallest lambda = 1/nu)
+        nu_max = float(nu_sorted[-1])
         lam_cr = 1.0 / nu_max
-        mode_free = solve_triangular(chol.T, vecs[:, -1], check_finite=False)
-        norm = float(np.linalg.norm(mode_free))
-        if norm > 0.0:
-            mode_free = mode_free / norm
+        
+        # Detect multiplicity: count eigenvalues within tolerance of nu_max
+        eig_tol = 1e-10 * max(1.0, abs(nu_max))
+        close_to_critical = np.abs(nu_sorted - nu_max) < eig_tol
+        multiplicity = int(np.sum(close_to_critical))
+        
+        # Build all mode shapes (transform back from whitened space)
+        modes_list = []
+        for i in range(len(nu_sorted)):
+            mode_free_i = solve_triangular(chol.T, vecs_sorted[:, i], check_finite=False)
+            norm = float(np.linalg.norm(mode_free_i))
+            if norm > 0.0:
+                mode_free_i = mode_free_i / norm
+            modes_list.append(mode_free_i)
+        
+        # Use the critical mode (last one, corresponding to nu_max)
+        mode_free = modes_list[-1].copy()
+        
+        # Issue warning if multiplicity > 1 (A2: AmbiguousModeWarning)
+        if multiplicity > 1:
+            warnings.warn(
+                f"AmbiguousModeWarning: {multiplicity} buckling modes have nearly identical "
+                f"critical load factors (lambda_cr = {lam_cr:.6g}). The returned mode is "
+                "implementation-dependent; any linear combination of these modes is equally valid.",
+                AmbiguousModeWarning,
+                stacklevel=2,
+            )
 
     mode = np.zeros(n_dof)
     mode[free] = mode_free
@@ -334,6 +411,8 @@ def linearized_buckling_load_factor(
     return BucklingResult(
         lambda_cr=float(lam_cr),
         mode=np.asarray(mode, dtype=float),
+        modes=modes_list,
+        multiplicity=multiplicity,
         n_compressed=compressed,
         base_forces={e.id: float(n_total[i]) for i, e in enumerate(elements)},
     )

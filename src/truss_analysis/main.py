@@ -88,6 +88,7 @@ from .postprocess import (
     calculate_reactions,
     check_displacement_magnitude,
     check_equilibrium,
+    check_shallow_system,
     imposed_strain_energy,
 )
 from .solver import (
@@ -671,6 +672,7 @@ def run(
         energy_scale=imposed_strain_energy(nodes, elements),
         penalty_energy=penalty_energy,
     )
+    check_shallow_system(nodes)
     check_displacement_magnitude(nodes, U)
     reactions = calculate_reactions(nodes, K, U, F_ext, fixed_dofs)
     equilibrium = check_equilibrium(nodes, reactions, applied_loads)

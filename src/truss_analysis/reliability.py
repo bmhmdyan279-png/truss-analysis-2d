@@ -11,6 +11,7 @@ is documented in ``docs/theory.md``.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,6 +22,7 @@ import numpy.typing as npt
 from scipy.stats import beta as beta_dist
 from scipy.stats import norm
 
+from .exceptions import BucklingCheckWarning
 from .limitstates import DEFAULT_BUCKLING_CURVE, GAMMA_M_FIRE, BucklingModel
 from .sections import (
     buckling_reduction_factor,
@@ -479,6 +481,14 @@ class ReliabilityEngine:
             member.effective_length_factor,
         )
         if self._buckling_model is BucklingModel.EULER_ONLY:
+            warnings.warn(
+                "BucklingModel.EULER_ONLY ignores residual stresses and initial "
+                "out-of-straightness, overestimating capacity of intermediate-"
+                "slenderness members. The reported reliability indices are optimistic. "
+                "Use EUROCODE_CHI for code-compliant assessment.",
+                BucklingCheckWarning,
+                stacklevel=2,
+            )
             return float(p_cr - abs(member.axial_force))
 
         if member.yield_stress is None or member.yield_stress <= 0.0:

@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .exceptions import BucklingCheckWarning, LargeDisplacementWarning
+from .exceptions import BucklingCheckWarning, LargeDisplacementWarning, ShallowSystemWarning
 from .model import Element, Node
 from .sections import euler_buckling_load
 
@@ -445,6 +445,55 @@ def calculate_buckling(
 #: threshold (C9 8.3): well above serviceability-relevant deflections, well
 #: below "the geometry has visibly changed".
 LARGE_DISPLACEMENT_RATIO = 0.1
+
+
+def check_shallow_system(
+    nodes: list[Node],
+    ratio: float = 0.1,
+) -> float | None:
+    """Warn when the system geometry is shallow (rise/span < ratio).
+
+    Linearised bifurcation analysis approximates the true snap-through limit
+    point with an error that scales as O(theta_0^2) where theta_0 is the
+    initial rise angle. For shallow systems (rise-to-span ratio below ~0.1),
+    the linearised lambda_cr can be significantly optimistic compared to the
+    actual collapse load. This warning flags such geometries so engineers can
+    supplement with geometrically nonlinear analysis (round-5 audit C6#9,
+    C7§4.2: member-specific or strain-based shallow detection is preferred).
+
+    Parameters
+    ----------
+    nodes : list[Node]
+        Model nodes (for computing rise and span from bounding box).
+    ratio : float, default 0.1
+        Threshold fraction; must be positive.
+
+    Returns
+    -------
+    float or None
+        ``rise / span`` (``None`` when span is zero, i.e. a degenerate model).
+        The warning is emitted when the returned value is below ``ratio``.
+    """
+    if ratio <= 0.0:
+        msg = f"ratio must be positive, got {ratio}"
+        raise ValueError(msg)
+    xs = [n.x for n in nodes]
+    ys = [n.y for n in nodes]
+    span = max(xs) - min(xs) if nodes else 0.0
+    rise = max(ys) - min(ys) if nodes else 0.0
+    if span <= 0.0:
+        return None
+    shallow_ratio = rise / span
+    if shallow_ratio < ratio:
+        warnings.warn(
+            f"system geometry is shallow: rise/span = {shallow_ratio:.3f} "
+            f"(threshold {ratio:.1f}): linearised bifurcation analysis may be "
+            f"optimistic compared to snap-through collapse. Consider a "
+            f"geometrically nonlinear analysis.",
+            ShallowSystemWarning,
+            stacklevel=2,
+        )
+    return shallow_ratio
 
 
 def check_displacement_magnitude(
