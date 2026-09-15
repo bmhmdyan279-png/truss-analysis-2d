@@ -232,3 +232,130 @@ def test_margin_alignment_when_member_disappears() -> None:
     assert stat is not None
     assert stat.sample_size == 2
     assert stat.valid_samples == 1
+
+
+# --- Round-5 audit pins: chi-aligned buckling margin, empirical pf ---------
+
+
+def _member(N=-1.5e5, E=210e9, fy=355e6, temp=20.0, **kw) -> MemberResponse:
+    base = dict(
+        axial_force=N,
+        E=E,
+        A=2e-3,
+        I_sec=8e-6,
+        length=3.0,
+        effective_length_factor=0.8,
+        yield_stress=fy,
+        temperature=temp,
+    )
+    base.update(kw)
+    return MemberResponse(**base)
+
+
+def _engine(**kw) -> ReliabilityEngine:
+    return ReliabilityEngine(variables={}, analyze_fn=lambda s: None, **kw)
+
+
+def test_buckling_margin_matches_limitstates_capacity_at_fire_temperature():
+    """One capacity model for the whole library (round-5 audit, C8-1).
+
+    The reliability buckling margin plus |N| must equal exactly the
+    capacity the EN 1993-1-2 limit-state layer computes for the same
+    physical member state -- pre-2.8 the margin was bare Euler while the
+    DCR chain used chi, so beta_buckling was systematically optimistic
+    (6x on the reference member at lambda_bar ~ 0.5).
+    """
+    import math as _math
+
+    from truss_analysis.limitstates import _member_limit_state
+    from truss_analysis.material.steel_eurocode import k_E, k_y
+
+    area, inertia, length, k_fac = 2e-3, 8e-6, 3.0, 0.8
+    E0, fy0, theta, N = 210e9, 355e6, 600.0, -1.5e5
+    state = _member_limit_state("m", theta, N, area, inertia, length, E0, k_fac, fy0)
+    member = _member(
+        N=N,
+        E=float(k_E(theta)) * E0,
+        fy=float(k_y(theta)) * fy0,
+        temp=theta,
+        A=area,
+        I_sec=inertia,
+        length=length,
+        effective_length_factor=k_fac,
+    )
+    margin = _engine()._buckling_margin(member)
+    assert _math.isclose(margin + abs(N), state.capacity, rel_tol=1e-12)
+    # And the old Euler margin really was optimistic on this member.
+    from truss_analysis.limitstates import BucklingModel
+
+    euler_margin = _engine(buckling_model=BucklingModel.EULER_ONLY)._buckling_margin(
+        member
+    )
+    assert euler_margin > margin
+
+
+def test_buckling_margin_euler_only_is_bit_for_bit_legacy():
+    import math as _math
+
+    from truss_analysis.limitstates import BucklingModel
+
+    m = _member()
+    expected = np.pi**2 * m.E * m.I_sec / (
+        m.effective_length_factor * m.length
+    ) ** 2 - abs(m.axial_force)
+    got = _engine(buckling_model=BucklingModel.EULER_ONLY)._buckling_margin(m)
+    assert _math.isclose(got, expected, rel_tol=1e-15, abs_tol=0.0)
+
+
+def test_buckling_margin_ambient_uses_ambient_curve():
+    """At 20 degC the EN 1993-1-1 curve applies (full imperfection alpha)."""
+    import math as _math
+
+    from truss_analysis.sections import (
+        buckling_reduction_factor,
+        euler_buckling_load,
+        non_dimensional_slenderness,
+    )
+
+    m = _member(temp=20.0)
+    p_cr = euler_buckling_load(m.I_sec, m.length, m.E, m.effective_length_factor)
+    lam = non_dimensional_slenderness(m.A, m.yield_stress, p_cr)
+    chi_amb = buckling_reduction_factor(lam, "c", fire=False)
+    chi_fire = buckling_reduction_factor(lam, "c", fire=True)
+    assert chi_amb != chi_fire  # the regime selection is observable
+    expected = chi_amb * m.A * m.yield_stress - abs(m.axial_force)
+    assert _math.isclose(_engine()._buckling_margin(m), expected, rel_tol=1e-12)
+
+
+def test_buckling_margin_requires_yield_stress_under_chi():
+    assert np.isnan(_engine()._buckling_margin(_member(fy=None)))
+
+
+def test_pf_empirical_counts_failures_and_carries_exact_ci():
+    from truss_analysis.reliability import _statistics
+
+    margins = np.array([1.0, -2.0, 3.0, -0.5, np.nan, 2.0, -1.0, 4.0, 5.0, 6.0])
+    stat = _statistics(LimitState.YIELD, "m", margins)
+    # 3 failures out of 9 valid samples (NaN excluded).
+    assert stat.valid_samples == 9
+    assert stat.pf_empirical == pytest.approx(3.0 / 9.0)
+    low, high = stat.pf_empirical_ci
+    assert 0.0 < low < stat.pf_empirical < high < 1.0
+
+    # Zero observed failures: point estimate 0, upper bound ~3/n (the
+    # resolution limit of the study), never a bare 0-width interval.
+    safe = _statistics(LimitState.YIELD, "m", np.ones(1000))
+    assert safe.pf_empirical == 0.0
+    lo, hi = safe.pf_empirical_ci
+    assert lo == 0.0
+    assert 0.0 < hi < 5.0 / 1000
+
+    # All-failure series closes at 1.
+    bad = _statistics(LimitState.YIELD, "m", -np.ones(10))
+    assert bad.pf_empirical == 1.0
+    assert bad.pf_empirical_ci[1] == 1.0
+
+    # No valid samples: NaN margin stats, no interval claim.
+    empty = _statistics(LimitState.YIELD, "m", np.full(4, np.nan))
+    assert np.isnan(empty.pf_empirical)
+    assert empty.pf_empirical_ci is None

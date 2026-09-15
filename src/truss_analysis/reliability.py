@@ -18,8 +18,15 @@ from typing import TypeAlias
 
 import numpy as np
 import numpy.typing as npt
+from scipy.stats import beta as beta_dist
 from scipy.stats import norm
 
+from .limitstates import DEFAULT_BUCKLING_CURVE, GAMMA_M_FIRE, BucklingModel
+from .sections import (
+    buckling_reduction_factor,
+    euler_buckling_load,
+    non_dimensional_slenderness,
+)
 from .uncertainty import RandomVariable
 
 TargetId: TypeAlias = int | str
@@ -63,6 +70,14 @@ class MemberResponse:
         Buckling effective-length factor ``k``.
     yield_stress : float or None, optional
         Yield stress; when ``None`` the yield margin is not evaluated.
+    temperature : float, default 20.0
+        Steel temperature [degC] of the member state. Selects the fire
+        buckling curve (EN 1993-1-2 imperfection factor ``0.65 alpha``)
+        when above ambient and the ambient curve (EN 1993-1-1) at 20 degC;
+        see :class:`ReliabilityEngine`. ``E`` and ``yield_stress`` are taken
+        **as given** (the analysis callback decides whether they are already
+        temperature-reduced), so ``temperature`` never rescales them -- it
+        only selects the code regime for ``chi``.
     """
 
     axial_force: float
@@ -72,6 +87,7 @@ class MemberResponse:
     length: float
     effective_length_factor: float
     yield_stress: float | None = None
+    temperature: float = 20.0
 
 
 @dataclass(frozen=True)
@@ -149,7 +165,26 @@ class MarginStatistics:
     beta_hat : float
         Reliability index estimate ``mean / std``.
     pf_approx : float
-        Approximate failure probability ``Phi(-beta_hat)``.
+        First-order failure probability ``Phi(-beta_hat)``. This is a
+        **normality assumption**, not a measurement: ``beta_hat`` is a
+        method-of-moments index, so ``pf_approx`` is accurate only when the
+        margin is close to Gaussian. Margins built from skewed inputs (a
+        lognormal ``f_y``, a Gumbel live load) are themselves skewed, and in
+        the far tail -- exactly where ``pf`` lives -- the normal
+        approximation can be off by orders of magnitude. Read
+        :attr:`pf_empirical` alongside it.
+    pf_empirical : float
+        Observed failure rate ``mean(margin < 0)`` over the *valid* (finite)
+        samples. Assumption-free, but with ``n`` samples it cannot resolve
+        probabilities much below ``1/n``: a rare-event study with zero
+        observed failures reports ``0.0``, which means "not observed", never
+        "impossible". Quantify that with :attr:`pf_empirical_ci`.
+    pf_empirical_ci : tuple[float, float] or None
+        Clopper-Pearson (exact binomial) 95 % confidence interval on
+        :attr:`pf_empirical`, or ``None`` when there are no valid samples.
+        The interval, not the point estimate, is the honest output of a
+        crude-Monte-Carlo failure probability: its upper bound at zero
+        observed failures is ``~3/n``, the resolution limit of the study.
     margins : numpy.ndarray
         Raw margin series; ``NaN`` marks samples where the margin is undefined.
     """
@@ -162,6 +197,8 @@ class MarginStatistics:
     std: float
     beta_hat: float
     pf_approx: float
+    pf_empirical: float
+    pf_empirical_ci: tuple[float, float] | None
     margins: npt.NDArray[np.float64] = field(repr=False)
 
 
@@ -256,6 +293,14 @@ class ReliabilityEngine:
         :class:`AnalysisSample`.
     service_limits : Sequence[ServiceLimit], optional
         Serviceability limits evaluated on nodal displacements.
+    buckling_model : BucklingModel, default EUROCODE_CHI
+        Compression capacity model behind the buckling margin; the default
+        matches the limit-state layer so reliability indices and DCRs speak
+        the same language (round-5 audit: the pre-2.8 engine used bare
+        Euler while the DCR chain used ``chi``, making every reported
+        buckling ``beta`` systematically optimistic).
+    buckling_curve : str, default "c"
+        Flexural buckling curve, only used by ``EUROCODE_CHI``.
     """
 
     def __init__(
@@ -263,10 +308,14 @@ class ReliabilityEngine:
         variables: Mapping[str, RandomVariable],
         analyze_fn: AnalyzeSample,
         service_limits: Sequence[ServiceLimit] = (),
+        buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
+        buckling_curve: str = DEFAULT_BUCKLING_CURVE,
     ) -> None:
         self._variables = dict(variables)
         self._analyze_fn = analyze_fn
         self._service_limits = tuple(service_limits)
+        self._buckling_model = buckling_model
+        self._buckling_curve = buckling_curve
 
     def run(self, n_samples: int) -> ReliabilityReport:
         """Run the engine once at a fixed sample size.
@@ -378,21 +427,39 @@ class ReliabilityEngine:
 
         return reports
 
-    @staticmethod
-    def _buckling_margin(member: MemberResponse) -> float:
-        """Return the Euler buckling margin of a compressed member.
+    def _buckling_margin(self, member: MemberResponse) -> float:
+        """Return the buckling safety margin of a compressed member.
+
+        Under the default :attr:`BucklingModel.EUROCODE_CHI` the margin is
+        ``chi * A * f_y / gamma_M - |N|`` with ``chi`` from the *same*
+        buckling-curve machinery the limit-state layer uses
+        (:func:`truss_analysis.sections.non_dimensional_slenderness` +
+        :func:`truss_analysis.sections.buckling_reduction_factor`), so this
+        engine and the DCR chain can no longer disagree about what a
+        member's compression capacity is. The fire imperfection factor
+        (``0.65 alpha``, EN 1993-1-2 4.2.3.1(3)) applies when the member
+        temperature is above ambient, the ambient curve (EN 1993-1-1) at
+        20 degC.
+
+        The historical :attr:`BucklingModel.EULER_ONLY` returns the bare
+        ``P_cr - |N|``; it is kept for reproducing pre-2.8 numbers and is
+        documented in :class:`BucklingModel` as optimistic at intermediate
+        slenderness (up to ~15 % at lambda_bar ~ 2, more near lambda_bar 1).
 
         Parameters
         ----------
         member : MemberResponse
             Member response; tension (non-negative axial force) or any
-            non-positive stiffness/geometry yields ``NaN``.
+            non-positive stiffness/geometry yields ``NaN``. Under
+            ``EUROCODE_CHI`` a missing ``yield_stress`` also yields ``NaN``:
+            without ``f_y`` the non-dimensional slenderness -- and hence
+            ``chi`` -- is undefined, and silently falling back to Euler
+            would re-create the two-capacity-models split this fix removes.
 
         Returns
         -------
         float
-            ``P_cr - |N|`` with ``P_cr`` the Euler critical load, or ``NaN``
-            when the margin is undefined.
+            Capacity minus ``|N|`` [N], or ``NaN`` when undefined.
         """
         if member.axial_force >= 0.0:
             return float("nan")
@@ -405,10 +472,28 @@ class ReliabilityEngine:
         ):
             return float("nan")
 
-        p_cr = (np.pi**2 * member.E * member.I_sec) / (
-            (member.effective_length_factor * member.length) ** 2
+        p_cr = euler_buckling_load(
+            member.I_sec,
+            member.length,
+            member.E,
+            member.effective_length_factor,
         )
-        return float(p_cr - abs(member.axial_force))
+        if self._buckling_model is BucklingModel.EULER_ONLY:
+            return float(p_cr - abs(member.axial_force))
+
+        if member.yield_stress is None or member.yield_stress <= 0.0:
+            return float("nan")
+        if member.A <= 0.0:
+            return float("nan")
+
+        lambda_bar = non_dimensional_slenderness(member.A, member.yield_stress, p_cr)
+        chi = buckling_reduction_factor(
+            lambda_bar,
+            self._buckling_curve,
+            fire=member.temperature > 20.0,
+        )
+        capacity = chi * member.A * member.yield_stress / GAMMA_M_FIRE
+        return float(capacity - abs(member.axial_force))
 
     @staticmethod
     def _service_margin(
@@ -446,6 +531,21 @@ class ReliabilityEngine:
         return float(limit.limit - value)
 
 
+def _clopper_pearson(k: int, n: int, confidence: float = 0.95) -> tuple[float, float]:
+    """Exact binomial (Clopper-Pearson) interval for ``k`` failures in ``n``.
+
+    Chosen over a Wald/normal interval deliberately: at the small failure
+    counts a crude Monte Carlo reliability study produces (often ``k = 0``)
+    the Wald interval is degenerate or even extends below zero, while
+    Clopper-Pearson is exact by construction and gives the honest
+    ``~3/n`` upper bound at ``k = 0``.
+    """
+    alpha = 1.0 - confidence
+    low = 0.0 if k == 0 else float(beta_dist.ppf(alpha / 2.0, k, n - k + 1))
+    high = 1.0 if k == n else float(beta_dist.ppf(1.0 - alpha / 2.0, k + 1, n - k))
+    return low, high
+
+
 def _statistics(
     limit_state: LimitState,
     target_id: TargetId,
@@ -465,6 +565,8 @@ def _statistics(
             std=float("nan"),
             beta_hat=float("nan"),
             pf_approx=float("nan"),
+            pf_empirical=float("nan"),
+            pf_empirical_ci=None,
             margins=margins,
         )
 
@@ -472,6 +574,9 @@ def _statistics(
     std = float(np.std(finite, ddof=1)) if valid_samples > 1 else 0.0
     beta = _beta_hat(mean, std)
     pf = _pf_from_beta(beta)
+    failures = int(np.count_nonzero(finite < 0.0))
+    pf_emp = failures / valid_samples
+    pf_ci = _clopper_pearson(failures, valid_samples)
 
     return MarginStatistics(
         limit_state=limit_state,
@@ -482,6 +587,8 @@ def _statistics(
         std=std,
         beta_hat=beta,
         pf_approx=pf,
+        pf_empirical=pf_emp,
+        pf_empirical_ci=pf_ci,
         margins=margins,
     )
 
