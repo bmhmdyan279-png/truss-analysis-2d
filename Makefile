@@ -2,7 +2,7 @@
 # All quality gates mirror the CI pipeline (.github/workflows/ci.yml).
 
 .PHONY: install test test-cov lint format type-check check-all build clean stats \
-        pre-commit-setup sync-requirements
+        stats-check pre-commit-setup sync-requirements
 
 ## Install runtime + dev dependencies and the pre-commit hooks
 install:
@@ -40,17 +40,29 @@ sync-requirements:
 stats:
 	python scripts/update_readme_stats.py
 
-## Everything CI runs, locally
-check-all: lint type-check test-cov
+## Fail if the READMEs do not already quote the measured stats (CI / pre-push).
+## Non-mutating: renders the patch in memory and compares, so it is safe to
+## run on a clean checkout and safe to run in CI.
+stats-check:
+	python scripts/update_readme_stats.py --check
+
+## Everything CI runs, locally.
+## `stats-check` re-runs the suite to measure coverage, so it goes last and
+## after `test-cov` -- running it first would measure twice for nothing.
+check-all: lint type-check test-cov stats-check
 
 ## Build sdist + wheel and check metadata
 build:
 	python -m build
 	twine check dist/*
 
-## Run the pinned pre-commit chain over all files
+## Run the pinned pre-commit chain over all files.
+## The pre-push hook type is installed too: the README-stats gate re-runs the
+## whole suite (~100 s), which is far too slow for every commit and belongs on
+## push instead.
 pre-commit-setup:
 	pre-commit install
+	pre-commit install --hook-type pre-push
 	pre-commit run --all-files
 
 ## Remove build artifacts and caches

@@ -52,7 +52,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Final
 
-from .sections import SquareHSS, idealised_square_hss
+from .sections import DEFAULT_THICKNESS_RATIO, SquareHSS, idealised_square_hss
 
 # ----------------------------------------------------------------------
 #  Public API: both the object-oriented generator and a simple function
@@ -122,7 +122,7 @@ class TrussConfig:
     youngs_modulus: float = 210.0e9
     thermal_expansion: float = 1.2e-5
     total_load: float = DEFAULT_TOTAL_LOAD
-    section_thickness_ratio: float = 25.0
+    section_thickness_ratio: float = DEFAULT_THICKNESS_RATIO
     moment_of_inertia: float | None = None
 
     def __post_init__(self) -> None:

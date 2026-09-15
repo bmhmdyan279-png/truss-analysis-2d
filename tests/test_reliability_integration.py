@@ -111,9 +111,9 @@ def test_example1_monte_carlo_runs_without_crash() -> None:
 
     assert yield_stat is not None
     assert yield_stat.valid_samples == 50
-    assert np.isfinite(yield_stat.beta_hat)
+    assert np.isfinite(yield_stat.beta_mom)
 
     assert buckling_stat is not None
     assert service_stat is not None
     assert service_stat.valid_samples == 50
-    assert np.isfinite(service_stat.beta_hat)
+    assert np.isfinite(service_stat.beta_mom)

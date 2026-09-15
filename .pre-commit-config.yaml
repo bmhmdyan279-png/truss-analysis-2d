@@ -52,3 +52,23 @@ repos:
         language: system
         types: [file]
         pass_filenames: true
+
+      # README statistics gate (round-6 audit C12).  The test count, coverage
+      # percentage and module count are quoted in four places in each of two
+      # READMEs; `make stats` regenerates them, but nothing enforced that it
+      # had been run -- both the round-5 and round-6 audits found the READMEs
+      # advertising numbers from a release or two earlier.  This hook measures
+      # the real values and fails if the committed text disagrees.
+      #
+      # It runs a full `pytest --cov` plus a `mypy` invocation (~100 s), so it
+      # is a pre-push hook, not pre-commit: gating every single commit on a
+      # two-minute re-measurement is how gates get disabled with --no-verify.
+      # `pre-commit install --hook-type pre-push` (see `make pre-commit-setup`)
+      # is required for it to fire.
+      - id: readme-stats
+        name: README statistics match the measured suite (make stats)
+        entry: python scripts/update_readme_stats.py --check
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-push]

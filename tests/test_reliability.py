@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Mapping
 from unittest.mock import MagicMock
 
@@ -12,11 +13,13 @@ from truss_analysis.reliability import (
     AnalysisSample,
     Direction,
     LimitState,
+    MarginStatistics,
     MemberResponse,
     ReliabilityEngine,
     ServiceLimit,
-    _beta_hat,
+    _beta_mom,
     _pf_from_beta,
+    _statistics,
     sample_named_variables,
 )
 from truss_analysis.solver import solve
@@ -85,11 +88,11 @@ def test_single_member_analytical_yield_beta() -> None:
     assert stat is not None
     assert stat.sample_size == 10_000
     assert stat.valid_samples == 10_000
-    assert np.isfinite(stat.beta_hat)
+    assert np.isfinite(stat.beta_mom)
 
     assert abs(stat.mean - _MARGIN_MEAN) <= 0.10 * abs(_MARGIN_MEAN)
     assert abs(stat.std - _LOAD_STD) <= 0.10 * _LOAD_STD
-    assert abs(stat.beta_hat - _BETA_THEORY) <= 0.20 * abs(_BETA_THEORY)
+    assert abs(stat.beta_mom - _BETA_THEORY) <= 0.20 * abs(_BETA_THEORY)
     assert 0.0 <= stat.pf_approx <= 1.0
 
 
@@ -105,7 +108,7 @@ def test_buckling_is_not_counted_for_tension() -> None:
 
     assert stat is not None
     assert stat.valid_samples == 0
-    assert np.isnan(stat.beta_hat)
+    assert np.isnan(stat.beta_mom)
     assert np.isnan(stat.pf_approx)
 
 
@@ -127,7 +130,7 @@ def test_convergence_reports_use_requested_sample_sizes() -> None:
 
     largest = reports[max(sizes)].get(LimitState.YIELD, 1)
     assert largest is not None
-    assert abs(largest.beta_hat - _BETA_THEORY) <= 0.30 * abs(_BETA_THEORY)
+    assert abs(largest.beta_mom - _BETA_THEORY) <= 0.30 * abs(_BETA_THEORY)
 
 
 def test_serviceability_limit_state_is_evaluated() -> None:
@@ -145,7 +148,7 @@ def test_serviceability_limit_state_is_evaluated() -> None:
 
     assert stat is not None
     assert stat.valid_samples == 2_000
-    assert np.isfinite(stat.beta_hat)
+    assert np.isfinite(stat.beta_mom)
 
 
 def test_service_limit_rejects_negative_limit() -> None:
@@ -175,11 +178,33 @@ def test_sample_named_variables_rejects_invalid_shape() -> None:
         sample_named_variables({"bad": bad_rv}, 2)
 
 
-def test_beta_hat_and_pf_edge_cases() -> None:
-    assert _beta_hat(10.0, 0.0) == float("inf")
-    assert _beta_hat(-10.0, 0.0) == float("-inf")
-    assert np.isnan(_beta_hat(0.0, 0.0))
-    assert np.isnan(_beta_hat(float("nan"), 1.0))
+def test_beta_hat_is_a_deprecated_alias_of_beta_mom() -> None:
+    """C8: the rename must warn, not silently change meaning.
+
+    ``beta_hat`` read as a Hasofer-Lind reliability index; the quantity is a
+    method-of-moments ``mean/std``.  The alias keeps old call sites working
+    for one release while telling them the name was wrong.
+    """
+    stat = _stat_for_deprecation_alias()
+    with pytest.warns(DeprecationWarning, match="renamed to beta_mom"):
+        legacy = stat.beta_hat
+    assert legacy == stat.beta_mom
+    # and the new name does not warn
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert stat.beta_mom == legacy
+
+
+def _stat_for_deprecation_alias() -> MarginStatistics:
+    """A minimal valid ``MarginStatistics`` for the alias test."""
+    return _statistics(LimitState.YIELD, "m1", np.array([2.0, 1.0, 3.0, 0.5, -0.5]))
+
+
+def test_beta_mom_and_pf_edge_cases() -> None:
+    assert _beta_mom(10.0, 0.0) == float("inf")
+    assert _beta_mom(-10.0, 0.0) == float("-inf")
+    assert np.isnan(_beta_mom(0.0, 0.0))
+    assert np.isnan(_beta_mom(float("nan"), 1.0))
 
     assert _pf_from_beta(float("inf")) == 0.0
     assert _pf_from_beta(float("-inf")) == 1.0
@@ -200,7 +225,7 @@ def test_service_margin_missing_node() -> None:
 
     assert stat is not None
     assert stat.valid_samples == 0
-    assert np.isnan(stat.beta_hat)
+    assert np.isnan(stat.beta_mom)
 
 
 def test_margin_alignment_when_member_disappears() -> None:

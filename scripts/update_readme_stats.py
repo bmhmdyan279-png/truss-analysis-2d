@@ -15,11 +15,20 @@ Usage
 
     python scripts/update_readme_stats.py           # measure + patch
     python scripts/update_readme_stats.py --dry-run # measure + report only
+    python scripts/update_readme_stats.py --check    # fail if the READMEs are stale
     python scripts/update_readme_stats.py --tests 539 --coverage 95.06 \
         --modules 44                                # patch from given values
 
 Exit code is 0 on success, 1 if a pattern could not be found (the READMEs
 changed shape and this script must be updated, not silently skipped).
+
+``--check`` is the CI/pre-commit mode: it measures the same values, renders
+the same patches *in memory*, and exits 1 when either README differs from
+what the numbers would produce.  It never writes.  That turns "remember to
+run ``make stats`` before releasing" -- which the round-5 and round-6 audits
+both caught being forgotten, leaving the READMEs advertising 356 tests /
+95.44 % and then 611 tests / 95.3 % against a suite that had moved on -- into
+a gate that fails the build instead.
 """
 
 from __future__ import annotations
@@ -122,19 +131,75 @@ FA_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
-def patch(
-    path: Path, patterns: list[tuple[re.Pattern[str], str]], fmt: dict[str, str]
-) -> int:
-    text = path.read_text(encoding="utf-8")
+def render(
+    text: str,
+    name: str,
+    patterns: list[tuple[re.Pattern[str], str]],
+    fmt: dict[str, str],
+) -> tuple[str, int, list[str]]:
+    """Apply every pattern to ``text`` in memory.
+
+    Returns ``(new_text, n_hits, missing_patterns)``.  Pure, so ``--check``
+    can compare against the file on disk without ever writing to it.
+    """
     hits = 0
+    missing: list[str] = []
     for pattern, template in patterns:
         replacement = template.format(**fmt)
         text, count = pattern.subn(replacement, text)
         if count == 0:
-            print(f"WARNING: pattern not found in {path.name}: {pattern.pattern}")
+            missing.append(pattern.pattern)
+            print(f"WARNING: pattern not found in {name}: {pattern.pattern}")
         hits += count
+    return text, hits, missing
+
+
+def patch(
+    path: Path, patterns: list[tuple[re.Pattern[str], str]], fmt: dict[str, str]
+) -> int:
+    """Render and write; returns the number of patched occurrences."""
+    text, hits, _missing = render(
+        path.read_text(encoding="utf-8"), path.name, patterns, fmt
+    )
     path.write_text(text, encoding="utf-8")
     return hits
+
+
+def check_stale(
+    patterns_en: list[tuple[re.Pattern[str], str]],
+    patterns_fa: list[tuple[re.Pattern[str], str]],
+    fmt: dict[str, str],
+) -> int:
+    """Exit status for ``--check``: 0 when both READMEs already agree.
+
+    Compares rendered-in-memory text against the files without writing, and
+    reports *which* README is stale plus how many occurrences would change.
+    A missing pattern is also a failure here: if the READMEs changed shape,
+    the numbers are no longer being maintained at all.
+    """
+    stale = 0
+    for path, patterns in ((README_EN, patterns_en), (README_FA, patterns_fa)):
+        current = path.read_text(encoding="utf-8")
+        rendered, hits, missing = render(current, path.name, patterns, fmt)
+        if missing:
+            print(f"STALE: {path.name}: {len(missing)} pattern(s) no longer match")
+            stale += 1
+        elif rendered != current:
+            changed = sum(
+                1
+                for a, b in zip(
+                    current.splitlines(), rendered.splitlines(), strict=False
+                )
+                if a != b
+            )
+            print(
+                f"STALE: {path.name}: {changed} line(s) would change "
+                f"({hits} occurrence(s)); run `make stats`"
+            )
+            stale += 1
+        else:
+            print(f"OK: {path.name} matches the measured statistics")
+    return 1 if stale else 0
 
 
 def main() -> int:
@@ -143,6 +208,11 @@ def main() -> int:
     parser.add_argument("--coverage", type=float, default=None)
     parser.add_argument("--modules", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="fail (exit 1) if the READMEs do not already quote these numbers",
+    )
     args = parser.parse_args()
 
     if args.tests is not None and args.coverage is not None:
@@ -170,6 +240,9 @@ def main() -> int:
         EN_PATTERNS_USE = [p for p in EN_PATTERNS if "{modules}" not in p[1]]
     else:
         EN_PATTERNS_USE = EN_PATTERNS
+
+    if args.check:
+        return check_stale(EN_PATTERNS_USE, FA_PATTERNS, fmt)
 
     hits_en = patch(README_EN, EN_PATTERNS_USE, fmt)
     hits_fa = patch(README_FA, FA_PATTERNS, fmt)

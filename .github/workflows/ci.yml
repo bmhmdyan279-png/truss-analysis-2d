@@ -100,6 +100,27 @@ jobs:
           --ignore=tests/validation/test_level4_rho_branches.py
           --ignore=tests/validation/test_level5_crossval.py
 
+  stats:
+    name: README statistics gate (make stats)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install package with all extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,viz,validation]"
+      # Deliberately lets the script do its own measuring rather than parsing
+      # the coverage job's output in shell.  `--check` and `make stats` then
+      # share one parser, so a green gate here guarantees `make stats` would
+      # be a no-op -- which is the actual property being asserted.  Two
+      # independent parsers could each be right and still disagree.
+      - name: Check the READMEs quote the measured suite
+        run: python scripts/update_readme_stats.py --check
+
   build-sdist:
     name: Build sdist + wheel (incl. git-less export)
     runs-on: ubuntu-latest

@@ -11,11 +11,13 @@ is documented in ``docs/theory.md``.
 
 from __future__ import annotations
 
+import os
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -30,6 +32,12 @@ from .sections import (
     non_dimensional_slenderness,
 )
 from .uncertainty import RandomVariable
+
+_DEPRECATION_BETA_HAT = (
+    "MarginStatistics.beta_hat is deprecated and renamed to beta_mom: the "
+    "quantity is a method-of-moments mean/std of the sampled margin, not a "
+    "Hasofer-Lind / FORM reliability index (no design point is searched for)."
+)
 
 TargetId: TypeAlias = int | str
 ScalarSample: TypeAlias = Mapping[str, float]
@@ -164,11 +172,21 @@ class MarginStatistics:
         Arithmetic mean of the finite margins.
     std : float
         Sample standard deviation (``ddof=1``) of the finite margins.
-    beta_hat : float
-        Reliability index estimate ``mean / std``.
+    beta_mom : float
+        **Method-of-moments** index ``mean / std`` of the sampled margin.
+
+        Renamed from ``beta_hat`` in round 6 because the old name read as a
+        reliability index in the Hasofer-Lind / FORM sense, which this is
+        not.  A FORM index is the distance from the origin to the design
+        point, minimised over the actual limit-state surface in standard
+        normal space; ``beta_mom`` is the first two moments of a sampled
+        margin and nothing else.  The two coincide only when the margin is
+        exactly Gaussian *and* the limit state is linear in the standard
+        normal variables.  No FORM/SORM search is performed here -- see the
+        module docstring's scope statement.
     pf_approx : float
-        First-order failure probability ``Phi(-beta_hat)``. This is a
-        **normality assumption**, not a measurement: ``beta_hat`` is a
+        First-order failure probability ``Phi(-beta_mom)``. This is a
+        **normality assumption**, not a measurement: ``beta_mom`` is a
         method-of-moments index, so ``pf_approx`` is accurate only when the
         margin is close to Gaussian. Margins built from skewed inputs (a
         lognormal ``f_y``, a Gumbel live load) are themselves skewed, and in
@@ -197,11 +215,22 @@ class MarginStatistics:
     valid_samples: int
     mean: float
     std: float
-    beta_hat: float
+    beta_mom: float
     pf_approx: float
     pf_empirical: float
     pf_empirical_ci: tuple[float, float] | None
     margins: npt.NDArray[np.float64] = field(repr=False)
+
+    @property
+    def beta_hat(self) -> float:
+        """Deprecated alias of :attr:`beta_mom` (round-6 rename, C8).
+
+        The old name implied a Hasofer-Lind reliability index; the quantity
+        is a method-of-moments ``mean / std``.  Emits
+        :class:`DeprecationWarning`.
+        """
+        warnings.warn(_DEPRECATION_BETA_HAT, DeprecationWarning, stacklevel=2)
+        return self.beta_mom
 
 
 @dataclass
@@ -283,6 +312,59 @@ def sample_named_variables(
     return samples
 
 
+#: Samples evaluated per worker task when ``n_jobs != 1``.  The chunk is the
+#: unit of both load balancing and (for the process backend) pickling, so it
+#: has to be large enough to amortise shipping the sample arrays and small
+#: enough that a straggler does not idle the pool at the end.
+PARALLEL_CHUNK_SAMPLES = 64
+
+ParallelBackend = Literal["threads", "processes"]
+"""Where :class:`ReliabilityEngine` runs its samples when ``n_jobs != 1``.
+
+``"threads"`` (the default) needs nothing of the caller: the analysis
+callback is never pickled, and because the expensive work is numpy/scipy
+linear algebra -- which releases the GIL -- threads scale.  ``"processes"``
+sidesteps the GIL entirely but requires ``analyze_fn`` and everything it
+closes over to be picklable, which rules out the closures and lambdas most
+call sites use.
+"""
+
+
+def _resolve_n_jobs(n_jobs: int | None) -> int:
+    """Normalise a scikit-learn-style ``n_jobs`` to a concrete worker count.
+
+    ``None`` and ``1`` are serial; ``-1`` is every CPU; ``-k`` is every CPU
+    but ``k - 1``.  ``0`` is rejected rather than quietly meaning one of the
+    two things a caller might have intended.
+    """
+    if n_jobs is None:
+        return 1
+    jobs = int(n_jobs)
+    if jobs == 0:
+        msg = "n_jobs must be a non-zero integer (-1 = every CPU)"
+        raise ValueError(msg)
+    if jobs < 0:
+        cpus = os.cpu_count() or 1
+        return max(1, cpus + 1 + jobs)
+    return jobs
+
+
+def _evaluate_chunk(
+    payload: tuple[AnalyzeSample, dict[str, npt.NDArray[np.float64]], range],
+) -> list[AnalysisSample]:
+    """Evaluate one contiguous block of sample indices, in order.
+
+    Module level (not a closure) so the *process* backend can pickle it.  The
+    sample arrays travel once per chunk rather than once per sample, which is
+    what makes that backend viable at all.
+    """
+    fn, samples, indices = payload
+    return [
+        fn({name: float(values[i]) for name, values in samples.items()})
+        for i in indices
+    ]
+
+
 class ReliabilityEngine:
     """Monte Carlo engine that summarises sampled safety margins.
 
@@ -303,6 +385,16 @@ class ReliabilityEngine:
         buckling ``beta`` systematically optimistic).
     buckling_curve : str, default "c"
         Flexural buckling curve, only used by ``EUROCODE_CHI``.
+    n_jobs : int, default 1
+        Workers used to evaluate ``analyze_fn`` across the sample stream
+        (C16).  ``1`` is serial; ``-1`` is every CPU; ``-k`` is every CPU but
+        ``k - 1``.  Results are *bit-identical* to the serial run for any
+        value: the random draws are taken up front from one stream and the
+        per-sample margins are accumulated strictly in index order, so
+        parallelism changes the wall clock and nothing else.
+    parallel_backend : {"threads", "processes"}, default "threads"
+        See :data:`ParallelBackend`.  ``"processes"`` requires
+        ``analyze_fn`` to be picklable.
     """
 
     def __init__(
@@ -312,12 +404,22 @@ class ReliabilityEngine:
         service_limits: Sequence[ServiceLimit] = (),
         buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
         buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+        n_jobs: int = 1,
+        parallel_backend: ParallelBackend = "threads",
     ) -> None:
+        if parallel_backend not in ("threads", "processes"):
+            msg = (
+                "parallel_backend must be 'threads' or 'processes'; got "
+                f"{parallel_backend!r}"
+            )
+            raise ValueError(msg)
         self._variables = dict(variables)
         self._analyze_fn = analyze_fn
         self._service_limits = tuple(service_limits)
         self._buckling_model = buckling_model
         self._buckling_curve = buckling_curve
+        self._n_jobs = _resolve_n_jobs(n_jobs)
+        self._parallel_backend = parallel_backend
 
     def run(self, n_samples: int) -> ReliabilityReport:
         """Run the engine once at a fixed sample size.
@@ -336,7 +438,9 @@ class ReliabilityEngine:
         return reports[n_samples]
 
     def run_convergence(
-        self, sample_sizes: Sequence[int]
+        self,
+        sample_sizes: Sequence[int],
+        n_jobs: int | None = None,
     ) -> dict[int, ReliabilityReport]:
         """Run the engine once and report statistics at several sample sizes.
 
@@ -348,6 +452,10 @@ class ReliabilityEngine:
         ----------
         sample_sizes : Sequence[int]
             Positive sample sizes; duplicates are ignored.
+        n_jobs : int or None, optional
+            Per-call override of the constructor's ``n_jobs``; ``None`` uses
+            the engine default.  Convenience for running a large study in
+            parallel after a small serial sanity check on the same engine.
 
         Returns
         -------
@@ -371,9 +479,8 @@ class ReliabilityEngine:
 
         margin_lists: dict[tuple[LimitState, TargetId], list[float]] = {}
 
-        for i in range(max_n):
-            scalar_sample = {name: float(values[i]) for name, values in samples.items()}
-            response = self._analyze_fn(scalar_sample)
+        jobs = self._n_jobs if n_jobs is None else _resolve_n_jobs(n_jobs)
+        for i, response in self._iter_responses(samples, max_n, jobs):
             seen: set[tuple[LimitState, TargetId]] = set()
 
             for member_id, member in response.member_responses.items():
@@ -428,6 +535,56 @@ class ReliabilityEngine:
             )
 
         return reports
+
+    def _iter_responses(
+        self,
+        samples: dict[str, npt.NDArray[np.float64]],
+        max_n: int,
+        jobs: int,
+    ) -> Iterator[tuple[int, AnalysisSample]]:
+        """Yield ``(index, response)`` pairs in strict index order.
+
+        With ``jobs == 1`` this is the original serial loop and no executor is
+        created.  Otherwise the stream is cut into chunks of
+        :data:`PARALLEL_CHUNK_SAMPLES` ``* jobs`` indices, one chunk is in
+        flight at a time, and the chunk's results are consumed in order
+        before the next is submitted.  That bounds resident responses to one
+        chunk -- the serial path holds none -- instead of materialising all
+        ``max_n`` of them, which an eager ``executor.map`` over the whole
+        range would do.
+
+        Determinism does not depend on the pool: the sample stream is drawn
+        once up front and the accumulation below walks indices ascending, so
+        a given ``max_n`` produces a given report at any ``jobs``.
+        """
+        if jobs <= 1 or max_n <= 1:
+            for i in range(max_n):
+                scalar = {name: float(values[i]) for name, values in samples.items()}
+                yield i, self._analyze_fn(scalar)
+            return
+
+        chunk = max(jobs, min(max_n, PARALLEL_CHUNK_SAMPLES * jobs))
+        executor_cls = (
+            ThreadPoolExecutor
+            if self._parallel_backend == "threads"
+            else ProcessPoolExecutor
+        )
+        with executor_cls(max_workers=jobs) as pool:
+            for start in range(0, max_n, chunk):
+                stop = min(start + chunk, max_n)
+                # Sub-blocks of `jobs` indices, so one chunk keeps every
+                # worker busy while `pool.map` still returns them in order.
+                blocks = [
+                    range(a, min(a + jobs, stop)) for a in range(start, stop, jobs)
+                ]
+                payloads = [(self._analyze_fn, samples, block) for block in blocks]
+                # Each index comes from its own block, never from a running
+                # counter, so a short block cannot silently mislabel a margin.
+                for block, responses in zip(
+                    blocks, pool.map(_evaluate_chunk, payloads), strict=True
+                ):
+                    for i, response in zip(block, responses, strict=True):
+                        yield i, response
 
     def _buckling_margin(self, member: MemberResponse) -> float:
         """Return the buckling safety margin of a compressed member.
@@ -573,7 +730,7 @@ def _statistics(
             valid_samples=0,
             mean=float("nan"),
             std=float("nan"),
-            beta_hat=float("nan"),
+            beta_mom=float("nan"),
             pf_approx=float("nan"),
             pf_empirical=float("nan"),
             pf_empirical_ci=None,
@@ -582,7 +739,7 @@ def _statistics(
 
     mean = float(np.mean(finite))
     std = float(np.std(finite, ddof=1)) if valid_samples > 1 else 0.0
-    beta = _beta_hat(mean, std)
+    beta = _beta_mom(mean, std)
     pf = _pf_from_beta(beta)
     failures = int(np.count_nonzero(finite < 0.0))
     pf_emp = failures / valid_samples
@@ -595,7 +752,7 @@ def _statistics(
         valid_samples=valid_samples,
         mean=mean,
         std=std,
-        beta_hat=beta,
+        beta_mom=beta,
         pf_approx=pf,
         pf_empirical=pf_emp,
         pf_empirical_ci=pf_ci,
@@ -603,8 +760,14 @@ def _statistics(
     )
 
 
-def _beta_hat(mean: float, std: float) -> float:
-    """Return the reliability index ``mean / std`` with degenerate guards."""
+def _beta_mom(mean: float, std: float) -> float:
+    """Return the method-of-moments index ``mean / std`` with degenerate guards.
+
+    Not a Hasofer-Lind reliability index -- no design point is searched for.
+    The guards matter: a zero-dispersion margin has an infinite index whose
+    *sign* is the whole answer, and ``0/0`` must stay ``nan`` rather than
+    becoming a confident ``0.0``.
+    """
     if not np.isfinite(mean) or not np.isfinite(std):
         return float("nan")
 

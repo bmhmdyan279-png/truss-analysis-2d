@@ -70,3 +70,27 @@ def test_heterogeneity_nan_handling() -> None:
 
     assert "Member 2" in result.warnings[0]
     assert result.unstable_members == []
+
+
+def test_beta_hat_is_a_deprecated_alias_of_beta_mom() -> None:
+    """C8: the rename warns rather than silently changing meaning.
+
+    ``beta_hat`` read as a Hasofer-Lind / FORM reliability index; the
+    quantity is a method-of-moments ``mu_g / std_g``.  The alias keeps old
+    call sites alive for one release while telling them the name was wrong.
+    """
+    import warnings
+
+    margins = {
+        "1": np.array([10.0, 12.0, 8.0, 11.0]),
+        "2": np.array([5.0, 4.0, 6.0, 5.5]),
+    }
+    result = compute_heterogeneity(
+        margins, {"1": 1.0, "2": 1.0}, n_bootstrap=10, bootstrap_seed=7
+    )
+    with pytest.warns(DeprecationWarning, match="renamed to beta_mom"):
+        legacy = result.beta_hat
+    assert legacy == result.beta_mom
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert result.beta_mom == legacy

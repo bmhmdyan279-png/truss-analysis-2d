@@ -13,11 +13,20 @@ quantifies how unevenly demand is distributed across members:
 
 from __future__ import annotations
 
+# Aliased: the result dataclass has a field named ``warnings``, and an
+# unaliased module import next to it reads like a bug even though it is not.
+import warnings as _warnings
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
+
+_DEPRECATION_BETA_HAT = (
+    "HeterogeneityResult.beta_hat is deprecated and renamed to beta_mom: the "
+    "quantity is a method-of-moments mu_g/std_g of the sampled margin, not a "
+    "Hasofer-Lind / FORM reliability index (no design point is searched for)."
+)
 
 
 @dataclass(frozen=True)
@@ -33,9 +42,14 @@ class HeterogeneityResult:
         ratio (defaults to 1.0 for members absent from the input map).
     mu_g : dict[str, float]
         Per-member mean safety margin.
-    beta_hat : dict[str, float]
-        Per-member reliability-like index ``mu_g / std_g`` (signed;
+    beta_mom : dict[str, float]
+        Per-member **method-of-moments** index ``mu_g / std_g`` (signed;
         ``inf``/``-inf``/``nan`` for degenerate dispersion).
+
+        Renamed from ``beta_hat`` in round 6 (C8): the quantity is a ratio of
+        the first two moments of the sampled margin, not a Hasofer-Lind /
+        FORM reliability index, and the old name invited exactly that
+        misreading.  ``beta_hat`` remains as a deprecated alias property.
     u_empirical_mean, u_empirical_std : float
         Mean and sample standard deviation of the heterogeneity index
         over the valid samples.
@@ -59,7 +73,7 @@ class HeterogeneityResult:
     member_ids: list[str]
     scf_values: dict[str, float]
     mu_g: dict[str, float]
-    beta_hat: dict[str, float]
+    beta_mom: dict[str, float]
     u_empirical_mean: float
     u_empirical_std: float
     u_empirical_quantiles: dict[str, float]
@@ -69,6 +83,15 @@ class HeterogeneityResult:
     h1_accepted: bool
     unstable_members: list[str]
     warnings: list[str]
+
+    @property
+    def beta_hat(self) -> dict[str, float]:
+        """Deprecated alias of :attr:`beta_mom` (round-6 rename, C8).
+
+        Emits :class:`DeprecationWarning`.
+        """
+        _warnings.warn(_DEPRECATION_BETA_HAT, DeprecationWarning, stacklevel=2)
+        return self.beta_mom
 
 
 def compute_bounded_metrics(values: npt.ArrayLike) -> dict[str, float]:
@@ -168,7 +191,7 @@ def compute_heterogeneity(
     warnings_list: list[str] = []
     unstable_members: list[str] = []
     mu_g_dict: dict[str, float] = {}
-    beta_hat_dict: dict[str, float] = {}
+    beta_mom_dict: dict[str, float] = {}
     src_matrix = np.zeros((n_samples, n_members))
 
     for idx, mid in enumerate(member_ids):
@@ -182,7 +205,7 @@ def compute_heterogeneity(
                 f"Member {mid}: No valid safety margin samples (all missing)."
             )
             mu_g_dict[mid] = mu_g
-            beta_hat_dict[mid] = beta
+            beta_mom_dict[mid] = beta
             src_matrix[:, idx] = np.nan
             continue
 
@@ -199,7 +222,7 @@ def compute_heterogeneity(
                 beta = float("nan")
 
         mu_g_dict[mid] = mu_g
-        beta_hat_dict[mid] = beta
+        beta_mom_dict[mid] = beta
 
         scf = scf_values.get(mid, 1.0)
 
@@ -283,7 +306,7 @@ def compute_heterogeneity(
         member_ids=member_ids,
         scf_values={mid: scf_values.get(mid, 1.0) for mid in member_ids},
         mu_g=mu_g_dict,
-        beta_hat=beta_hat_dict,
+        beta_mom=beta_mom_dict,
         u_empirical_mean=float(np.mean(valid_u)) if len(valid_u) > 0 else float("nan"),
         u_empirical_std=float(np.std(valid_u, ddof=1)) if len(valid_u) > 1 else 0.0,
         u_empirical_quantiles=quantiles,

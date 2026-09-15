@@ -32,21 +32,39 @@ import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+import numpy as np
+from scipy.optimize import brentq
+
 from .exceptions import BucklingCheckWarning
 
 __all__ = [
     "BUCKLING_CURVE_ALPHA",
+    "DEFAULT_THICKNESS_RATIO",
     "FIRE_IMPERFECTION_FACTOR",
     "LAMBDA_BAR_BUCKLING_LIMIT",
+    "MIN_THICKNESS_RATIO",
     "SectionCatalog",
     "SquareHSS",
     "buckling_reduction_factor",
     "euler_buckling_load",
     "idealised_square_hss",
     "non_dimensional_slenderness",
+    "thickness_ratio_from_section",
 ]
 
-_MIN_THICKNESS_RATIO = 2.0  # r = b/t must keep (b - 2t) > 0
+#: Smallest admissible width-to-thickness ratio ``r = b/t``: at ``r = 2`` the
+#: wall closes the void (``2t = b``).  Exported (it was ``_MIN_THICKNESS_RATIO``)
+#: because callers that invert the section model need the same bound the
+#: forward model enforces.
+MIN_THICKNESS_RATIO = 2.0
+_MIN_THICKNESS_RATIO = MIN_THICKNESS_RATIO  # backwards-compatible alias
+
+#: Fallback ``b/t`` when a member carries no usable ``I_sec`` and its ratio
+#: therefore cannot be recovered.  25.0 is the value the parametric generator
+#: has always used; it is a *declared assumption*, and
+#: :func:`~truss_analysis.retrofit.actions.apply_decision` warns whenever it
+#: has to fall back to it (round-6 audit C7).
+DEFAULT_THICKNESS_RATIO = 25.0
 
 #: Imperfection factors ``alpha`` of the five flexural buckling curves,
 #: EN 1993-1-1:2005 Table 6.1 / Table 6.2.
@@ -125,7 +143,9 @@ class SquareHSS:
         return math.sqrt(self.i_sec / self.area)
 
 
-def idealised_square_hss(area: float, thickness_ratio: float = 25.0) -> SquareHSS:
+def idealised_square_hss(
+    area: float, thickness_ratio: float = DEFAULT_THICKNESS_RATIO
+) -> SquareHSS:
     """Construct the idealised square HSS with a given area and ``b/t`` ratio.
 
     Inverts ``A = 4 b^2 (r - 1) / r^2`` for ``b``, then sets ``t = b / r``.
@@ -161,6 +181,91 @@ def idealised_square_hss(area: float, thickness_ratio: float = 25.0) -> SquareHS
     b = (r / 2.0) * math.sqrt(area / (r - 1.0))
     t = b / r
     return SquareHSS(name=f"idealised-r{r:g}-A{area:g}", b=b, t=t)
+
+
+#: Offset keeping the root bracket strictly inside the hollow range.
+_R_EPS = 1e-9
+
+
+def _kappa_of_r(r: float) -> float:
+    """Dimensionless ``I / A^2`` of the idealised square HSS at ratio ``r``."""
+    return (r**3 - 3.0 * r**2 + 4.0 * r - 2.0) / (24.0 * (r - 1.0) ** 2)
+
+
+def thickness_ratio_from_section(area: float, i_sec: float) -> float:
+    """Recover ``r = b/t`` from a member's ``(A, I)`` pair.
+
+    The idealised square HSS is a two-parameter family, and the dimensionless
+    combination ``I / A^2`` depends on ``r`` alone:
+
+    .. code-block:: text
+
+        A = 4 t (b - t),  I = (b^4 - (b - 2t)^4) / 12,  b = r t
+        =>  I / A^2 = (r^3 - 3 r^2 + 4 r - 2) / (24 (r - 1)^2)
+
+    That map is strictly increasing on ``r > 2`` -- from ``1/12`` at the
+    solid limit to ``r/24`` asymptotically -- so it is invertible and the
+    recovered ratio is unique.  Being independent of ``A``, it is exactly the
+    quantity needed to enlarge a member while preserving *its own* wall
+    slenderness rather than an assumed one.
+
+    Parameters
+    ----------
+    area : float
+        Cross-sectional area ``A`` [m^2]; must be positive.
+    i_sec : float
+        Second moment of area ``I`` [m^4]; must be positive.
+
+    Returns
+    -------
+    float
+        Width-to-thickness ratio ``r = b/t`` of the idealised square HSS that
+        reproduces ``I / A^2``.
+
+    Raises
+    ------
+    ValueError
+        If ``area`` or ``i_sec`` is non-positive, or if ``I / A^2`` falls
+        below ``1/12`` -- the value at ``r = 2``, below which no hollow
+        square section can be that stocky and the input is therefore not an
+        idealised HSS at all (a solid or doubly-symmetric rolled section,
+        for instance).
+
+    See Also
+    --------
+    idealised_square_hss : the forward map this inverts.
+    """
+    if area <= 0.0:
+        msg = f"area must be > 0 to recover a thickness ratio, got {area}"
+        raise ValueError(msg)
+    if i_sec <= 0.0:
+        msg = f"i_sec must be > 0 to recover a thickness ratio, got {i_sec}"
+        raise ValueError(msg)
+
+    kappa = float(i_sec) / (float(area) * float(area))
+    kappa_min = _kappa_of_r(MIN_THICKNESS_RATIO + _R_EPS)
+    if kappa < kappa_min:
+        msg = (
+            f"I/A^2 = {kappa:.6g} is below {kappa_min:.6g}, the solid limit "
+            f"(r = {MIN_THICKNESS_RATIO:g}) of the idealised square HSS; this "
+            "section is not representable in that family"
+        )
+        raise ValueError(msg)
+
+    # kappa(r) ~ r/24 for large r, so 24*kappa is a tight initial guess; pad
+    # the bracket generously rather than iterating to find one.
+    hi = max(4.0 * MIN_THICKNESS_RATIO, 48.0 * kappa + 16.0)
+    while _kappa_of_r(hi) < kappa:  # pragma: no cover - defensive growth
+        hi *= 2.0
+    root = brentq(
+        lambda r: _kappa_of_r(r) - kappa,
+        MIN_THICKNESS_RATIO + _R_EPS,
+        hi,
+        xtol=1e-12,
+        rtol=4.0 * float(np.finfo(float).eps),
+        maxiter=200,
+    )
+    return float(root)
 
 
 @dataclass(frozen=True)

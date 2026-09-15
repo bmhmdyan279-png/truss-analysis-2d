@@ -8,7 +8,7 @@
 اولویت‌بندی مقاوم‌سازی.
 
 [![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
-![coverage](https://img.shields.io/badge/coverage-۹۵.۳%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-۹۳.۷%25-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 [![PyPI version](https://img.shields.io/pypi/v/truss-analysis.svg)](https://pypi.org/project/truss-analysis/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -59,7 +59,7 @@
   سختی گره‌های آزاد).
 
 همه‌چیز با ورودی‌های داده‌شده قطعی است، تایپ کامل دارد
-(`mypy --strict` پاک) و با ۶۱۱ آزمون پوشش ۹۵.۳٪ (گیت ۹۰٪) گرفته است.
+(`mypy --strict` پاک) و با ۶۸۹ آزمون پوشش ۹۳.۷٪ (گیت ۹۰٪) گرفته است.
 نتایج همیشه SI هستند (متر، نیوتن، پاسکال) — صرف‌نظر از دستگاه واحد ورودی.
 
 ## قابلیت‌ها
@@ -552,7 +552,7 @@ make stats          # اندازه‌گیری مجدد و به‌روزرسان�
 make build          # sdist + wheel + twine check
 ```
 
-وضعیت فعلی این شاخه: **۶۱۱ آزمون پاس، پوشش ۹۵.۳۱٪** (`pytest tests/`)،
+وضعیت فعلی این شاخه: **۶۸۹ آزمون پاس، پوشش ۹۳.۷۴٪** (`pytest tests/`)،
 `ruff` پاک با مجموعه‌قواعد گسترش‌یافته (E, F, I, W, UP, B, SIM, RUF, PT,
 N, D) و `mypy --strict` پاک روی هر ۴۶ ماژول کتابخانه.
 
@@ -581,7 +581,7 @@ src/truss_analysis/
 ├── validation/                              # معیارها، پل مرجع، سورگیت
 ├── sensitivity.py, reliability.py           # گرادیان‌ها + توابع قابلیت اطمینان (حاشیه‌های هم‌تراز با chi)
 └── visualization.py                         # رسم شکل (matplotlib با بارگذاری تنبل)
-tests/                                       # ۶۱۱ آزمون شامل tests/validation/
+tests/                                       # ۶۸۹ آزمون شامل tests/validation/
 docs/theory.md, docs/error_codes.md          # فرمول‌بندی + مرجع کدهای خطا
 examples/                                    # مدل‌های مثالِ قابل اجرا
 scripts/                                     # ابزارهای نگهداری مخزن
