@@ -49,6 +49,7 @@ from .sections import (
     euler_buckling_load,
     non_dimensional_slenderness,
 )
+from .stability import linearized_buckling_load_factor
 
 __all__ = [
     "DEFAULT_BUCKLING_CURVE",
@@ -487,6 +488,17 @@ def _member_limit_state(
             # N_b,fi,theta,Rd = chi * A * f_y,theta / gamma_M,fi == chi * n_rd
             capacity = chi * n_rd
         else:
+            # EULER_ONLY: historical model that overestimates capacity of
+            # intermediate-slenderness members (~15% at lambda_bar ~ 2).
+            # This is optimistic and should be flagged to users.
+            warnings.warn(
+                "BucklingModel.EULER_ONLY ignores residual stresses and initial "
+                "out-of-straightness, overestimating capacity of intermediate-"
+                "slenderness members. The reported DCR and critical temperature "
+                "are optimistic. Use EUROCODE_CHI for code-compliant assessment.",
+                UserWarning,
+                stacklevel=2,
+            )
             capacity = min(p_cr, n_rd)
     else:
         capacity = n_rd
@@ -589,6 +601,7 @@ def dcr_field(
     f_y: float,
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+    check_system_stability: bool = True,
 ) -> dict[str, MemberLimitState]:
     """DCR state of every member at the given member temperatures.
 
@@ -606,16 +619,46 @@ def dcr_field(
         Compression capacity model; see :class:`BucklingModel`.
     buckling_curve : str, default "c"
         Flexural buckling curve, only used by ``EUROCODE_CHI``.
+    check_system_stability : bool, default True
+        If True, compute the linearised system buckling load factor
+        ``lambda_cr``. When ``lambda_cr < 1``, all compression members
+        receive a DCR adjustment to reflect system-level instability risk
+        (A1: connect lambda_cr to dcr_field).
 
     Returns
     -------
     dict[str, MemberLimitState]
-        Limit state per member id.
+        Limit state per member id. When ``check_system_stability=True`` and
+        ``lambda_cr < 1``, compression members have their DCR increased by
+        the factor ``1 / lambda_cr`` to account for system instability.
     """
     forces = member_axial_forces(nodes, elements, loads, temps)
-    return _limit_states_from_forces(
+    result = _limit_states_from_forces(
         nodes, elements, forces, temps, f_y, buckling_model, buckling_curve
     )
+    
+    # A1: Connect lambda_cr to dcr_field for system stability
+    if check_system_stability:
+        try:
+            buckling_result = linearized_buckling_load_factor(nodes, elements, loads, temps)
+            lambda_cr = buckling_result.lambda_cr
+            
+            # If lambda_cr < 1, the system is unstable at current load level
+            # Adjust DCR for compression members to reflect this
+            if lambda_cr < 1.0:
+                stability_factor = 1.0 / lambda_cr
+                for member_id, ls in result.items():
+                    if ls.compression and ls.p_cr is not None:
+                        # Scale DCR by stability factor
+                        # This ensures DCR > 1 when system is unstable
+                        object.__setattr__(ls, 'dcr', ls.dcr * stability_factor)
+        except MechanismError:
+            # Base state already unstable - all compression members should fail
+            for member_id, ls in result.items():
+                if ls.compression:
+                    object.__setattr__(ls, 'dcr', float('inf'))
+    
+    return result
 
 
 def member_critical_temperature(
