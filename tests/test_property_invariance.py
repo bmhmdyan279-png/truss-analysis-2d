@@ -647,3 +647,88 @@ def test_fabrication_error_in_an_indeterminate_truss_stresses_members() -> None:
     assert U[2] == pytest.approx(expected_u, rel=1e-10)
     # Self-equilibrated: with no external load the two end reactions cancel.
     assert sum(forces.values()) == pytest.approx(2.0 * expected_N, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Round-5 audit (C4 #12): dimensional similarity under geometric scaling
+# ---------------------------------------------------------------------------
+
+
+def test_dimensional_similarity_under_geometric_scaling() -> None:
+    """Scale lengths by s, areas by s^2, loads by s^2 -> forces scale by s^2,
+    displacements by s, and every stress/strain/force-per-area invariant is
+    exactly preserved.
+
+    This is the dimensional-analysis oracle the round-5 audit asked for: it
+    catches unit and exponent bugs that neither coverage nor expected-value
+    tests see, because it compares two independently-scaled instances of the
+    SAME physical structure against each other.
+    """
+    from dataclasses import replace
+
+    s = 7.3
+    nodes, elements, loads = _base_model()
+    U1, r1 = _solve_model(nodes, elements, loads)
+
+    big_nodes = [replace(n, x=n.x * s, y=n.y * s) for n in nodes]
+    big_elements = [
+        replace(
+            e,
+            A=e.A * s**2,
+            I_sec=e.I_sec * s**4,
+            delta_L_free=e.delta_L_free * s,
+        )
+        for e in elements
+    ]
+    big_loads = {nid: (fx * s**2, fy * s**2) for nid, (fx, fy) in loads.items()}
+    U2, r2 = _solve_model(big_nodes, big_elements, big_loads)
+
+    # displacements scale linearly with s
+    assert np.allclose(U2, s * U1, rtol=1e-9, atol=1e-12)
+
+    f1, f2 = _forces_by_id(r1), _forces_by_id(r2)
+    a_by_id = {e.id: e.A for e in elements}
+    for mid in f1:
+        # forces scale with s^2 ...
+        assert f2[mid] == pytest.approx(s**2 * f1[mid], rel=1e-9, abs=1e-6)
+        # ... so axial stress N/A is exactly invariant
+        assert f2[mid] / (a_by_id[mid] * s**2) == pytest.approx(
+            f1[mid] / a_by_id[mid], rel=1e-9, abs=1e-9
+        )
+
+
+def test_dimensional_similarity_with_thermal_load() -> None:
+    """The scaling oracle also holds when the demand is a restrained thermal
+    eigenstrain: alpha and delta_T are intensive (unscaled), delta_L_free is
+    extensive (scales with s), so the developed force still scales by s^2."""
+    from dataclasses import replace
+
+    s = 3.0
+    nodes = [
+        Node(id="a", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="b", x=2.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+    ]
+    elements = [
+        Element(
+            id="bar",
+            node_i="a",
+            node_j="b",
+            E=E_STEEL,
+            A=0.01,
+            alpha=1.2e-5,
+            delta_T=200.0,
+            delta_L_free=1e-4,
+        )
+    ]
+    _U1, r1 = _solve_model(nodes, elements, {})
+
+    big_nodes = [replace(n, x=n.x * s, y=n.y * s) for n in nodes]
+    big_elements = [
+        replace(e, A=e.A * s**2, delta_L_free=e.delta_L_free * s) for e in elements
+    ]
+    _U2, r2 = _solve_model(big_nodes, big_elements, {})
+
+    f1, f2 = _forces_by_id(r1), _forces_by_id(r2)
+    # fully restrained thermal force N = -E A alpha dT (delta_L_free adds -k*dl):
+    # both terms scale as s^2 (A*s^2, and k=EA/L * dl*s = E A s^2 * dl / L ... *s/s)
+    assert f2["bar"] == pytest.approx(s**2 * f1["bar"], rel=1e-9)
