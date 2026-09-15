@@ -122,6 +122,28 @@ class AmbiguousModeWarning(UserWarning):
     """
 
 
+class LumpedCapacityWarning(UserWarning):
+    """Warning issued when the lumped-capacitance member-heating model is stretched.
+
+    :func:`truss_analysis.thermal.fire_curve.steel_temperature` assumes the
+    steel temperature is *uniform over the cross-section*, which is what
+    EN 1993-1-2 §4.2.2.2 endorses for unprotected members.  That assumption
+    holds while the Biot number ``h (V/A_m) / lambda`` stays small, i.e. while
+    the section factor ``A_m/V`` is large enough for the surface heat input to
+    be spread through the whole section faster than it arrives.
+
+    Emitted when ``A_m/V`` falls below
+    :data:`~truss_analysis.thermal.fire_curve.LUMPED_SECTION_FACTOR_LIMIT`
+    (50 1/m, the reference threshold for a "thick" section): such a member
+    develops a real through-thickness gradient, its core lags its surface,
+    and a single lumped temperature overstates how much of the section has
+    been weakened.  The answer is not wrong so much as un-conservative, which
+    is why it is a warning rather than a silent assumption.  A heat-conduction
+    (finite-element) solution is out of scope for this library; see the
+    module docstring's scope statement.
+    """
+
+
 class IllConditionedPerturbationWarning(UserWarning):
     """Warning issued when a Woodbury perturbation solve is numerically weak.
 

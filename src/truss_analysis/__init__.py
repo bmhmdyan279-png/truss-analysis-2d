@@ -26,8 +26,13 @@ from .tangent_verification import (
     verify_tangent_stiffness,
 )
 from .thermal.fire_curve import (
+    LUMPED_SECTION_FACTOR_LIMIT,
+    ParametricFire,
     SteelHeatingResult,
+    biot_critical_section_factor,
     iso_834_temperature,
+    lumped_capacity_biot,
+    parametric_fire_temperature,
     steel_temperature,
 )
 from .topology_generator import TrussConfig, TrussFamily, generate_topology
@@ -47,11 +52,13 @@ except ImportError:  # pragma: no cover
 solve_truss = solve
 
 __all__ = [
+    "LUMPED_SECTION_FACTOR_LIMIT",
     "AnalysisResult",
     "BucklingResult",
     "Element",
     "LinearizationCheck",
     "Node",
+    "ParametricFire",
     "SquareHSS",
     "SteelHeatingResult",
     "TangentCheck",
@@ -59,6 +66,7 @@ __all__ = [
     "TrussFamily",
     "__version__",
     "assemble_global_matrices",
+    "biot_critical_section_factor",
     "calculate_element_forces",
     "check_energy",
     "ci_two_component",
@@ -73,6 +81,8 @@ __all__ = [
     "iso_834_temperature",
     "linearized_buckling_load_factor",
     "linearized_tangent_stiffness",
+    "lumped_capacity_biot",
+    "parametric_fire_temperature",
     "run",
     "solve",
     "solve_truss",

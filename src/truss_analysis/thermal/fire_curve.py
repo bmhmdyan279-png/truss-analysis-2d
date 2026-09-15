@@ -46,25 +46,37 @@ The integrator is explicit Runge--Kutta 4 with a step capped at
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
 
+from ..exceptions import LumpedCapacityWarning
 from ..material.steel_eurocode import (
     FloatOrArray,
     specific_heat,
+    thermal_conductivity,
     unit_mass,
 )
 
 __all__ = [
     "ALPHA_C",
+    "B_VALUE_LIMITS",
     "EPSILON_RES",
+    "LUMPED_SECTION_FACTOR_LIMIT",
+    "OPENING_FACTOR_LIMITS",
+    "Q_TD_RANGE_OF_VALIDITY",
     "STEFAN_BOLTZMANN",
+    "T_LIM_FIRE_GROWTH_MIN",
+    "ParametricFire",
     "SteelHeatingResult",
+    "biot_critical_section_factor",
     "h_net",
     "iso_834_temperature",
+    "lumped_capacity_biot",
+    "parametric_fire_temperature",
     "steel_temperature",
 ]
 
@@ -87,6 +99,53 @@ _AMBIENT_C = 20.0
 
 #: ISO 834 curve is defined only for t >= 0; cap the exponent argument.
 _ISO834_COEF = 345.0
+
+# --- EN 1991-1-2:2002 Annex A: parametric temperature-time curve ----------
+
+#: Limits of validity of the opening factor ``O = A_v sqrt(h_eq) / A_t``
+#: [m^0.5], EN 1991-1-2 A.1(3).
+OPENING_FACTOR_LIMITS: tuple[float, float] = (0.02, 0.2)
+
+#: Limits of validity of the thermal inertia ``b = sqrt(rho c lambda)``
+#: [J/(m^2 s^0.5 K)], EN 1991-1-2 A.2.
+B_VALUE_LIMITS: tuple[float, float] = (100.0, 2200.0)
+
+#: Range of validity of the fire load density on the total enclosure area
+#: ``q_td`` [MJ/m^2], EN 1991-1-2 A.2 note.  Outside it the curve is an
+#: extrapolation of the fitting data, so the module warns rather than raises:
+#: the standard states it as a range of applicability, not a hard bound.
+Q_TD_RANGE_OF_VALIDITY: tuple[float, float] = (50.0, 1000.0)
+
+#: Limiting duration ``t_lim`` [min] by fire growth rate, EN 1991-1-2
+#: Table A.2.  ``t_max = max(0.2e-3 q_td / O, t_lim)``, so a fast-growing
+#: fire in a lightly loaded compartment is bounded below by this value.
+T_LIM_FIRE_GROWTH_MIN: dict[str, float] = {
+    "slow": 25.0,
+    "medium": 20.0,
+    "fast": 15.0,
+}
+
+#: Reference values in the denominator of ``Gamma``, EN 1991-1-2 A.1(3).
+_GAMMA_O_REF = 0.04
+_GAMMA_B_REF = 1160.0
+
+#: Asymptotic gas temperature of the parametric curve: 20 + 1325 [degC].
+_PARAMETRIC_AMPLITUDE = 1325.0
+
+# --- B7: applicability of the lumped-capacitance assumption ---------------
+
+#: Section factor ``A_m/V`` [1/m] below which
+#: :func:`steel_temperature` warns that the uniform-temperature assumption is
+#: being stretched.  50 1/m is the reference threshold for a "thick" section;
+#: the warning text also reports the Biot number computed from the module's
+#: own heat-transfer physics, so the threshold is checkable rather than magic.
+LUMPED_SECTION_FACTOR_LIMIT = 50.0
+
+#: Gas temperature [degC] at which the effective surface coefficient for the
+#: Biot estimate is evaluated.  Mid-range for a compartment fire, and far
+#: enough into the radiative regime that the estimate is representative of
+#: the exposure rather than of the first few seconds.
+_BIOT_REFERENCE_THETA_G = 800.0
 
 
 def iso_834_temperature(
@@ -130,6 +189,278 @@ def iso_834_temperature(
     if np.ndim(t) == 0:
         return float(out)
     return out
+
+
+@dataclass(frozen=True)
+class ParametricFire:
+    """EN 1991-1-2:2002 Annex A parametric temperature-time curve.
+
+    Where :func:`iso_834_temperature` is a fixed prescriptive curve, the
+    parametric curve is derived from the compartment: its ventilation, its
+    fire load and the thermal inertia of its boundaries.  It therefore has a
+    *real* peak temperature and a cooling phase, which is what
+    performance-based design needs and what a nominal fire-rating curve
+    cannot express.
+
+    .. code-block:: text
+
+        heating  (t* <= t*_max):
+            theta_g = 20 + 1325 (1 - 0.324 e^{-0.2 t*}
+                                   - 0.204 e^{-1.7 t*}
+                                   - 0.472 e^{-19  t*})
+        t*     = t * Gamma,          Gamma = (O / b)^2 / (0.04 / 1160)^2
+        t_max  = max(0.2e-3 * q_td / O, t_lim)                [hours]
+        t*_max = t_max * Gamma
+        cooling (t* > t*_max):
+            theta_g = theta_max - rate * (t* - t*_max * x)
+            rate = 625                  if t*_max <= 0.5 h
+                 = 250 (3 - t*_max)     if 0.5 < t*_max < 2 h
+                 = 250                  if t*_max >= 2 h
+        and theta_g >= theta_0 throughout.
+
+    The instance is callable with time in **minutes**, the convention
+    :func:`steel_temperature` expects of a ``fire_curve`` argument, so it
+    drops straight in: ``steel_temperature(60, sf, fire_curve=ParametricFire(...))``.
+
+    Validated against the Access Steel worked example SX042a-EN-EU (office
+    compartment, ``O = 0.1024``, ``q_td = 181.8``, ``b = 1234``,
+    ``t_lim = 20 min``): ``Gamma = 5.791``, ``t_max = 0.355 h``,
+    ``t*_max = 2.056 h``, ``theta_max = 1052 degC`` and the cooling line
+    ``theta_g = 1566 - 250 t*`` -- all reproduced to four significant
+    figures in ``tests/test_fire_curve.py``.
+
+    Attributes
+    ----------
+    opening_factor : float
+        ``O = A_v sqrt(h_eq) / A_t`` [m^0.5]; must lie in
+        :data:`OPENING_FACTOR_LIMITS`.
+    q_td : float
+        Design fire load density on the *total enclosure* area [MJ/m^2].
+    b_value : float
+        Thermal inertia ``b = sqrt(rho c lambda)`` of the boundary, area
+        weighted and excluding the openings [J/(m^2 s^0.5 K)]; must lie in
+        :data:`B_VALUE_LIMITS`.
+    t_lim_min : float, default 20.0
+        Limiting duration [min] for the fire growth rate (Table A.2: slow 25,
+        medium 20, fast 15).
+    theta_0 : float, default 20.0
+        Initial gas temperature [degC]; also the floor the cooling phase
+        stops at.
+
+    Notes
+    -----
+    Scope: this is the main clause of Annex A, in which ``Gamma`` is formed
+    from the opening factor.  The standard's *note* to A.1(1) gives a
+    different ``Gamma = (b/1160)^2 / (q_td/420)^2`` for low-fire-load
+    offices with ``b > 1200``; it is deliberately not implemented here,
+    because it is a National-Annex-dependent special case and shipping an
+    unvalidated second variant of a fire curve is worse than not shipping
+    it.  Protected members (EN 1993-1-2 §4.2.5.2) are likewise out of scope
+    of :func:`steel_temperature` -- see its docstring.
+    """
+
+    opening_factor: float
+    q_td: float
+    b_value: float
+    t_lim_min: float = 20.0
+    theta_0: float = _AMBIENT_C
+
+    def __post_init__(self) -> None:
+        """Validate the compartment parameters against the code's limits."""
+        lo, hi = OPENING_FACTOR_LIMITS
+        if not lo <= self.opening_factor <= hi:
+            msg = (
+                f"opening_factor O must lie in [{lo}, {hi}] m^0.5 "
+                f"(EN 1991-1-2 A.1(3)), got {self.opening_factor}"
+            )
+            raise ValueError(msg)
+        lo_b, hi_b = B_VALUE_LIMITS
+        if not lo_b <= self.b_value <= hi_b:
+            msg = (
+                f"b_value must lie in [{lo_b}, {hi_b}] J/(m^2 s^0.5 K) "
+                f"(EN 1991-1-2 A.2), got {self.b_value}"
+            )
+            raise ValueError(msg)
+        if self.q_td <= 0.0:
+            msg = f"q_td must be > 0 MJ/m^2, got {self.q_td}"
+            raise ValueError(msg)
+        if self.t_lim_min <= 0.0:
+            msg = f"t_lim_min must be > 0, got {self.t_lim_min}"
+            raise ValueError(msg)
+        q_lo, q_hi = Q_TD_RANGE_OF_VALIDITY
+        if not q_lo <= self.q_td <= q_hi:
+            warnings.warn(
+                f"LumpedCapacityWarning-adjacent scope note: q_td = "
+                f"{self.q_td:g} MJ/m^2 is outside the [{q_lo}, {q_hi}] range "
+                "of validity of the EN 1991-1-2 Annex A parametric curve; "
+                "the result is an extrapolation of the standard's fitting "
+                "data.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    @property
+    def gamma(self) -> float:
+        """Return the time-scaling factor ``Gamma`` [-] (A.1(3))."""
+        ratio = (self.opening_factor / self.b_value) / (_GAMMA_O_REF / _GAMMA_B_REF)
+        return float(ratio * ratio)
+
+    @property
+    def t_lim_h(self) -> float:
+        """Return the limiting duration ``t_lim`` in hours."""
+        return float(self.t_lim_min) / 60.0
+
+    @property
+    def ventilation_controlled(self) -> bool:
+        """Return whether ventilation, not fuel, limits the fire duration."""
+        return self.t_ventilation_h > self.t_lim_h
+
+    @property
+    def t_ventilation_h(self) -> float:
+        """Return the ventilation-controlled duration ``0.2e-3 q_td / O`` [h]."""
+        return float(0.2e-3 * self.q_td / self.opening_factor)
+
+    @property
+    def t_max_h(self) -> float:
+        """Return the limiting time ``t_max`` [h] (A.1(4))."""
+        return max(self.t_ventilation_h, self.t_lim_h)
+
+    @property
+    def t_max_star_h(self) -> float:
+        """Return the *scaled* peak time ``t*_max = t_max Gamma`` [h]."""
+        return float(self.t_max_h * self.gamma)
+
+    @property
+    def cooling_factor_x(self) -> float:
+        """Return the cooling-phase factor ``x`` (A.2).
+
+        ``x = 1`` for a ventilation-controlled fire and ``x = t_lim / t_max``
+        otherwise; since ``t_max = t_lim`` in the fuel-controlled branch, the
+        second expression is also 1.  Computed rather than hard-coded so the
+        branch actually taken is visible and testable.
+        """
+        if self.ventilation_controlled:
+            return 1.0
+        return float(self.t_lim_h / self.t_max_h)
+
+    @property
+    def cooling_rate(self) -> float:
+        """Return the cooling rate [K/h] selected by ``t*_max`` (A.2)."""
+        t_star = self.t_max_star_h
+        if t_star <= 0.5:
+            return 625.0
+        if t_star < 2.0:
+            return float(250.0 * (3.0 - t_star))
+        return 250.0
+
+    @property
+    def theta_max(self) -> float:
+        """Return the peak gas temperature ``theta_max`` [degC]."""
+        return float(self._heating(self.t_max_star_h))
+
+    def _heating(self, t_star: FloatOrArray) -> npt.NDArray[np.float64]:
+        """Heating-phase temperature at scaled time ``t*`` [h]."""
+        ts = np.asarray(t_star, dtype=float)
+        out: npt.NDArray[np.float64] = np.asarray(
+            self.theta_0
+            + _PARAMETRIC_AMPLITUDE
+            * (
+                1.0
+                - 0.324 * np.exp(-0.2 * ts)
+                - 0.204 * np.exp(-1.7 * ts)
+                - 0.472 * np.exp(-19.0 * ts)
+            ),
+            dtype=float,
+        )
+        return out
+
+    def temperature(self, t_min: FloatOrArray) -> FloatOrArray:
+        """Return the gas temperature [degC] at time ``t_min`` [minutes].
+
+        Parameters
+        ----------
+        t_min : float or ndarray
+            Time [minutes]; must be >= 0.
+
+        Returns
+        -------
+        float or ndarray
+            Gas temperature [degC], same shape as ``t_min``.
+
+        Raises
+        ------
+        ValueError
+            If any time is negative.
+        """
+        arr = np.asarray(t_min, dtype=float)
+        if np.any(arr < 0.0):
+            msg = (
+                f"parametric_fire_temperature: time must be >= 0, got min "
+                f"{float(arr.min())}"
+            )
+            raise ValueError(msg)
+        t_star = (arr / 60.0) * self.gamma  # hours, scaled
+        t_peak = self.t_max_star_h
+        heating = self._heating(t_star)
+        cooling = np.maximum(
+            self.theta_0,
+            self.theta_max
+            - self.cooling_rate * (t_star - t_peak * self.cooling_factor_x),
+        )
+        out = np.where(t_star <= t_peak, heating, cooling)
+        # continuity guard: never report below ambient on either branch
+        out = np.maximum(out, self.theta_0)
+        if np.ndim(t_min) == 0:
+            return float(out)
+        return out
+
+    def __call__(self, t_min: FloatOrArray) -> FloatOrArray:
+        """Return the gas temperature at ``t_min`` [minutes] (fire-curve protocol)."""
+        return self.temperature(t_min)
+
+
+def parametric_fire_temperature(
+    t_min: FloatOrArray,
+    opening_factor: float,
+    q_td: float,
+    b_value: float,
+    t_lim_min: float = 20.0,
+    theta_0: float = _AMBIENT_C,
+) -> FloatOrArray:
+    """Functional form of :class:`ParametricFire` (EN 1991-1-2 Annex A).
+
+    Parameters
+    ----------
+    t_min : float or ndarray
+        Time [minutes]; must be >= 0.
+    opening_factor : float
+        ``O = A_v sqrt(h_eq) / A_t`` [m^0.5].
+    q_td : float
+        Design fire load density on the total enclosure area [MJ/m^2].
+    b_value : float
+        Boundary thermal inertia [J/(m^2 s^0.5 K)].
+    t_lim_min : float, default 20.0
+        Limiting duration by fire growth rate [min] (Table A.2).
+    theta_0 : float, default 20.0
+        Initial gas temperature [degC].
+
+    Returns
+    -------
+    float or ndarray
+        Gas temperature [degC], same shape as ``t_min``.
+
+    See Also
+    --------
+    ParametricFire : the same curve as a validated, self-describing object.
+    """
+    fire = ParametricFire(
+        opening_factor=opening_factor,
+        q_td=q_td,
+        b_value=b_value,
+        t_lim_min=t_lim_min,
+        theta_0=theta_0,
+    )
+    return fire.temperature(t_min)
 
 
 def h_net(
@@ -255,6 +586,105 @@ class SteelHeatingResult:
         return float(t_target)
 
 
+def lumped_capacity_biot(
+    section_factor: float,
+    theta_a0: float = _AMBIENT_C,
+    emissivity: float = EPSILON_RES,
+    alpha_c: float = ALPHA_C,
+) -> float:
+    """Biot number behind the uniform-temperature assumption (B7).
+
+    .. code-block:: text
+
+        Bi = h_eff * (V / A_m) / lambda_a
+
+    The lumped-capacitance model in :func:`steel_temperature` is valid while
+    ``Bi`` is small (the classical criterion is ``Bi < 0.1``): internal
+    conduction must redistribute the surface heat input faster than it
+    arrives, or the section develops a through-thickness gradient and a
+    single temperature stops describing it.
+
+    ``h_eff`` is not a guessed constant -- it is the module's own
+    :func:`h_net` linearised about a representative exposure
+    (:data:`_BIOT_REFERENCE_THETA_G` gas against the member's initial
+    temperature), so it carries the radiative term that dominates a real
+    compartment fire.  ``lambda_a`` is evaluated at the *reference gas*
+    temperature rather than at ambient, because steel conductivity falls with
+    temperature and the lower value gives the larger, i.e. conservative,
+    Biot number.
+
+    Parameters
+    ----------
+    section_factor : float
+        ``A_m/V`` [1/m]; must be positive.
+    theta_a0 : float, default 20.0
+        Initial steel temperature [degC].
+    emissivity, alpha_c : float
+        Surface exchange parameters; see :func:`h_net`.
+
+    Returns
+    -------
+    float
+        Biot number [-].
+
+    Raises
+    ------
+    ValueError
+        If ``section_factor`` is not positive.
+    """
+    if section_factor <= 0.0:
+        msg = f"section_factor (A_m/V) must be > 0, got {section_factor}"
+        raise ValueError(msg)
+    flux = float(h_net(_BIOT_REFERENCE_THETA_G, theta_a0, emissivity, alpha_c))
+    delta_t = _BIOT_REFERENCE_THETA_G - float(theta_a0)
+    h_eff = flux / delta_t if delta_t > 0.0 else float(alpha_c)
+    lambda_a = float(thermal_conductivity(_BIOT_REFERENCE_THETA_G))
+    if lambda_a <= 0.0:  # pragma: no cover - the code table is positive
+        return float("inf")
+    return float(h_eff / (float(section_factor) * lambda_a))
+
+
+def biot_critical_section_factor(
+    biot_limit: float = 0.1,
+    theta_a0: float = _AMBIENT_C,
+    emissivity: float = EPSILON_RES,
+    alpha_c: float = ALPHA_C,
+) -> float:
+    """Section factor at which the Biot number reaches ``biot_limit``.
+
+    Inverts :func:`lumped_capacity_biot`: ``A_m/V = h_eff / (Bi * lambda_a)``.
+    Reporting the code's ``A_m/V`` threshold *and* the threshold the classical
+    ``Bi < 0.1`` criterion actually implies keeps the warning honest -- for
+    the default exposure the two are ~34 1/m and 50 1/m, i.e. the code
+    threshold fires first and is the conservative one.  A warning that
+    quoted a Biot number passing its own stated criterion would be
+    self-contradicting.
+
+    Parameters
+    ----------
+    biot_limit : float, default 0.1
+        Biot number defining the validity limit of a lumped body.
+    theta_a0 : float, default 20.0
+        Initial steel temperature [degC].
+    emissivity, alpha_c : float
+        Surface exchange parameters; see :func:`h_net`.
+
+    Returns
+    -------
+    float
+        Critical section factor ``A_m/V`` [1/m].
+
+    Raises
+    ------
+    ValueError
+        If ``biot_limit`` is not positive.
+    """
+    if biot_limit <= 0.0:
+        msg = f"biot_limit must be > 0, got {biot_limit}"
+        raise ValueError(msg)
+    return lumped_capacity_biot(1.0, theta_a0, emissivity, alpha_c) / float(biot_limit)
+
+
 def steel_temperature(
     duration_min: float,
     section_factor: float,
@@ -266,6 +696,7 @@ def steel_temperature(
     rho_a: float | None = None,
     max_step_s: float = 5.0,
     n_output: int = 0,
+    warn_lumped: bool = True,
 ) -> SteelHeatingResult:
     """Steel temperature history of an unprotected member (lumped capacity).
 
@@ -304,6 +735,12 @@ def steel_temperature(
     n_output : int, default 0
         Number of evenly spaced output samples (including t=0 and t=end).
         ``0`` keeps every integrator step.
+    warn_lumped : bool, default True
+        Issue a
+        :class:`~truss_analysis.exceptions.LumpedCapacityWarning` when
+        ``section_factor`` is below
+        :data:`LUMPED_SECTION_FACTOR_LIMIT`.  Set to ``False`` inside a sweep
+        that would otherwise emit the same warning once per member.
 
     Returns
     -------
@@ -315,6 +752,14 @@ def steel_temperature(
     ValueError
         If ``duration_min`` <= 0, ``section_factor`` <= 0, ``shadow_factor``
         is outside (0, 1], or ``max_step_s`` <= 0.
+
+    Warns
+    -----
+    LumpedCapacityWarning
+        If ``section_factor < LUMPED_SECTION_FACTOR_LIMIT``: the member is
+        thick enough to develop a real through-thickness gradient, so the
+        uniform-temperature answer is un-conservative.  The message carries
+        the Biot number from :func:`lumped_capacity_biot`.
     """
     if duration_min <= 0.0:
         msg = f"duration_min must be > 0, got {duration_min}"
@@ -333,6 +778,23 @@ def steel_temperature(
     if rho <= 0.0:
         msg = f"rho_a must be > 0, got {rho}"
         raise ValueError(msg)
+
+    # B7: state the limit of the lumped assumption instead of assuming it.
+    if warn_lumped and section_factor < LUMPED_SECTION_FACTOR_LIMIT:
+        biot = lumped_capacity_biot(section_factor, theta_a0, emissivity, alpha_c)
+        warnings.warn(
+            f"LumpedCapacityWarning: section factor A_m/V = "
+            f"{section_factor:.4g} 1/m is below "
+            f"{LUMPED_SECTION_FACTOR_LIMIT:g} 1/m (thick section); the "
+            f"Biot number is {biot:.3f} against the usual Bi < 0.1 criterion "
+            "for a lumped body. The cross-section will develop a real "
+            "through-thickness gradient, its core will lag its surface, and "
+            "the single uniform temperature returned here is "
+            "un-conservative. A heat-conduction solution is out of scope "
+            "for this library.",
+            LumpedCapacityWarning,
+            stacklevel=2,
+        )
 
     duration_s = float(duration_min) * 60.0
     n_steps = max(1, int(np.ceil(duration_s / max_step_s)))
