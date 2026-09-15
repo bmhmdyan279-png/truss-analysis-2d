@@ -88,6 +88,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "truss_analysis" = ["py.typed"]
 "truss_analysis.material" = ["data/*.json"]
+"truss_analysis.thermal" = ["data/*.json"]
 
 # setuptools_scm: `write_to` generates _version.py at build time (gitignored);
 # `fallback_version` keeps `python -m build` working in source exports that

@@ -1,0 +1,71 @@
+{
+  "schema": "en1993-1-2/protection-materials/v1",
+  "purpose": "Characteristic thermal properties of common fire-protection materials, for the EN 1993-1-2:2005 clause 4.2.5.2 insulated-member heating model. The clause itself tabulates no material properties; it consumes lambda_p, rho_p and c_p that the designer must supply.",
+  "clause_of_the_model": "4.2.5.2",
+  "standard": {
+    "code": "EN 1993-1-2",
+    "title": "Eurocode 3: Design of steel structures - Part 1-2: General rules - Structural fire design",
+    "edition": "2005",
+    "publisher": "CEN",
+    "note": "The protected-steel formula is taken from the standard. The material numbers below are NOT from the standard."
+  },
+  "formula": {
+    "clause": "4.2.5.2(1)",
+    "temperature_increment": "d_theta_a_t = (k_sh * lambda_p / d_p) * (A_p_over_V) / (rho_a * c_a) * (theta_g_t - theta_a_t) * dt / (1 + mu/3) - (exp(mu/10) - 1) * d_theta_g_t",
+    "capacity_ratio": "mu = (c_p * rho_p) / (c_a * rho_a) * d_p * (A_p_over_V)",
+    "non_negative_clause": "d_theta_a_t shall not be taken as negative whenever d_theta_g_t > 0",
+    "step_limit_s": 30.0,
+    "shadow_factor": {
+      "contour_protection": 1.0,
+      "box_protection_without_cavity": "k_sh = 0.9 * (A_p_over_V)_box / (A_p_over_V)",
+      "note": "k_sh = 1.0 is the conservative default: it multiplies the heating term, so a lower k_sh predicts a cooler member."
+    },
+    "source_of_the_transcription": {
+      "name": "Possidente, L. & Tondini, N. (2024), 'Validation of a New Analytical Formula to Predict the Steel Temperature of Heavily Insulated Cross-Sections', Fire Technology 60:1219-1252, eq. (6) and eq. (7)",
+      "url": "https://iris.unitn.it/bitstream/11572/401190/1/Validation_Lumped_Mass_Formula_PUBLISHED.pdf",
+      "verified": "2026-09-16",
+      "why": "Peer-reviewed restatement of EN 1993-1-2 clause 4.2.5.2 including the mu >= 0 step rule and the 30 s step limit. That paper models flat 1-D plates under contour protection, so it writes the increment without k_sh; the shadow factor is restored here from the clause and defaults to the conservative 1.0."
+    }
+  },
+  "materials": {
+    "provenance": {
+      "name": "Possidente, L. & Tondini, N. (2024), Fire Technology 60:1219-1252, Table 1 (after the EN 12524 class of characteristic building-material values)",
+      "url": "https://iris.unitn.it/bitstream/11572/401190/1/Validation_Lumped_Mass_Formula_PUBLISHED.pdf",
+      "verified": "2026-09-16",
+      "status": "SECONDARY SOURCE. These are representative literature values, not code-mandated numbers, and not extracted from EN 1993-1-2. Real design must use the manufacturer's certified properties for the specific product, which differ from these by tens of percent and are temperature dependent. This catalogue exists so the model is exercisable and reproducible out of the box; it is a starting point for a study, never a substitution for product data.",
+      "temperature_dependence": "All values are temperature-independent constants. EN 1993-1-2 permits temperature-dependent lambda_p and c_p; gypsum in particular has a large endothermic dehydration plateau near 100-200 degC that a constant c_p cannot represent. Not modelled."
+    },
+    "columns": {
+      "lambda_p": "thermal conductivity [W/(m K)]",
+      "rho_p": "unit mass [kg/m^3]",
+      "c_p": "specific heat [J/(kg K)]",
+      "thickness_range_mm": "typical applied thickness range, informative only"
+    },
+    "rows": [
+      {"id": "gypsum_board", "name": "Gypsum board", "lambda_p": 0.20, "rho_p": 800.0, "c_p": 1700.0, "thickness_range_mm": [10, 50]},
+      {"id": "silicate_board", "name": "Silicate board", "lambda_p": 0.15, "rho_p": 450.0, "c_p": 1100.0, "thickness_range_mm": [10, 50]},
+      {"id": "vermiculite_sprayed", "name": "Sprayed vermiculite/cement", "lambda_p": 0.15, "rho_p": 300.0, "c_p": 1100.0, "thickness_range_mm": [10, 50]},
+      {"id": "mineral_fibre_sprayed", "name": "Sprayed mineral fibre", "lambda_p": 0.10, "rho_p": 250.0, "c_p": 1100.0, "thickness_range_mm": [10, 50]},
+      {"id": "rockwool", "name": "Rockwool", "lambda_p": 0.25, "rho_p": 120.0, "c_p": 1100.0, "thickness_range_mm": [10, 50]},
+      {"id": "lightweight_concrete", "name": "Lightweight concrete encasement", "lambda_p": 0.80, "rho_p": 1600.0, "c_p": 1200.0, "thickness_range_mm": [10, 50]},
+      {"id": "concrete_with_voids", "name": "Concrete with voids", "lambda_p": 0.30, "rho_p": 600.0, "c_p": 1200.0, "thickness_range_mm": [10, 50]},
+      {"id": "calcareous_concrete", "name": "Calcareous concrete (aerated)", "lambda_p": 1.30, "rho_p": 2200.0, "c_p": 1200.0, "thickness_range_mm": [10, 50]},
+      {"id": "siliceous_concrete", "name": "Siliceous concrete encasement", "lambda_p": 1.70, "rho_p": 2400.0, "c_p": 1200.0, "thickness_range_mm": [10, 50]},
+      {"id": "brick", "name": "Brick encasement", "lambda_p": 1.00, "rho_p": 2000.0, "c_p": 1200.0, "thickness_range_mm": [100, 300]}
+    ]
+  },
+  "steel_reference_properties": {
+    "note": "c_a and rho_a are taken from the library's own EN 1993-1-2 single source of truth (material.steel_eurocode), not duplicated here. c_a is temperature dependent and is evaluated at each step.",
+    "rho_a_kg_m3": 7850.0,
+    "source": "truss_analysis.material.steel_eurocode.unit_mass / specific_heat"
+  },
+  "extracted_at": "2026-09-16",
+  "extracted_by": "manual transcription of a peer-reviewed restatement of EN 1993-1-2 clause 4.2.5.2 and its literature material table",
+  "known_limitations": [
+    "No temperature dependence of lambda_p or c_p; gypsum dehydration is therefore not represented.",
+    "No moisture content or dehydration-migration model (EN 1993-1-2 A.2 note for gypsum/concrete encasement).",
+    "No intumescent coating model: an intumescent layer's effective thickness is a function of temperature and time, which a constant d_p cannot express.",
+    "No cavity or multi-layer construction; a single homogeneous layer only.",
+    "The 30 s step limit of the clause is enforced, so the integrator is explicit Euler as the standard prescribes -- deliberately not RK4, because replacing the code's own recursion with a higher-order scheme would stop being the code's answer."
+  ]
+}

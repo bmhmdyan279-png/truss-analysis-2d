@@ -13,7 +13,9 @@ from .sections import SquareHSS, euler_buckling_load, idealised_square_hss
 from .solver import check_energy, solve
 from .stability import (
     BucklingResult,
+    ImperfectionStudy,
     geometric_stiffness,
+    imperfection_sensitivity,
     linearized_buckling_load_factor,
 )
 from .tangent_verification import (
@@ -34,6 +36,13 @@ from .thermal.fire_curve import (
     lumped_capacity_biot,
     parametric_fire_temperature,
     steel_temperature,
+)
+from .thermal.protection import (
+    InsulationMaterial,
+    insulation_catalogue,
+    insulation_material,
+    protected_steel_temperature,
+    protected_temperatures_for_members,
 )
 from .topology_generator import TrussConfig, TrussFamily, generate_topology
 
@@ -56,6 +65,8 @@ __all__ = [
     "AnalysisResult",
     "BucklingResult",
     "Element",
+    "ImperfectionStudy",
+    "InsulationMaterial",
     "LinearizationCheck",
     "Node",
     "ParametricFire",
@@ -77,12 +88,17 @@ __all__ = [
     "generate_topology",
     "geometric_stiffness",
     "idealised_square_hss",
+    "imperfection_sensitivity",
+    "insulation_catalogue",
+    "insulation_material",
     "internal_force",
     "iso_834_temperature",
     "linearized_buckling_load_factor",
     "linearized_tangent_stiffness",
     "lumped_capacity_biot",
     "parametric_fire_temperature",
+    "protected_steel_temperature",
+    "protected_temperatures_for_members",
     "run",
     "solve",
     "solve_truss",

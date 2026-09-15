@@ -12,4 +12,6 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   truss_analysis.thermal.fire_curve
+   truss_analysis.thermal.protection
    truss_analysis.thermal.material

@@ -103,7 +103,10 @@ Utilities & Helpers
    truss_analysis.units
    truss_analysis.sensitivity
    truss_analysis.heterogeneity
+   truss_analysis.thermal.fire_curve
+   truss_analysis.thermal.protection
    truss_analysis.thermal.material
+   truss_analysis.tangent_verification
    truss_analysis.reliability_adapter
 
 Validation (Optional Dependencies)
