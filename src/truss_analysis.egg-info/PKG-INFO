@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: truss_analysis
-Version: 2.8.1.dev1+g366a69a59.d20260915
+Version: 2.8.1.dev1+g4721d0568.d20260915
 Summary: Linear 2D truss finite-element analysis with temperature-dependent steel properties (EN 1993-1-2)
 Author: bmhmdyan279-png
 License: MIT
