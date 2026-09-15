@@ -35,6 +35,25 @@ from .solver import solve
 #: probe magnitude, NOT a numerics-policy cutoff: removing an essential
 #: member drives ``rcond`` to ``O(probe)``, a merely important one stays
 #: orders of magnitude above this.
+#:
+#: Calibrated on a 12-model / 193-member corpus rather than asserted
+#: (round-6 audit C4; ``tests/test_key_element_rcond_calibration.py``).  The
+#: ground truth there is an independent SVD rank test on the member-deleted
+#: assembly -- no ``dpocon``, no Cholesky, no threshold -- and the measured
+#: ``rcond`` distributions under the production probe are:
+#:
+#: .. code-block:: text
+#:
+#:     kinematically essential (n=97):  rcond <= 7.3e-07
+#:     merely important        (n=96):  rcond >= 1.9e-04
+#:
+#: a 2.4-decade gap with this constant sitting close to the middle of it
+#: (1.1 decades below the essential maximum, 1.3 above the redundant
+#: minimum), and ``dpocon`` reproducing the SVD verdict on all 193 members.
+#: The corpus spans determinate and redundant frames, Pratt and Warren
+#: trusses at several panel counts, X-braced variants, a shallow fan and a
+#: cantilever, with and without fabrication prestrain -- a threshold tuned on
+#: one topology family would be overfitted, not calibrated.
 _KEY_ELEMENT_RCOND = 1e-5
 
 
