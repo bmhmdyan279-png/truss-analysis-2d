@@ -49,6 +49,33 @@ PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 def _fa(value: str) -> str:
     return value.translate(PERSIAN_DIGITS)
 
+def _opensees_ignores() -> list[str]:
+    """Return the pytest --ignore flags for the reference-solver files.
+
+    tests/validation/test_level4_opensees.py (and its two siblings) pull in
+    truss_analysis.validation, which imports openseespy.  When that import
+    fails -- either because openseespy is absent, or because its compiled
+    extension cannot be loaded (the DLL-load failure seen on Windows/py3.14
+    and on some Linux CI runners even with the ``validation`` extra
+    installed) -- pytest aborts during collection with rc=2, and no
+    statistics can be measured.
+
+    The ``test`` and ``coverage`` CI jobs already pass the same three
+    --ignore flags on the command line.  The ``stats`` job measures the same
+    suite and must therefore reach the same count.  Probing the import at
+    runtime, rather than hard-coding the flags, keeps the measured number
+    honest on a machine where the reference solver really does load.
+    """
+    try:
+        import openseespy.opensees  # type: ignore[import-not-found]  # noqa: F401
+    except Exception:  # noqa: BLE001 -- DLL-load failures are not ImportError
+        return [
+            "--ignore=tests/validation/test_level4_opensees.py",
+            "--ignore=tests/validation/test_level4_rho_branches.py",
+            "--ignore=tests/validation/test_level5_crossval.py",
+        ]
+    return []
+
 
 def measure() -> tuple[int, float, int]:
     """Return ``(n_tests, coverage_percent, n_modules)`` from real runs."""
@@ -61,6 +88,7 @@ def measure() -> tuple[int, float, int]:
             "-q",
             "--cov=src",
             "--cov-report=term",
+            *_opensees_ignores(),  # ← این خط
         ],
         cwd=REPO_ROOT,
         capture_output=True,
