@@ -205,6 +205,72 @@ rather than followed.
 - **`EigenConvergenceError`** in the exception hierarchy: a buckling load
   factor is safety-critical, so an unconverged Ritz value is never returned as
   if it were an answer.
+- **C10: complex-step verification of the adjoint DDM.** `sensitivity.py`
+  cross-checked its analytic derivative only against central differences, which
+  cap out near `sqrt(machine epsilon)` because the cancellation in
+  `(f(x+h) - f(x-h))/2h` grows as `h` shrinks. Complex-step has no
+  cancellation -- `f'(x) = Im[f(x + ih)]/h`, exact as `h -> 0` -- so it can
+  drive `h` to `1e-30`. Two preconditions were checked rather than assumed:
+  the DDM's `d(|u|_max)/dA_i` is not analytic as written (`|.|` conjugates,
+  `max` is non-smooth), but at a *fixed* base-state argmax node the quantity is
+  `sqrt(u_x^2 + u_y^2)`, whose analytic continuation uses the principal complex
+  root and no conjugation -- exactly the subgradient convention
+  `SensitivityResult` already documents. And the chain must be complex-safe:
+  `k = EA/L`, `K = sum k b b^T`, the solve and `B^T (k dL_pre)` are all
+  polynomial or linear in `A`, while the EN piecewise-linear material tables
+  are *not* (`np.interp` rejects complex input), so this covers the ambient
+  chain only and extending it to the fire chain needs a complex-safe
+  interpolation in the material layer first. The oracle re-derives assembly,
+  reduction and solve from scratch, because a check that shares its code path
+  with the thing it checks can only catch typos. **Result: the DDM agrees to
+  2e-16 .. 8e-15 relative.** Two further tests pin what makes this oracle
+  stronger rather than merely different -- insensitivity to `h` over
+  `1e-10..1e-40`, and the best of seven central-difference step sizes being at
+  least 100x worse.
+- **C4: `_KEY_ELEMENT_RCOND` calibrated on a corpus, not on two fixtures.**
+  `DamageOperator._check_mechanism` decides whether a member is kinematically
+  essential by comparing a `dpocon` reciprocal condition number against `1e-5`
+  -- a threshold in a safety-relevant classification, previously pinned by two
+  fixtures and a hard-coded expected-members dictionary. That catches a
+  regression; it does not tell you whether `1e-5` is the right number or merely
+  one that happens to work on those two models. Now calibrated on a **12-model
+  / 193-member corpus** against an *independent* ground truth (delete the
+  member outright, `rank(K_ff)` by SVD -- no `dpocon`, no Cholesky, no
+  threshold), spanning determinate and redundant frames, Pratt and Warren
+  trusses at several panel counts, X-braced variants, a shallow fan and a
+  cantilever, with and without fabrication prestrain. Measured: essential
+  members reach `rcond <= 7.3e-07`, merely-important ones stay at
+  `rcond >= 1.9e-04` -- a **2.41-decade gap** with the constant near the middle
+  (1.1 decades below the essential maximum, 1.3 above the redundant minimum) --
+  and `dpocon` reproduces the SVD verdict on all 193. The threshold is required
+  to sit inside the gap with a factor of 10 clearance on *both* sides, and the
+  measured distributions are recorded in the constant's own docstring so the
+  number is traceable to evidence. Two fixture bugs surfaced while building the
+  corpus, either of which would have quietly gutted the calibration: the plain
+  Pratt generator produces a *determinate* truss (`m = 4n+1 = n_free`), so
+  every member is essential and it contributes no data for the "merely
+  important" class at all (X-braced variants took that class from 3 members to
+  96); and the "cantilever" fixture had 5 members against 6 free DOFs, i.e. it
+  was a mechanism, whose every member is trivially essential -- data that looks
+  meaningful and is not.
+- **C13/C14: a machine-readable physics boundary, propagated into results.**
+  `docs/theory.md` §12 stated the validity envelope in prose, which answers the
+  question for a reader but not for a program. New `data/physics_boundary.yaml`
+  (22 entries, closed 5-value status vocabulary, stable ids, explicit `limits`
+  on every `supported-with-limits` row) plus `truss_analysis.physics_boundary`
+  to load and *validate* it -- a boundary file that is internally inconsistent
+  is worse than none, since a consumer calling `covers()` would be relying on
+  it. Every analysis result now carries `solver_metadata["physics_boundary"]`:
+  a compact hash-pinned digest (schema, version, content hash, counts) rather
+  than the whole table, because embedding prose in a report invites consumers
+  to parse prose. The content hash changes when and only when the envelope
+  changes, which is what makes it a compatibility assertion instead of
+  decoration. `docs/api` page added; package-data extended so the YAML ships.
+  Tests pin the artefact against §12 in both directions, so the documentation
+  cannot drift from what ships -- and the first run of that test found exactly
+  such a drift: five entries existed only in the YAML, three from punctuation
+  differences ("Thermal and fabrication" vs "Thermal / fabrication") and two
+  that were genuinely absent from the prose table.
 
 ### Changed
 
@@ -295,25 +361,21 @@ Collected for quick scanning; each is detailed above.
   round with no budget for a full re-verification is how a clean refactor
   becomes a silent behaviour change in a safety-critical path. Deferred to a
   round of its own.
-- **C10 -- complex-step verification of the DDM.** The sensitivity module's
-  analytic derivatives are already cross-checked against central differences;
-  complex-step would remove the round-off floor and let the agreement be
-  asserted to machine precision. Worth doing, but it needs `complex`-safe
-  paths through the EN material interpolation (piecewise-linear tables with
-  `np.interp` do not accept complex input), which is a change to the material
-  layer rather than to the sensitivity layer.
-- **C13/C14 -- a machine-readable `physics_boundary.yaml` and its propagation
-  into `AnalysisResult`/JSON.** `docs/theory.md` already states the boundary
-  matrix in prose; making it a shipped artefact that the result carries is a
-  good idea and a schema decision (what belongs in a *result* versus in
-  documentation) that deserves its own discussion rather than a late-round
-  guess.
-- **C9 -- mandatory triple ranking output.** Ranking currently returns one
-  ordering chosen by the caller; making all three unconditional would change
-  the shape of a public result type.
-- **C4 -- calibrating `dpocon` on more than two fixtures.** Needs a reference
-  corpus with known condition numbers; the benchmark suite is the right home
-  and does not have them yet.
+- **C9 -- mandatory triple ranking output.** `ProbabilisticRanking` already
+  carries two orderings (mean-CI probabilistic and deterministic-at-mean-inputs)
+  plus the sample standard deviations a third would be built from; making a
+  third *ordering* unconditional changes the shape of a public result type, and
+  which third ordering is the right one (upper confidence bound on CI?
+  probability of being most critical?) is a modelling decision that should not
+  be guessed at the end of a round.
+- **C11 -- separate `MaterialState` from `MemberResponse`.** The two are
+  genuinely conflated (`MemberResponse` carries both the response quantities
+  `axial_force`/`E` and the section/material state `A`/`I_sec`/`yield_stress`/
+  `temperature`). Splitting them is the right call but touches every
+  constructor site in the reliability chain, and doing it at the end of a round
+  with no budget for a full re-verification is how a clean refactor becomes a
+  silent behaviour change in a safety-critical path. Deferred to a round of its
+  own.
 
 ## [2.8.0] — 2026-09-15
 

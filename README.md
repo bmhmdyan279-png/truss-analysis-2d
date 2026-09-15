@@ -8,7 +8,7 @@ per EN 1993-1-2, parametric topology generation, member criticality indices,
 uncertainty quantification and retrofit triage utilities.
 
 [![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
-![coverage](https://img.shields.io/badge/coverage-94.1%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-94.2%25-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 [![PyPI version](https://img.shields.io/pypi/v/truss-analysis.svg)](https://pypi.org/project/truss-analysis/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -61,8 +61,8 @@ elevated temperatures:
   condition number of the free-free stiffness matrix).
 
 Everything is deterministic given the inputs, fully type-annotated
-(`mypy --strict` clean) and covered by a test suite of 791 tests
-(94.1 % coverage, gate at 90 %). Results are always SI (m, N, Pa) regardless
+(`mypy --strict` clean) and covered by a test suite of 838 tests
+(94.2 % coverage, gate at 90 %). Results are always SI (m, N, Pa) regardless
 of the input unit system.
 
 ## Features
@@ -607,9 +607,9 @@ make stats          # re-measure and patch the README test/coverage numbers
 make sync-requirements  # regenerate requirements*.txt from pyproject.toml
 ```
 
-Current status on this branch: **791 tests passing, 94.09 % coverage**
+Current status on this branch: **838 tests passing, 94.19 % coverage**
 (`pytest tests/`), `ruff` clean (extended rule set: E, F, I, W, UP, B, SIM,
-RUF, PT, N, D), `mypy --strict` clean on all 48 library modules.
+RUF, PT, N, D), `mypy --strict` clean on all 49 library modules.
 
 The pinned `pre-commit` chain runs ruff, mypy (src/), detect-secrets (with
 baseline), a repository hygiene scanner (forbidden artefacts/paths/size
@@ -636,7 +636,7 @@ src/truss_analysis/
 ├── validation/                              # metrics, reference bridge, surrogate
 ├── sensitivity.py, reliability.py           # gradients + reliability helpers (chi-aligned margins)
 └── visualization.py                         # plotting (lazy matplotlib)
-tests/                                       # 791 tests incl. tests/validation/
+tests/                                       # 838 tests incl. tests/validation/
 docs/theory.md, docs/error_codes.md          # formulation + error reference
 examples/                                    # runnable example models
 scripts/                                     # repository utilities

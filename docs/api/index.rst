@@ -107,6 +107,7 @@ Utilities & Helpers
    truss_analysis.thermal.protection
    truss_analysis.thermal.material
    truss_analysis.tangent_verification
+   truss_analysis.physics_boundary
    truss_analysis.reliability_adapter
 
 Validation (Optional Dependencies)

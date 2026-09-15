@@ -86,7 +86,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-"truss_analysis" = ["py.typed"]
+"truss_analysis" = ["py.typed", "data/*.yaml"]
 "truss_analysis.material" = ["data/*.json"]
 "truss_analysis.thermal" = ["data/*.json"]
 

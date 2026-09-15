@@ -8,6 +8,12 @@ from .graph_validation import structural_report, validate_topology
 from .limitstates import ci_two_component, dcr_field, system_critical_temperature
 from .main import AnalysisResult, run
 from .model import Element, Node
+from .physics_boundary import (
+    BoundaryEntry,
+    PhysicsBoundary,
+    boundary_digest,
+    physics_boundary,
+)
 from .postprocess import calculate_element_forces
 from .sections import SquareHSS, euler_buckling_load, idealised_square_hss
 from .solver import check_energy, solve
@@ -63,6 +69,7 @@ solve_truss = solve
 __all__ = [
     "LUMPED_SECTION_FACTOR_LIMIT",
     "AnalysisResult",
+    "BoundaryEntry",
     "BucklingResult",
     "Element",
     "ImperfectionStudy",
@@ -70,6 +77,7 @@ __all__ = [
     "LinearizationCheck",
     "Node",
     "ParametricFire",
+    "PhysicsBoundary",
     "SquareHSS",
     "SteelHeatingResult",
     "TangentCheck",
@@ -78,6 +86,7 @@ __all__ = [
     "__version__",
     "assemble_global_matrices",
     "biot_critical_section_factor",
+    "boundary_digest",
     "calculate_element_forces",
     "check_energy",
     "ci_two_component",
@@ -97,6 +106,7 @@ __all__ = [
     "linearized_tangent_stiffness",
     "lumped_capacity_biot",
     "parametric_fire_temperature",
+    "physics_boundary",
     "protected_steel_temperature",
     "protected_temperatures_for_members",
     "run",

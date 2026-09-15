@@ -49,6 +49,11 @@ Output JSON schema (``analyze --output RESULT.json``)
                           "numpy_version": "<str>", "scipy_version": "<str>",
                           "bc_method": "<elimination|penalty>",
                           "use_sparse": <bool>,
+                          "physics_boundary": {"schema": "<str>",
+                                               "version": "<str>",
+                                               "content_hash": "<str>",
+                                               "n_entries": <int>,
+                                               "counts": {...}},
                           "assembly_mode": "<sparse-coo|dense-einsum>",
                           "reduction_order": "<free-dof-elimination|penalty-augmented>",
                           "factorisation": "<cholesky|lu|sparse-lu|...>",
@@ -84,6 +89,7 @@ from .fileio import load_json
 from .graph_validation import TopologyValidationError, structural_report
 from .model import Element, Node, validate_inputs
 from .numerics import DEFAULT_TOLERANCES
+from .physics_boundary import boundary_digest
 from .postprocess import (
     calculate_buckling,
     calculate_element_forces,
@@ -640,6 +646,12 @@ def run(
         # strategy was chosen; these say what the assembler and the linear
         # algebra then did, which is what a reproducer or a reviewer needs in
         # order to know that two runs are comparable at all.
+        # C14: the physics boundary these numbers were computed under, as a
+        # compact hash-pinned digest.  A result that does not say which
+        # validity envelope it belongs to cannot be checked for compatibility
+        # later, and embedding the whole table in every report would invite
+        # consumers to parse prose instead of a hash.
+        "physics_boundary": boundary_digest(),
         "assembly_mode": "sparse-coo" if use_sparse_eff else "dense-einsum",
         "reduction_order": (
             "penalty-augmented"

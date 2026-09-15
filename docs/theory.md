@@ -1138,6 +1138,8 @@ formally, not implicitly.
 | Torsional / torsional-flexural buckling | **not supported** (needs $I_z, I_t, I_w$ absent from the section model) | — |
 | 3D, frames, semi-rigid joints, distributed loads | **not supported** (2D pin-jointed, nodal loads) | §1 |
 | FORM/SORM, PCE, Sobol indices, subset simulation | **not supported** (deferred) | §11.2 |
+| Accuracy of the first-order tangent $K_E + K_G$ | measured, not assumed: `verify_linearization_convergence` reports the gap to the exact tangent closing at fitted order 1.000 | `tangent_verification` |
+| Validation against physical fire or structural test data | **not supported** — verification is against closed forms, independent algorithms and code worked examples; no experimental corpus ships, so agreement with the real world is inferred from agreement with the standards, not measured | §12 |
 
 **Deferred with rationale (round-5):** creep/transient-strain models and
 torsional-flexural buckling need material/section data and validation sources
