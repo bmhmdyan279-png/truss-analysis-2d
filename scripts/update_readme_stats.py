@@ -29,6 +29,14 @@ run ``make stats`` before releasing" -- which the round-5 and round-6 audits
 both caught being forgotten, leaving the READMEs advertising 356 tests /
 95.44 % and then 611 tests / 95.3 % against a suite that had moved on -- into
 a gate that fails the build instead.
+
+Stability note
+--------------
+Both badge/prose and the bold status lines now quote *one-decimal* coverage
+(``cov1``).  Two-decimal coverage drifts by 0.01 between Windows and Linux
+because IEEE-754 summation order over the per-file coverage counters is not
+identical; quoting ``cov1`` in the bold line as well keeps the four
+occurrences per README mutually consistent and immune to that jitter.
 """
 
 from __future__ import annotations
@@ -49,6 +57,7 @@ PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 def _fa(value: str) -> str:
     return value.translate(PERSIAN_DIGITS)
 
+
 def _opensees_ignores() -> list[str]:
     """Return the pytest --ignore flags for the reference-solver files.
 
@@ -68,7 +77,7 @@ def _opensees_ignores() -> list[str]:
     """
     try:
         import openseespy.opensees  # type: ignore[import-not-found]  # noqa: F401
-    except Exception:  # noqa: BLE001 -- DLL-load failures are not ImportError
+    except Exception:  # DLL-load failures are not ImportError
         return [
             "--ignore=tests/validation/test_level4_opensees.py",
             "--ignore=tests/validation/test_level4_rho_branches.py",
@@ -88,7 +97,7 @@ def measure() -> tuple[int, float, int]:
             "-q",
             "--cov=src",
             "--cov-report=term",
-            *_opensees_ignores(),  # ← این خط
+            *_opensees_ignores(),
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -115,7 +124,10 @@ def measure() -> tuple[int, float, int]:
 
 
 # (pattern, replacement template) — templates use {n}, {cov1}, {cov2}, {fa_*}.
-# cov1 = one-decimal coverage (badge/prose), cov2 = two-decimal (status line).
+# cov1 = one-decimal coverage, used in *every* README occurrence (badge,
+# prose, and bold status line) so Windows/Linux float-sum jitter cannot
+# make the four copies disagree.  cov2 remains available for callers that
+# explicitly want two decimals.
 EN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"badge/coverage-[\d.]+%25-brightgreen"),
@@ -127,7 +139,7 @@ EN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"\*\*\d+ tests passing, [\d.]+ % coverage\*\*"),
-        "**{n} tests passing, {cov2} % coverage**",
+        "**{n} tests passing, {cov1} % coverage**",
     ),
     (
         re.compile(r"tests/(\s+)# \d+ tests incl\."),
@@ -150,7 +162,7 @@ FA_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(r"\*\*[\d۰-۹]+ آزمون پاس، پوشش [\d۰-۹.]+٪\*\*"),
-        "**{fa_n} آزمون پاس، پوشش {fa_cov2}٪**",
+        "**{fa_n} آزمون پاس، پوشش {fa_cov1}٪**",
     ),
     (
         re.compile(r"tests/(\s+)# [\d۰-۹]+ آزمون شامل"),

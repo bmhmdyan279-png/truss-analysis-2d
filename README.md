@@ -607,9 +607,9 @@ make stats          # re-measure and patch the README test/coverage numbers
 make sync-requirements  # regenerate requirements*.txt from pyproject.toml
 ```
 
-Current status on this branch: **820 tests passing, 94.18 % coverage**
+Current status on this branch: **820 tests passing, 94.2 % coverage**
 (`pytest tests/`), `ruff` clean (extended rule set: E, F, I, W, UP, B, SIM,
-RUF, PT, N, D), `mypy --strict` clean on all 48 library modules.
+RUF, PT, N, D), `mypy --strict` clean on all 49 library modules.
 
 The pinned `pre-commit` chain runs ruff, mypy (src/), detect-secrets (with
 baseline), a repository hygiene scanner (forbidden artefacts/paths/size
