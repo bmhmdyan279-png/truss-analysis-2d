@@ -81,3 +81,27 @@ class UnitAmbiguityWarning(UserWarning):
     in everyday use, and choosing the wrong one is a silent factor-of-16
     error in self-weight.
     """
+
+
+class ShallowSystemWarning(UserWarning):
+    """Warning issued when the system geometry is shallow (rise/span < 0.1).
+
+    Linearised bifurcation analysis approximates the true snap-through limit
+    point with an error that scales as O(theta_0^2) where theta_0 is the
+    initial rise angle. For shallow systems (rise-to-span ratio below ~0.1),
+    the linearised lambda_cr can be significantly optimistic compared to the
+    actual collapse load. This warning flags such geometries so engineers can
+    supplement with geometrically nonlinear analysis (round-5 audit C6#9,
+    C7§4.2: member-specific or strain-based shallow detection is preferred).
+    """
+
+
+class AmbiguousModeWarning(UserWarning):
+    """Warning issued when buckling modes have repeated eigenvalues.
+
+    When the buckling load factor has multiplicity > 1, the returned mode
+    shape is implementation-dependent (any vector in the eigenspace is
+    valid). The specific mode returned by eigh/eigsh may vary with LAPACK
+    version, rounding errors, or tiny perturbations. Engineers should
+    examine all modes in the repeated eigenspace for physical interpretation.
+    """
