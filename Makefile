@@ -18,15 +18,22 @@ test:
 test-cov:
 	pytest tests/ -q --cov=src --cov-report=term-missing --cov-fail-under=90
 
-## Lint and format checks (ruff)
+## Lint and format checks (ruff).
+## Covers every Python directory in the repo, matching what the pre-commit
+## chain lints. This used to be `src/ tests/ scripts/` only -- benchmarks/ was
+## left out, so 240 findings sat on main with `make lint` and the CI lint job
+## both green while `pre-commit run --all-files` was red. Gates that do not
+## cover the same files are not the same gate.
+LINT_TARGETS := src/ tests/ scripts/ benchmarks/ docs/
+
 lint:
-	ruff check src/ tests/ scripts/
-	ruff format --check src/ tests/ scripts/
+	ruff check $(LINT_TARGETS)
+	ruff format --check $(LINT_TARGETS)
 
 ## Auto-fix lint issues and format
 format:
-	ruff check --fix src/ tests/ scripts/
-	ruff format src/ tests/ scripts/
+	ruff check --fix $(LINT_TARGETS)
+	ruff format $(LINT_TARGETS)
 
 ## Static typing (strict, configured in pyproject.toml)
 type-check:

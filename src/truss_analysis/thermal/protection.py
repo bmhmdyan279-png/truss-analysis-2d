@@ -24,7 +24,7 @@ never cools while the fire is still heating -- and a step limit of
 ``dt <= 30 s``.
 
 Three things about this implementation are deliberate, and each is the kind
-of choice a reviewer should be able to check rather than take on trust:
+of choice that can be checked rather than taken on trust:
 
 * **The integrator is explicit Euler, not RK4.** The unprotected solver in
   :mod:`~truss_analysis.thermal.fire_curve` uses RK4 because §4.2.2.2 states

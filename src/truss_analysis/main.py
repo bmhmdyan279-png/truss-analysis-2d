@@ -644,7 +644,7 @@ def run(
         # C15: how the linear system that produced these numbers was actually
         # formed and reduced.  `bc_method` says which boundary-condition
         # strategy was chosen; these say what the assembler and the linear
-        # algebra then did, which is what a reproducer or a reviewer needs in
+        # algebra then did, which is what anyone reproducing a result needs in
         # order to know that two runs are comparable at all.
         # C14: the physics boundary these numbers were computed under, as a
         # compact hash-pinned digest.  A result that does not say which

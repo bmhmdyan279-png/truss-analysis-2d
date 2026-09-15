@@ -138,6 +138,7 @@ extend-ignore-names = [
     "delta_L_thermal", "delta_L_total",
     "E_a", "k_E", "get_eurocode_k_E", "old_k_E", "new_k_E",
     "du_x_dA", "du_y_dA", "dU_f_dA",
+    "dT",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -151,6 +152,14 @@ extend-ignore-names = [
 # Repository utility scripts: same documentation exemption, pytest-style
 # rules do not apply, and mechanics/Greek notation is kept verbatim.
 "scripts/**" = ["D", "PT", "N806", "RUF001", "RUF002", "RUF003"]
+# Benchmark harness: a developer-facing driver, not shipped library code, so
+# it gets the same documentation and notation exemptions as scripts/.  Line
+# length, naming and correctness rules still apply in full -- this exemption
+# exists so the gate agrees with pre-commit (which lints every file), not to
+# let the harness drift.  Before round 6 neither `make lint` nor the CI lint
+# job covered benchmarks/ at all, so 240 findings sat invisible on main while
+# pre-commit was red.
+"benchmarks/**" = ["D", "PT", "RUF001", "RUF002", "RUF003"]
 
 # ---------------------------------------------------------------------------
 # Testing / coverage
