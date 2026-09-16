@@ -8,7 +8,7 @@
 اولویت‌بندی مقاوم‌سازی.
 
 [![CI](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml/badge.svg)](https://github.com/bmhmdyan279-png/truss-analysis-2d/actions/workflows/ci.yml)
-![coverage](https://img.shields.io/badge/coverage-۹۴.۲%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-۹۴.۴%25-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 [![PyPI version](https://img.shields.io/pypi/v/truss-analysis.svg)](https://pypi.org/project/truss-analysis/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -59,7 +59,7 @@
   سختی گره‌های آزاد).
 
 همه‌چیز با ورودی‌های داده‌شده قطعی است، تایپ کامل دارد
-(`mypy --strict` پاک) و با ۸۲۰ آزمون پوشش ۹۴.۲٪ (گیت ۹۰٪) گرفته است.
+(`mypy --strict` پاک) و با ۹۶۴ آزمون پوشش ۹۴.۴٪ (گیت ۹۰٪) گرفته است.
 نتایج همیشه SI هستند (متر، نیوتن، پاسکال) — صرف‌نظر از دستگاه واحد ورودی.
 
 ## قابلیت‌ها
@@ -319,7 +319,7 @@ $ head -c 240 warren4.json
 
 ```console
 $ truss-analysis version
-2.5.0
+2.8.0
 ```
 
 (نصب از خروجیِ بدون git سورس. در یک checkout گیت، رشتهٔ دقیق
@@ -552,7 +552,7 @@ make stats          # اندازه‌گیری مجدد و به‌روزرسان�
 make build          # sdist + wheel + twine check
 ```
 
-وضعیت فعلی این شاخه: **۸۲۰ آزمون پاس، پوشش ۹۴.۲٪** (`pytest tests/`)،
+وضعیت فعلی این شاخه: **۹۶۴ آزمون پاس، پوشش ۹۴.۴٪** (`pytest tests/`)،
 `ruff` پاک با مجموعه‌قواعد گسترش‌یافته (E, F, I, W, UP, B, SIM, RUF, PT,
 N, D) و `mypy --strict` پاک روی هر ۴۶ ماژول کتابخانه.
 
@@ -581,7 +581,7 @@ src/truss_analysis/
 ├── validation/                              # معیارها، پل مرجع، سورگیت
 ├── sensitivity.py, reliability.py           # گرادیان‌ها + توابع قابلیت اطمینان (حاشیه‌های هم‌تراز با chi)
 └── visualization.py                         # رسم شکل (matplotlib با بارگذاری تنبل)
-tests/                                       # ۸۲۰ آزمون شامل tests/validation/
+tests/                                       # ۹۶۴ آزمون شامل tests/validation/
 docs/theory.md, docs/error_codes.md          # فرمول‌بندی + مرجع کدهای خطا
 examples/                                    # مدل‌های مثالِ قابل اجرا
 scripts/                                     # ابزارهای نگهداری مخزن
@@ -602,7 +602,7 @@ scripts/                                     # ابزارهای نگهداری �
   author  = {bmhmdyan279-png},
   title   = {truss\_analysis: linear 2D truss finite-element analysis for Python},
   year    = {2026},
-  version = {2.5.0},
+  version = {2.8.0},
   license = {MIT},
   url     = {https://github.com/bmhmdyan279-png/truss-analysis-2d}
 }

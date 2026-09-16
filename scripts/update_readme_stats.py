@@ -58,59 +58,101 @@ def _fa(value: str) -> str:
     return value.translate(PERSIAN_DIGITS)
 
 
-def _opensees_ignores() -> list[str]:
-    """Return the pytest --ignore flags for the reference-solver files.
+#: The three reference-solver test files, always excluded from the canonical
+#: measurement.  See :func:`_canonical_ignores` for why this is unconditional.
+REFERENCE_SOLVER_FILES: tuple[str, ...] = (
+    "tests/validation/test_level4_opensees.py",
+    "tests/validation/test_level4_rho_branches.py",
+    "tests/validation/test_level5_crossval.py",
+)
 
-    tests/validation/test_level4_opensees.py (and its two siblings) pull in
-    truss_analysis.validation, which imports openseespy.  When that import
-    fails -- either because openseespy is absent, or because its compiled
-    extension cannot be loaded (the DLL-load failure seen on Windows/py3.14
-    and on some Linux CI runners even with the ``validation`` extra
-    installed) -- pytest aborts during collection with rc=2, and no
-    statistics can be measured.
 
-    The ``test`` and ``coverage`` CI jobs already pass the same three
-    --ignore flags on the command line.  The ``stats`` job measures the same
-    suite and must therefore reach the same count.  Probing the import at
-    runtime, rather than hard-coding the flags, keeps the measured number
-    honest on a machine where the reference solver really does load.
+def _canonical_ignores() -> list[str]:
+    """Return the pytest ``--ignore`` flags the canonical numbers are measured with.
+
+    These are applied **unconditionally**, whether or not ``openseespy`` happens
+    to import on this machine.  That is the whole point.
+
+    The previous version probed the import at runtime and returned the flags only
+    when it failed.  The intention was honesty -- measure the full suite where
+    the reference solver really loads -- but the effect was a gate whose expected
+    value depends on the environment it runs in.  The round-7 audit found exactly
+    that: HEAD advertised 820 tests / 94.2% measured where ``openseespy`` does
+    not load, while earlier commits on the same tree advertised 838 / 94.19%
+    measured where it does, so ``make stats-check`` was red on one machine and
+    green on another for the same commit.  A number that is not canonical is not
+    a gate.
+
+    The canonical configuration is therefore the *narrower* one: the same three
+    ``--ignore`` flags the ``test`` and ``coverage`` CI jobs pass, so the README
+    quotes the suite every CI runner actually executes.  The with-validation
+    count is still measured and printed as information (see
+    :func:`measure_with_validation`), because it is genuinely useful -- it just
+    must not be the number the gate compares against.
     """
+    return [f"--ignore={path}" for path in REFERENCE_SOLVER_FILES]
+
+
+def _reference_solver_available() -> bool:
+    """Whether ``openseespy`` imports on this machine, for reporting only."""
     try:
         import openseespy.opensees  # type: ignore[import-not-found]  # noqa: F401
     except Exception:  # DLL-load failures are not ImportError
-        return [
-            "--ignore=tests/validation/test_level4_opensees.py",
-            "--ignore=tests/validation/test_level4_rho_branches.py",
-            "--ignore=tests/validation/test_level5_crossval.py",
-        ]
-    return []
+        return False
+    return True
 
 
-def measure() -> tuple[int, float, int]:
-    """Return ``(n_tests, coverage_percent, n_modules)`` from real runs."""
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "tests/",
-            "-q",
-            "--cov=src",
-            "--cov-report=term",
-            *_opensees_ignores(),
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
+def _run_pytest(extra: list[str], with_cov: bool) -> tuple[int, float]:
+    """Run pytest once and parse ``(n_passed, coverage_percent)``."""
+    cmd = [sys.executable, "-m", "pytest", "tests/", "-q", "--no-header", *extra]
+    if with_cov:
+        cmd += ["--cov=src", "--cov-report=term"]
+    else:
+        cmd.append("--no-cov")
+    proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
     out = proc.stdout
     m_tests = re.search(r"(\d+) passed", out)
     m_cov = re.search(r"Total coverage: ([\d.]+)%", out) or re.search(
         r"^TOTAL\s+\d+\s+\d+\s+([\d.]+)%", out, re.MULTILINE
     )
-    if proc.returncode != 0 or not m_tests or not m_cov:
+    if proc.returncode != 0 or not m_tests or (with_cov and not m_cov):
         msg = f"test run failed or unparseable (rc={proc.returncode})"
         raise RuntimeError(msg)
+    coverage = float(m_cov.group(1)) if m_cov else 0.0
+    return int(m_tests.group(1)), coverage
+
+
+def _released_version() -> str:
+    """Latest release tag, e.g. ``2.8.0`` -- the version the docs should quote.
+
+    Taken from git rather than from ``setuptools_scm`` on purpose.  A working
+    checkout reports ``2.8.1.dev21+gee0e9bfd5``, which is the right string for
+    ``truss_analysis.__version__`` and the wrong one for a citation record or a
+    documented CLI transcript: both are about the *release*, not the commit.
+    ``pyproject.toml``'s ``fallback_version`` is the backstop when there are no
+    tags at all.
+    """
+    proc = subprocess.run(
+        ["git", "describe", "--tags", "--abbrev=0"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip().removeprefix("v")
+    fallback = re.search(
+        r'fallback_version\s*=\s*"([^"]+)"',
+        (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"),
+    )
+    return fallback.group(1) if fallback else "0.0.0"
+
+
+def measure() -> tuple[int, float, int, str]:
+    """Return ``(n_tests, coverage_percent, n_modules, version)`` from real runs.
+
+    Measured in the canonical configuration -- see :func:`_canonical_ignores`.
+    """
+    n_tests, coverage = _run_pytest(_canonical_ignores(), with_cov=True)
 
     proc_mypy = subprocess.run(
         [sys.executable, "-m", "mypy", "src/"],
@@ -120,7 +162,21 @@ def measure() -> tuple[int, float, int]:
     )
     m_mod = re.search(r"in (\d+) source files", proc_mypy.stdout)
     modules = int(m_mod.group(1)) if m_mod else 0
-    return int(m_tests.group(1)), float(m_cov.group(1)), modules
+    return n_tests, coverage, modules, _released_version()
+
+
+def measure_with_validation() -> tuple[int, float] | None:
+    """The full suite including the reference-solver files, if it runs at all.
+
+    Informational only.  Never compared against the READMEs, which is what makes
+    the canonical number environment-independent.
+    """
+    if not _reference_solver_available():
+        return None
+    try:
+        return _run_pytest([], with_cov=False)
+    except RuntimeError:
+        return None
 
 
 # (pattern, replacement template) — templates use {n}, {cov1}, {cov2}, {fa_*}.
@@ -128,6 +184,24 @@ def measure() -> tuple[int, float, int]:
 # prose, and bold status line) so Windows/Linux float-sum jitter cannot
 # make the four copies disagree.  cov2 remains available for callers that
 # explicitly want two decimals.
+#: Occurrences of the released version, patched alongside the statistics.
+#: The round-7 audit found the CLI transcript and the BibTeX record both
+#: quoting 2.5.0 while the tree built 2.8.0 and CITATION.cff said 2.8.0 --
+#: three different answers to "what version is this", none of them enforced,
+#: because this script patched counts and coverage but never the version.
+VERSION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(r"(\$ truss-analysis version\n)[\d.]+"),
+        r"\g<1>{version}",
+    ),
+    (
+        re.compile(r"(  version = \{)[\d.]+(\},)"),
+        r"\g<1>{version}\g<2>",
+    ),
+]
+
+CITATION_VERSION = re.compile(r'(^version: ")[\d.]+(")', re.MULTILINE)
+
 EN_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(r"badge/coverage-[\d.]+%25-brightgreen"),
@@ -242,11 +316,28 @@ def check_stale(
     return 1 if stale else 0
 
 
+def _patch_citation(version: str, dry_run: bool = False) -> int:
+    """Keep CITATION.cff's ``version:`` in step with the latest release tag.
+
+    A citation record that quotes a stale version is worse than one that quotes
+    no version: it is the field a reader is most likely to copy.
+    """
+    path = REPO_ROOT / "CITATION.cff"
+    if not path.exists():
+        return 0
+    text = path.read_text(encoding="utf-8")
+    rendered, count = CITATION_VERSION.subn(rf"\g<1>{version}\g<2>", text)
+    if count and not dry_run:
+        path.write_text(rendered, encoding="utf-8")
+    return count
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tests", type=int, default=None)
     parser.add_argument("--coverage", type=float, default=None)
     parser.add_argument("--modules", type=int, default=None)
+    parser.add_argument("--version", type=str, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--check",
@@ -258,8 +349,11 @@ def main() -> int:
     if args.tests is not None and args.coverage is not None:
         n, cov = args.tests, args.coverage
         modules = args.modules or 0
+        version = args.version or _released_version()
     else:
-        n, cov, modules = measure()
+        n, cov, modules, version = measure()
+        if args.version:
+            version = args.version
 
     cov1 = f"{cov:.1f}"
     cov2 = f"{cov:.2f}"
@@ -268,26 +362,71 @@ def main() -> int:
         "cov1": cov1,
         "cov2": cov2,
         "modules": str(modules),
+        "version": version,
         "fa_n": _fa(str(n)),
         "fa_cov1": _fa(cov1),
         "fa_cov2": _fa(cov2),
+        "fa_version": _fa(version),
     }
-    print(f"measured: tests={n} coverage={cov2}% modules={modules}")
+    print(f"measured (canonical): tests={n} coverage={cov2}% modules={modules}")
+    print(f"measured (release):   version={version}")
+
+    # The with-validation count is reported and deliberately never gated: it
+    # depends on whether openseespy loads, which is a property of the machine
+    # rather than of the tree.
+    with_validation = measure_with_validation()
+    if with_validation is not None:
+        print(
+            f"informational: with the reference solver the suite is "
+            f"{with_validation[0]} tests; the READMEs quote the canonical "
+            f"{n} so the number does not depend on this machine"
+        )
+    else:
+        print(
+            "informational: openseespy unavailable here, so the "
+            "with-validation count was not measured; the canonical number is "
+            "unaffected by design"
+        )
+
     if args.dry_run:
         return 0
     if modules == 0:
         print("WARNING: module count unavailable; module-count line not patched")
-        EN_PATTERNS_USE = [p for p in EN_PATTERNS if "{modules}" not in p[1]]
+        en_patterns = [pt for pt in EN_PATTERNS if "{modules}" not in pt[1]]
     else:
-        EN_PATTERNS_USE = EN_PATTERNS
+        en_patterns = EN_PATTERNS
+
+    all_en = [*en_patterns, *VERSION_PATTERNS]
+    all_fa = [*FA_PATTERNS, *VERSION_PATTERNS]
 
     if args.check:
-        return check_stale(EN_PATTERNS_USE, FA_PATTERNS, fmt)
+        status = check_stale(all_en, all_fa, fmt)
+        citation_version = _citation_version_on_disk()
+        if citation_version is not None and citation_version != version:
+            print(
+                f"STALE: CITATION.cff quotes {citation_version}, latest release "
+                f"is {version}; run `make stats`"
+            )
+            status = 1
+        return status
 
-    hits_en = patch(README_EN, EN_PATTERNS_USE, fmt)
-    hits_fa = patch(README_FA, FA_PATTERNS, fmt)
-    print(f"patched {hits_en} occurrence(s) in README.md, {hits_fa} in README.fa.md")
+    hits_en = patch(README_EN, all_en, fmt)
+    hits_fa = patch(README_FA, all_fa, fmt)
+    hits_cff = _patch_citation(version)
+    print(
+        f"patched {hits_en} occurrence(s) in README.md, {hits_fa} in "
+        f"README.fa.md, {hits_cff} in CITATION.cff"
+    )
     return 0
+
+
+def _citation_version_on_disk() -> str | None:
+    """The version CITATION.cff currently quotes, or None if absent."""
+    path = REPO_ROOT / "CITATION.cff"
+    if not path.exists():
+        return None
+    found = CITATION_VERSION.search(path.read_text(encoding="utf-8"))
+    return found.group(0).split('"')[1] if found else None
 
 
 if __name__ == "__main__":

@@ -152,6 +152,11 @@ extend-ignore-names = [
 # Repository utility scripts: same documentation exemption, pytest-style
 # rules do not apply, and mechanics/Greek notation is kept verbatim.
 "scripts/**" = ["D", "PT", "N806", "RUF001", "RUF002", "RUF003"]
+# This test drives scripts/update_readme_stats.py, whose whole job includes
+# rendering Persian numerals into README.fa.md. The "ambiguous character"
+# findings are the subject matter under test, not an encoding accident, so the
+# same exemption the script itself carries applies here.
+"tests/test_stats_gate.py" = ["RUF001", "RUF002", "RUF003"]
 # Benchmark harness: a developer-facing driver, not shipped library code, so
 # it gets the same documentation and notation exemptions as scripts/.  Line
 # length, naming and correctness rules still apply in full -- this exemption
