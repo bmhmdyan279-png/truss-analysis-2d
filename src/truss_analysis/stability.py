@@ -642,20 +642,30 @@ class BucklingResult:
     mode : numpy.ndarray
         Critical buckling mode on the full DOF vector ``(2n,)``, unit
         2-norm, fixed DOFs exactly zero. Arbitrary sign (eigenvectors are).
-        Equals ``modes[0]``.
+        Equals ``modes[0]`` whenever :attr:`modes` is non-empty.  When
+        ``lambda_cr`` is ``inf`` there is no critical mode and this field is
+        the **zero vector**: it keeps a fixed shape so callers need not
+        branch on ``None``, and its zero norm is the signal -- that is what
+        :func:`imperfection_sensitivity` tests before refusing to sweep an
+        imperfection along a direction that does not exist.
     modes : list[numpy.ndarray]
         The ``n_modes`` leading buckling modes on the free DOFs, ordered by
         *descending* ``nu`` -- i.e. by *ascending* ``lambda_cr``, so
         ``modes[0]`` is the critical one and equals ``mode``.  Each is unit
         2-norm.  Fewer than ``n_modes`` entries appear when the spectrum has
-        fewer positive eigenvalues.
+        fewer positive eigenvalues, and the list is **empty** when
+        ``lambda_cr`` is ``inf``: absence is reported as absence rather than
+        as a placeholder zero vector, so ``zip(modes, load_factors)`` cannot
+        pair a non-mode with a non-load.
     load_factors : tuple[float, ...]
         Load factor belonging to each entry of :attr:`modes`, in the same
-        order (so ``load_factors[0] == lambda_cr`` and the sequence is
-        non-decreasing).  ``inf`` entries mean that mode does not buckle
-        under load amplification.  Returned because a list of mode shapes
-        without the loads they belong to cannot be checked, plotted or
-        ranked by the caller.
+        order and the same length (so ``load_factors[0] == lambda_cr`` and
+        the sequence is non-decreasing).  Empty exactly when :attr:`modes`
+        is, i.e. when ``lambda_cr`` is ``inf``.  Every entry is finite: only
+        eigenvalues with ``nu > _NU_POSITIVE_FLOOR`` are retained, so a
+        non-positive ``nu`` -- which would map to an infinite or negative
+        load factor -- never reaches this tuple and is instead reflected in
+        ``lambda_cr = inf``.
     multiplicity : int
         Number of computed eigenvalues within
         :data:`_EIGEN_MULT_RTOL` (relative) of the critical one.
@@ -663,6 +673,8 @@ class BucklingResult:
         :exc:`~truss_analysis.exceptions.AmbiguousModeWarning`.  It is a
         *lower* bound: only the eigenpairs actually computed are compared,
         so raise ``n_modes`` if a higher multiplicity must be resolved.
+        ``0`` when ``lambda_cr`` is ``inf`` -- there is no critical
+        eigenvalue to be multiple of.
     n_compressed : int
         Number of members carrying compression in the base state beyond the
         library's force classification band.
@@ -873,11 +885,22 @@ def linearized_buckling_load_factor(
 
     # --- critical value, multiplicity and modes ---------------------------
     positive = nu > _NU_POSITIVE_FLOOR
-    load_factors: tuple[float, ...] = ()
     if not np.any(positive):
+        # No bifurcation under load amplification.  The container reports
+        # *absence* rather than a placeholder: an empty ``modes`` list and an
+        # empty ``load_factors`` tuple, so a caller that zips the two gets
+        # nothing to misread.  The previous shape returned
+        # ``modes=[zeros]`` with ``load_factors=(inf,)``, which paired a zero
+        # vector with an infinite load factor and invited exactly the reading
+        # "here is the buckling mode, it buckles at infinity" -- a mode shape
+        # that is not a mode shape, for a load that is not a load.  ``mode``
+        # stays the zero vector because it is a fixed-shape field and
+        # :func:`imperfection_sensitivity` relies on its norm being zero to
+        # detect that there is no bifurcation direction to imperil.
         lam_cr = float("inf")
-        modes_list: list[npt.NDArray[np.float64]] = [np.zeros(n_free)]
-        multiplicity = 1
+        modes_list: list[npt.NDArray[np.float64]] = []
+        load_factors: tuple[float, ...] = ()
+        multiplicity = 0
     else:
         nu_pos = nu[positive]
         modes_pos = modes_free[:, positive]
@@ -907,7 +930,8 @@ def linearized_buckling_load_factor(
             )
 
     mode = np.zeros(n_dof)
-    mode[free] = modes_list[0]
+    if modes_list:
+        mode[free] = modes_list[0]
 
     zero_band = 1e-12  # relative to E A, the library-wide strain-zero band
     compressed = int(
@@ -917,7 +941,7 @@ def linearized_buckling_load_factor(
         lambda_cr=float(lam_cr),
         mode=np.asarray(mode, dtype=float),
         modes=modes_list,
-        load_factors=load_factors if load_factors else (float(lam_cr),),
+        load_factors=load_factors,
         multiplicity=multiplicity,
         n_compressed=compressed,
         base_forces={e.id: float(n_total[i]) for i, e in enumerate(elements)},

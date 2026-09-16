@@ -391,6 +391,68 @@ def test_tension_only_load_still_reports_infinity_on_both_paths() -> None:
         assert res.n_compressed == 0
 
 
+@pytest.mark.parametrize("solver", ["dense", "sparse"])
+@pytest.mark.parametrize("n_modes", [1, 3])
+def test_no_bifurcation_reports_absence_not_a_placeholder(
+    solver: str, n_modes: int
+) -> None:
+    """Pin the ``lambda_cr = inf`` container contract (round-7 audit, item 4).
+
+    The previous shape returned ``modes=[zeros(n_free)]`` together with
+    ``load_factors=(inf,)`` and ``multiplicity=1``.  A caller doing the
+    natural thing -- ``zip(res.modes, res.load_factors)`` -- was handed a
+    zero vector labelled with an infinite load factor, i.e. "here is the
+    buckling mode; it buckles at infinity".  That is not a mode and not a
+    load, and the docstring's promise that every mode is unit 2-norm was
+    false in precisely this branch.  Absence is now reported as absence.
+    """
+    nodes, elements, _ = _toggle(load=-1000.0)
+    loads_up = {nd.id: {"Fx": 0.0, "Fy": +5000.0} for nd in nodes if not nd.is_support}
+    res = linearized_buckling_load_factor(
+        nodes,
+        elements,
+        loads_up,
+        n_modes=n_modes,
+        eigen_solver=solver,
+        warn_shallow=False,
+    )
+
+    assert res.lambda_cr == float("inf")
+    assert res.modes == []
+    assert res.load_factors == ()
+    assert res.multiplicity == 0
+    # the fixed-shape field stays a zero vector of the full DOF length
+    assert res.mode.shape == (2 * len(nodes),)
+    assert float(np.linalg.norm(res.mode)) == 0.0
+    # and the two parallel sequences can never disagree about their length
+    assert len(res.modes) == len(res.load_factors)
+
+
+@pytest.mark.parametrize("solver", ["dense", "sparse"])
+def test_modes_and_load_factors_always_agree_in_length(solver: str) -> None:
+    """The zip invariant holds in every branch, including the infinite one."""
+    nodes, elements, loads = _pratt(4)
+    free = [d for d in range(2 * len(nodes)) if d not in fixed_dof_indices(nodes)]
+    for n_modes in (1, 2, 4, 12):
+        res = linearized_buckling_load_factor(
+            nodes,
+            elements,
+            loads,
+            n_modes=n_modes,
+            eigen_solver=solver,
+            warn_shallow=False,
+        )
+        assert len(res.modes) == len(res.load_factors)
+        assert len(res.modes) <= n_modes
+        assert res.multiplicity >= (1 if res.modes else 0)
+        for mode, factor in zip(res.modes, res.load_factors, strict=True):
+            assert np.isfinite(factor), "a non-positive nu must not reach here"
+            assert abs(float(np.linalg.norm(mode)) - 1.0) < 1e-12
+        if res.modes:
+            assert res.load_factors[0] == pytest.approx(res.lambda_cr)
+            assert np.allclose(res.modes[0], res.mode[free])
+
+
 # --------------------------------------------------------------------------
 # shallow-geometry screen (A4), made orientation-robust in round 6
 # --------------------------------------------------------------------------
