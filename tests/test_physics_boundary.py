@@ -378,3 +378,74 @@ def test_digest_is_identical_across_solver_options() -> None:
 def test_metadata_remains_json_serialisable_with_the_digest() -> None:
     result = run(EXAMPLE, quiet=True)
     assert json.loads(json.dumps(result.solver_metadata)) == result.solver_metadata
+
+
+# --------------------------------------------------------------------------
+# round-7 audit, item 10: content_hash covered the entries but not the
+# revision, so re-certifying the same wording against a new standard edition
+# left a consumer pinned to the hash unable to tell the two apart.
+# --------------------------------------------------------------------------
+
+
+def test_content_hash_tracks_the_audit_round() -> None:
+    """Same envelope, new certification: the hash must move."""
+    import dataclasses
+
+    boundary = physics_boundary()
+    recertified = dataclasses.replace(boundary, audit_round=boundary.audit_round + 1)
+
+    assert recertified.content_hash() != boundary.content_hash()
+    # the entries did not change, so the difference is entirely the revision
+    assert recertified.entries == boundary.entries
+
+
+def test_content_hash_ignores_the_calendar_date() -> None:
+    """A date is metadata about the artefact, not content of the envelope.
+
+    ``digest()`` carries ``updated`` for provenance; the hash must not, or every
+    cosmetic date edit would invalidate results computed under an identical
+    envelope.
+    """
+    import dataclasses
+
+    boundary = physics_boundary()
+    redated = dataclasses.replace(boundary, updated="2099-12-31")
+
+    assert redated.content_hash() == boundary.content_hash()
+    assert redated.digest()["updated"] == "2099-12-31"
+    assert redated.digest()["content_hash"] == boundary.digest()["content_hash"]
+
+
+def test_content_hash_ignores_the_library_version() -> None:
+    """The version changes on every release and says nothing about the envelope."""
+    import dataclasses
+
+    boundary = physics_boundary()
+    reversioned = dataclasses.replace(boundary, version="99.99.99")
+
+    assert reversioned.content_hash() == boundary.content_hash()
+
+
+def test_content_hash_is_deterministic_and_entry_sensitive() -> None:
+    """Every hashed field must actually be hashed."""
+    import dataclasses
+
+    boundary = physics_boundary()
+    assert boundary.content_hash() == physics_boundary().content_hash()
+
+    first = boundary.entries[0]
+    for field_name, new_value in (
+        ("id", first.id + "_renamed"),
+        ("status", "deferred"),
+        ("phenomenon", first.phenomenon + " (altered)"),
+        ("detail", first.detail + " altered"),
+        ("doc_section", "99.99"),
+    ):
+        altered = dataclasses.replace(first, **{field_name: new_value})
+        edited = dataclasses.replace(boundary, entries=(altered, *boundary.entries[1:]))
+        assert edited.content_hash() != boundary.content_hash(), field_name
+
+    if first.limits:
+        altered = dataclasses.replace(first, limits=(*first.limits, "one more"))
+        edited = dataclasses.replace(boundary, entries=(altered, *boundary.entries[1:]))
+        assert edited.content_hash() != boundary.content_hash(), "limits"

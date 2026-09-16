@@ -8,13 +8,18 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from truss_analysis.sections import (
+    _R_EPS,
+    MIN_THICKNESS_RATIO,
     SectionCatalog,
     SquareHSS,
+    _kappa_of_r,
     euler_buckling_load,
     idealised_square_hss,
+    thickness_ratio_from_section,
 )
 from truss_analysis.topology_generator import TrussConfig, TrussFamily
 
@@ -163,3 +168,68 @@ def test_chi_curve_ordering_is_proven() -> None:
     # at/below the limit every curve is exactly 1
     for c in curves:
         assert buckling_reduction_factor(0.1, c, fire=False) == 1.0
+
+
+# --------------------------------------------------------------------------
+# round-7 audit, item 7: the solid-limit boundary must not surface a raw
+# scipy bracket error.
+#
+# The claimed failure mode -- ``kappa`` exactly at ``1/12`` reaching ``brentq``
+# with a same-sign bracket and raising ``ValueError: f(a) and f(b) must have
+# different signs`` -- does not reproduce on the current scipy, because brentq
+# tolerates ``f(a) == 0`` and returns ``a``.  But the ``<`` guard is one
+# rounding away from being wrong: ``kappa_min`` is itself a floating-point
+# evaluation ``_R_EPS`` inside the boundary, so a section supplied at exactly
+# the solid limit lands on either side of it by a rounding, and which side
+# depends on the platform.  The bracket is now checked explicitly and the solid
+# limit returned, so the answer no longer rests on brentq's undocumented
+# tolerance of a zero endpoint.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "kappa",
+    [
+        1.0 / 12.0,
+        _kappa_of_r(MIN_THICKNESS_RATIO + _R_EPS),
+        np.nextafter(_kappa_of_r(MIN_THICKNESS_RATIO + _R_EPS), 1.0),
+    ],
+)
+def test_solid_limit_returns_the_solid_limit_not_a_scipy_error(kappa: float) -> None:
+    """``I = A^2 / 12`` is the r = 2 end of the family and must say so."""
+    area = 0.01
+    ratio = thickness_ratio_from_section(area, kappa * area * area)
+    assert ratio == pytest.approx(MIN_THICKNESS_RATIO, abs=1e-6)
+    # and it round-trips: the recovered ratio reproduces the supplied kappa
+    assert _kappa_of_r(ratio) == pytest.approx(kappa, rel=1e-6)
+
+
+def test_below_solid_limit_still_gets_the_friendly_message() -> None:
+    """The guard must not have been widened into accepting a solid section."""
+    area = 0.01
+    kappa = np.nextafter(_kappa_of_r(MIN_THICKNESS_RATIO + _R_EPS), 0.0)
+    with pytest.raises(ValueError, match="not representable in that family"):
+        thickness_ratio_from_section(area, kappa * area * area)
+
+
+def test_no_input_reaches_brentq_with_a_same_sign_bracket() -> None:
+    """Sweep the whole representable range; none may raise a raw scipy error.
+
+    This is the property the guard exists for, checked over inputs rather than
+    argued about: across four decades of ``I/A^2`` from the solid limit upward,
+    every call either returns a ratio or raises the library's own message.
+    """
+    area = 0.02
+    kappa_lo = _kappa_of_r(MIN_THICKNESS_RATIO + _R_EPS)
+    for kappa in np.geomspace(kappa_lo, 20.0, 200):
+        try:
+            ratio = thickness_ratio_from_section(area, kappa * area * area)
+        except ValueError as exc:
+            message = str(exc)
+        else:
+            message = ""
+            assert ratio >= MIN_THICKNESS_RATIO
+            assert _kappa_of_r(ratio) == pytest.approx(kappa, rel=1e-9)
+        assert "different signs" not in message, (
+            f"a raw scipy bracket error escaped at I/A^2 = {kappa:g}"
+        )

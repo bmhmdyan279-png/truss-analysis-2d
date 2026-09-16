@@ -195,17 +195,31 @@ class PhysicsBoundary:
         return out
 
     def content_hash(self) -> str:
-        """Return a short hash pinning the boundary's content.
+        """Return a short hash pinning the boundary's content *and* revision.
 
-        Computed over the canonical rendering of every entry, so it changes
-        when and only when the envelope changes -- which is what lets a result
-        assert *which* boundary it was computed under, and a test detect a
-        silent edit.
+        Computed over the canonical rendering of every entry together with
+        :attr:`audit_round`, so it changes when and only when the envelope
+        changes -- which is what lets a result assert *which* boundary it was
+        computed under, and a test detect a silent edit.
+
+        ``audit_round`` is included because it is part of what a consumer needs
+        to know.  Without it, re-certifying the same envelope against a new
+        revision of EN 1993-1-2 -- bumping ``updated`` and ``audit_round`` while
+        the wording stays identical, because the standard's numbers did not move
+        -- leaves the hash unchanged, and a downstream consumer pinned to the
+        hash cannot tell the two certifications apart.  The library version is
+        deliberately *not* included: it changes on every release, which would
+        make the hash useless as a statement about the envelope.
         """
-        payload = "\n".join(
-            f"{e.id}|{e.status}|{e.phenomenon}|{e.detail}|{e.doc_section}|"
-            f"{';'.join(e.limits)}"
-            for e in self.entries
+        header = f"audit_round={self.audit_round}"
+        payload = (
+            header
+            + "\n"
+            + "\n".join(
+                f"{e.id}|{e.status}|{e.phenomenon}|{e.detail}|{e.doc_section}|"
+                f"{';'.join(e.limits)}"
+                for e in self.entries
+            )
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 

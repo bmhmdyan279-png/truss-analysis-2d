@@ -243,7 +243,8 @@ def thickness_ratio_from_section(area: float, i_sec: float) -> float:
         raise ValueError(msg)
 
     kappa = float(i_sec) / (float(area) * float(area))
-    kappa_min = _kappa_of_r(MIN_THICKNESS_RATIO + _R_EPS)
+    lo = MIN_THICKNESS_RATIO + _R_EPS
+    kappa_min = _kappa_of_r(lo)
     if kappa < kappa_min:
         msg = (
             f"I/A^2 = {kappa:.6g} is below {kappa_min:.6g}, the solid limit "
@@ -257,9 +258,24 @@ def thickness_ratio_from_section(area: float, i_sec: float) -> float:
     hi = max(4.0 * MIN_THICKNESS_RATIO, 48.0 * kappa + 16.0)
     while _kappa_of_r(hi) < kappa:  # pragma: no cover - defensive growth
         hi *= 2.0
+
+    # The bracket is checked before brentq rather than left to it.  The `<`
+    # guard above is exact in the comparison it makes but ``kappa_min`` is
+    # itself a floating-point evaluation one _R_EPS inside the boundary, so a
+    # section supplied at exactly the solid limit (``I = A^2 / 12``) can land on
+    # either side of it by a rounding.  When it lands inside, ``f(lo)`` is zero
+    # or positive and ``brentq`` raises its own
+    # ``ValueError: f(a) and f(b) must have different signs`` -- a raw scipy
+    # message about a bracket, where the docstring promises an explanation about
+    # the section not being representable.  Returning the solid limit is the
+    # physically right answer there, and saying so beats an internal error.
+    f_lo = _kappa_of_r(lo) - kappa
+    if f_lo >= 0.0:
+        return lo
+
     root = brentq(
         lambda r: _kappa_of_r(r) - kappa,
-        MIN_THICKNESS_RATIO + _R_EPS,
+        lo,
         hi,
         xtol=1e-12,
         rtol=4.0 * float(np.finfo(float).eps),
