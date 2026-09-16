@@ -66,6 +66,7 @@ is complete either way.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import lru_cache
@@ -73,13 +74,20 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from ..material.steel_eurocode import (
     FloatOrArray,
+    check_material_model_range,
     specific_heat,
     unit_mass,
 )
-from .fire_curve import SteelHeatingResult, iso_834_temperature
+from .fire_curve import (
+    _ABSOLUTE_ZERO_C,
+    SteelHeatingResult,
+    _gas_temperature_grid,
+    iso_834_temperature,
+)
 
 __all__ = [
     "MAX_STEP_S_PROTECTED",
@@ -332,6 +340,69 @@ def capacity_ratio_mu(
     )
 
 
+def _protected_final_theta(
+    duration_s: float,
+    dt: float,
+    section_factor: float,
+    material: InsulationMaterial,
+    thickness_m: float,
+    theta_gas_grid: npt.NDArray[np.float64],
+    theta_a0: float,
+    shadow_factor: float,
+) -> float:
+    """Return the final steel temperature of the clause 4.2.5.2 recursion.
+
+    The same recursion :func:`protected_steel_temperature` runs, factored out so
+    the error estimate can evaluate it at a halved step without a second copy of
+    the physics.  Two copies of a clause implementation that are supposed to
+    agree are how an error estimate ends up measuring the difference between
+    them rather than the truncation error.
+
+    The gas-temperature history is interpolated from the caller's grid rather
+    than re-evaluated, so the half-step run sees the same fire curve at the same
+    precision and the only thing that changes is ``dt``.
+    """
+    n_half = max(1, round(duration_s / dt))
+    t_half = np.linspace(0.0, duration_s, n_half + 1)
+    theta_gas = np.interp(
+        t_half, _grid_times(duration_s, theta_gas_grid), theta_gas_grid
+    )
+
+    rho_a = float(unit_mass())
+    lam_over_d = float(material.lambda_p) / float(thickness_m)
+    cp_rhop = float(material.volumetric_heat_capacity)
+
+    theta_a = theta_a0
+    theta_g = float(theta_gas[0])
+    for i in range(n_half):
+        theta_g_next = float(theta_gas[i + 1])
+        d_theta_g = theta_g_next - theta_g
+        c_a = float(specific_heat(theta_a))
+        mu = (cp_rhop / (c_a * rho_a)) * thickness_m * section_factor
+        heating = (
+            shadow_factor
+            * lam_over_d
+            * section_factor
+            / (rho_a * c_a)
+            * (theta_g - theta_a)
+            / (1.0 + mu / 3.0)
+            * dt
+        )
+        d_theta_a = heating - (math.exp(mu / 10.0) - 1.0) * d_theta_g
+        if d_theta_g > 0.0 and d_theta_a < 0.0:
+            d_theta_a = 0.0
+        theta_a += float(d_theta_a)
+        theta_g = theta_g_next
+    return theta_a
+
+
+def _grid_times(
+    duration_s: float, theta_gas_grid: npt.NDArray[np.float64]
+) -> npt.NDArray[np.float64]:
+    """Sample times belonging to a gas-temperature grid of the same length."""
+    return np.linspace(0.0, duration_s, theta_gas_grid.shape[0])
+
+
 def protected_steel_temperature(
     duration_min: float,
     section_factor: float,
@@ -342,6 +413,7 @@ def protected_steel_temperature(
     shadow_factor: float = 1.0,
     max_step_s: float = MAX_STEP_S_PROTECTED,
     n_output: int = 0,
+    estimate_error: bool = False,
 ) -> SteelHeatingResult:
     """Steel temperature history of an insulated member (clause 4.2.5.2).
 
@@ -370,6 +442,15 @@ def protected_steel_temperature(
     n_output : int, default 0
         Number of evenly spaced output samples (including ``t = 0`` and the
         end); ``0`` keeps every step.
+    estimate_error : bool, default False
+        Rerun at half the step and report the truncation-error estimate on
+        :attr:`SteelHeatingResult.step_error_estimate`.  The clause's recursion
+        is first order, so the estimate is simply ``|f(dt) - f(dt/2)|``.  Worth
+        turning on whenever this solver's output is compared with
+        :func:`~truss_analysis.thermal.fire_curve.steel_temperature`: that one
+        is fourth-order RK4, and at the same nominal step the two differ in
+        accuracy by roughly two orders of magnitude, which is invisible without
+        this field.
 
     Returns
     -------
@@ -411,6 +492,21 @@ def protected_steel_temperature(
             f"step ceiling of EN 1993-1-2 clause 4.2.5.2; got {max_step_s}"
         )
         raise ValueError(msg)
+    # ``theta_a0`` was the one argument this function never looked at: a NaN
+    # propagated silently into every subsequent step and an ``inf`` produced a
+    # history of NaNs that still came back inside a result object.  The
+    # unprotected solver validates its inputs and the two results are
+    # documented as interchangeable, so they have to be equally strict.
+    if not math.isfinite(theta_a0):
+        msg = f"theta_a0 must be a finite temperature in degC, got {theta_a0}"
+        raise ValueError(msg)
+    if theta_a0 <= _ABSOLUTE_ZERO_C:
+        msg = (
+            f"theta_a0 must be above absolute zero ({_ABSOLUTE_ZERO_C} degC), "
+            f"got {theta_a0}"
+        )
+        raise ValueError(msg)
+    check_material_model_range(theta_a0, context="initial steel temperature")
 
     rho_a = float(unit_mass())
     duration_s = float(duration_min) * 60.0
@@ -419,23 +515,35 @@ def protected_steel_temperature(
 
     ts = np.linspace(0.0, duration_s, n_steps + 1)
     thetas = np.empty(n_steps + 1, dtype=float)
-    theta_gas = np.empty(n_steps + 1, dtype=float)
 
     theta_a = float(theta_a0)
-    theta_g = float(fire_curve(0.0))
     thetas[0] = theta_a
-    theta_gas[0] = theta_g
 
-    # Constant part of the heating coefficient; c_a(theta_a) is the only
-    # temperature-dependent factor and is evaluated per step.
+    # Constant parts of the heating coefficient, hoisted out of the loop.
+    # ``c_a(theta_a)`` is the only temperature-dependent factor and is
+    # evaluated once per step; ``capacity_ratio_mu`` is inlined rather than
+    # called because it re-derived both ``specific_heat(theta_a)`` and
+    # ``unit_mass()`` on every step, and ``rho_a`` had already been hoisted
+    # above -- so the loop was doing three table lookups where one sufficed.
+    # At a 30 s step over two hours that is 480 redundant lookups, which is
+    # the same pattern round 5 removed from the Table 3.1 accessors for a
+    # measured 36% saving.  The public ``capacity_ratio_mu`` keeps its own
+    # derivation and is tested against this inline form.
     lam_over_d = float(material.lambda_p) / float(thickness_m)
+    cp_rhop = float(material.volumetric_heat_capacity)
+    # The gas temperature is evaluated on the whole grid up front: the clause's
+    # recursion is sequential in theta_a but not in theta_g, and calling
+    # fire_curve twice per step (once here, once for the history) doubles the
+    # cost of a parametric curve for no benefit.
+    theta_gas = _gas_temperature_grid(fire_curve, ts / 60.0)
+    theta_g = float(theta_gas[0])
+
     for i in range(n_steps):
-        t_next_min = ts[i + 1] / 60.0
-        theta_g_next = float(fire_curve(t_next_min))
+        theta_g_next = float(theta_gas[i + 1])
         d_theta_g = theta_g_next - theta_g
 
         c_a = float(specific_heat(theta_a))
-        mu = capacity_ratio_mu(material, thickness_m, section_factor, theta_a)
+        mu = (cp_rhop / (c_a * rho_a)) * thickness_m * section_factor
         heating = (
             shadow_factor
             * lam_over_d
@@ -454,7 +562,30 @@ def protected_steel_temperature(
         theta_a += float(d_theta_a)
         theta_g = theta_g_next
         thetas[i + 1] = theta_a
-        theta_gas[i + 1] = theta_g
+
+    error_estimate: float | None = None
+    if estimate_error:
+        half = _protected_final_theta(
+            duration_s,
+            0.5 * dt,
+            section_factor,
+            material,
+            thickness_m,
+            theta_gas,
+            float(theta_a0),
+            shadow_factor,
+        )
+        # first order: e(dt) ~ |f(dt) - f(dt/2)| / (1 - 2^-1) = 2 |...| ... but
+        # the clause's recursion converges linearly, so the honest statement of
+        # the remaining error at dt is the gap itself scaled by 1/(1 - 1/2).
+        error_estimate = (
+            abs(float(thetas[-1]) - half) / 0.5 if math.isfinite(half) else None
+        )
+
+    # Measured on the integration grid, before any downsampling: a finite
+    # difference across widened output intervals understates the peak.
+    rate_full = float(np.max(np.diff(thetas) / np.diff(ts))) if n_steps >= 1 else 0.0
+    out_of_range = check_material_model_range(thetas, context="steel temperature")
 
     if n_output > 0:
         idx = (
@@ -466,6 +597,9 @@ def protected_steel_temperature(
         time_s=np.asarray(ts, dtype=float),
         theta_steel=np.asarray(thetas, dtype=float),
         theta_gas=np.asarray(theta_gas, dtype=float),
+        max_heating_rate_full=rate_full,
+        step_error_estimate=error_estimate,
+        out_of_range=out_of_range,
     )
 
 

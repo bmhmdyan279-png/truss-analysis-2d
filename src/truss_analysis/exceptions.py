@@ -144,6 +144,47 @@ class LumpedCapacityWarning(UserWarning):
     """
 
 
+class ParametricFireRangeWarning(UserWarning):
+    """Warning issued when a parametric fire's inputs leave the code's range.
+
+    The EN 1991-1-2 Annex A parametric temperature-time curve is a fit to a
+    bounded set of compartment fire data, and the standard states the range it
+    was fitted over.  A compartment outside that range still produces a smooth,
+    plausible curve from the same equations; it is simply an extrapolation of
+    the fit rather than a code-compliant gas temperature history.
+
+    Emitted by :class:`truss_analysis.thermal.fire_curve.ParametricFire` when
+    ``q_td`` falls outside
+    :data:`~truss_analysis.thermal.fire_curve.Q_TD_RANGE_OF_VALIDITY`.
+    Previously reported as a bare ``UserWarning`` whose text described itself as
+    "LumpedCapacityWarning-adjacent" -- naming a class that concerns the
+    lumped-capacitance *member* model rather than the *gas curve*, so a caller
+    filtering on category could not catch it and a caller reading the message
+    was pointed at the wrong physics.
+    """
+
+
+class SteelTemperatureRangeWarning(UserWarning):
+    """Warning issued when steel temperature leaves the material model's range.
+
+    Every property in :mod:`truss_analysis.material.steel_eurocode` is read from
+    EN 1993-1-2:2005 Table 3.1 and clause 3.4, which tabulate carbon steel from
+    20 degC to 1200 degC.  Outside that band the accessors *clamp* -- which is
+    the documented behaviour and the right one for an interpolator -- but a
+    clamp is silent, and a silent clamp in a fire calculation is the same
+    failure mode this library refuses everywhere else: a thin member in a long
+    fire can pass 1200 degC, and the answer then looks perfectly ordinary while
+    being an extrapolation of the last tabulated row rather than a code-compliant
+    value.
+
+    Emitted by :func:`truss_analysis.thermal.fire_curve.steel_temperature` and
+    :func:`truss_analysis.thermal.protection.protected_steel_temperature` when
+    the computed history, or the supplied initial temperature, leaves the range.
+    The result is still returned; the warning states that its upper end is
+    outside the standard's validity envelope.
+    """
+
+
 class IllConditionedPerturbationWarning(UserWarning):
     """Warning issued when a Woodbury perturbation solve is numerically weak.
 

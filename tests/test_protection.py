@@ -18,6 +18,8 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import json
+import math
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -486,3 +488,272 @@ def test_custom_fire_curve_is_accepted() -> None:
     )
     assert np.all(res.theta_gas == pytest.approx(500.0))
     assert 20.0 < res.theta_final < 500.0
+
+
+# --------------------------------------------------------------------------
+# round-7 audit: theta_a0 was the one argument never validated, the material
+# model's 1200 degC ceiling clamped silently, and the loop re-derived two
+# constants per step.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_initial_temperature_is_rejected(bad: float) -> None:
+    """A NaN used to propagate through every step and still return a result."""
+    with pytest.raises(ValueError, match="finite temperature"):
+        protected_steel_temperature(
+            30.0, 200.0, insulation_material("gypsum_board"), 0.02, theta_a0=bad
+        )
+
+
+@pytest.mark.parametrize("bad", [-273.15, -300.0, -1e6])
+def test_initial_temperature_below_absolute_zero_is_rejected(bad: float) -> None:
+    with pytest.raises(ValueError, match="absolute zero"):
+        protected_steel_temperature(
+            30.0, 200.0, insulation_material("gypsum_board"), 0.02, theta_a0=bad
+        )
+
+
+def test_both_solvers_validate_the_initial_temperature_alike() -> None:
+    """Their results are documented as interchangeable; so is their strictness."""
+    from truss_analysis.thermal.fire_curve import steel_temperature
+
+    for solver in (
+        lambda **kw: protected_steel_temperature(
+            30.0, 200.0, insulation_material("gypsum_board"), 0.02, **kw
+        ),
+        lambda **kw: steel_temperature(30.0, 200.0, **kw),
+    ):
+        with pytest.raises(ValueError, match="finite temperature"):
+            solver(theta_a0=float("nan"))
+        with pytest.raises(ValueError, match="absolute zero"):
+            solver(theta_a0=-300.0)
+
+
+def test_scalar_only_fire_curve_is_still_accepted() -> None:
+    """Regression: the vectorised gas-temperature grid must not break the API.
+
+    ``fire_curve`` is declared ``Callable[[FloatOrArray], FloatOrArray]``, and a
+    scalar lambda is the natural way to express a bespoke or measured exposure.
+    Building the grid with an unconditional array call turned that documented
+    input into a ``ValueError`` -- a performance change breaking the API is not
+    a performance change.
+    """
+    scalar_only = lambda t_min: 20.0 + 345.0 * math.log10(1.0 + 8.0 * t_min)  # noqa: E731
+    result = protected_steel_temperature(
+        30.0,
+        200.0,
+        insulation_material("gypsum_board"),
+        0.02,
+        fire_curve=scalar_only,
+    )
+    assert np.isfinite(result.theta_steel).all()
+    assert result.theta_steel[-1] > result.theta_steel[0]
+
+
+def test_a_curve_that_is_not_a_curve_is_rejected() -> None:
+    """The fallback must still refuse something that is not a temperature."""
+    with pytest.raises(ValueError, match="finite gas temperature"):
+        protected_steel_temperature(
+            30.0,
+            200.0,
+            insulation_material("gypsum_board"),
+            0.02,
+            fire_curve=lambda t: float("nan"),
+        )
+
+
+def test_inline_capacity_ratio_matches_the_public_function() -> None:
+    """The loop inlines ``mu``; the public function must still agree with it.
+
+    Hoisting ``specific_heat`` and ``unit_mass`` out of the recursion replaced a
+    call to :func:`capacity_ratio_mu` with the same expression written inline.
+    Two expressions of one clause is exactly how they drift, so the equality is
+    pinned across the whole temperature range rather than trusted.
+    """
+    from truss_analysis.material.steel_eurocode import specific_heat, unit_mass
+
+    material = insulation_material("gypsum_board")
+    thickness, section_factor = 0.02, 200.0
+    rho_a = float(unit_mass())
+    for theta in (20.0, 100.0, 400.0, 735.0, 900.0, 1200.0):
+        inline = (
+            float(material.volumetric_heat_capacity)
+            / (float(specific_heat(theta)) * rho_a)
+            * thickness
+            * section_factor
+        )
+        assert inline == pytest.approx(
+            capacity_ratio_mu(material, thickness, section_factor, theta), rel=1e-15
+        )
+
+
+def test_hoisting_did_not_change_the_answer() -> None:
+    """A performance change that moves the physics is not a performance change."""
+    result = protected_steel_temperature(
+        60.0, 200.0, insulation_material("gypsum_board"), 0.02
+    )
+    # 538.330342435918 degC, the value this configuration produced before the
+    # redundant lookups were hoisted out of the recursion.
+    assert result.theta_final == pytest.approx(538.330342435918, rel=1e-12)
+
+
+def test_max_heating_rate_is_measured_on_the_integration_grid() -> None:
+    """Downsampling must not silently understate the peak rate.
+
+    Measured on a 30-minute ISO 834 exposure at ``A_m/V = 200``: the peak occurs
+    in the first minute, where the curve is steepest, and 12 output points give
+    1.0821 degC/s against the true 1.0966 -- a 1.3% understatement from a
+    finite difference across widened intervals.
+    """
+    full = protected_steel_temperature(
+        30.0, 200.0, insulation_material("gypsum_board"), 0.02
+    )
+    coarse = protected_steel_temperature(
+        30.0, 200.0, insulation_material("gypsum_board"), 0.02, n_output=12
+    )
+    naive = float(np.max(np.diff(coarse.theta_steel) / np.diff(coarse.time_s)))
+
+    assert coarse.max_heating_rate() == pytest.approx(full.max_heating_rate())
+    assert naive < coarse.max_heating_rate(), "the naive rate must be the low one"
+    assert naive == pytest.approx(coarse.max_heating_rate(), rel=0.05)
+
+
+def test_error_estimate_separates_the_two_integrators() -> None:
+    """The complaint this answers: RK4 and explicit Euler are not comparable.
+
+    EN 1993-1-2 4.2.2.2 states an ODE and earns a fourth-order scheme; 4.2.5.2
+    states a recursion with a clip and a step ceiling, and reproducing the code's
+    answer means reproducing its first-order recursion.  Both choices are right,
+    but a model mixing protected and unprotected members then carries two
+    numerical errors orders of magnitude apart, which was previously invisible.
+    """
+    from truss_analysis.thermal.fire_curve import steel_temperature
+
+    material = insulation_material("gypsum_board")
+    euler = protected_steel_temperature(
+        60.0, 200.0, material, 0.02, estimate_error=True
+    )
+    rk4 = steel_temperature(30.0, 200.0, estimate_error=True)
+
+    assert euler.step_error_estimate is not None
+    assert rk4.step_error_estimate is not None
+    # measured: about 0.71 degC for the clause's 30 s Euler step, 4.3e-6 degC
+    # for RK4 at 5 s -- five orders of magnitude apart
+    assert euler.step_error_estimate > 0.1
+    assert rk4.step_error_estimate < 1e-3
+    assert euler.step_error_estimate > 100.0 * rk4.step_error_estimate
+
+
+def test_error_estimate_is_off_by_default_and_bounds_the_real_error() -> None:
+    """The estimate must actually bound the error, not merely be reported."""
+    material = insulation_material("gypsum_board")
+    plain = protected_steel_temperature(60.0, 200.0, material, 0.02)
+    assert plain.step_error_estimate is None
+
+    measured = protected_steel_temperature(
+        60.0, 200.0, material, 0.02, estimate_error=True
+    )
+    converged = protected_steel_temperature(60.0, 200.0, material, 0.02, max_step_s=1.0)
+    real_error = abs(measured.theta_final - converged.theta_final)
+
+    assert measured.step_error_estimate is not None
+    assert measured.step_error_estimate >= real_error
+
+
+#: A severe industrial exposure reaching ~1400 degC.  ISO 834 cannot be used
+#: for this test: its gas temperature asymptotes near 1193 degC, so the steel
+#: behind it never passes the material model's 1200 degC ceiling no matter how
+#: long the exposure runs -- the ceiling is only reachable with a hotter curve.
+_SEVERE_CURVE = "lambda t_min: 20.0 + 1380.0 * (1.0 - math.exp(-t_min / 10.0))"
+
+
+def _severe(t_min):
+    return 20.0 + 1380.0 * (1.0 - math.exp(-t_min / 10.0))
+
+
+def test_exceeding_the_material_model_ceiling_warns_and_is_recorded() -> None:
+    """Table 3.1 clamps above 1200 degC; a clamp must not be silent.
+
+    A thin member in a severe exposure passes the ceiling and the accessor
+    returns the 1200 degC row, so the history looks ordinary while its upper end
+    is an extrapolation of the last tabulated value rather than a code-compliant
+    property.
+    """
+    from truss_analysis.exceptions import SteelTemperatureRangeWarning
+    from truss_analysis.thermal.fire_curve import steel_temperature
+
+    with pytest.warns(SteelTemperatureRangeWarning, match="1200"):
+        result = steel_temperature(120.0, 250.0, fire_curve=_severe)
+    assert result.out_of_range is not None
+    assert result.out_of_range[1] > 1200.0
+
+    # the protected solver is held to the same standard
+    with pytest.warns(SteelTemperatureRangeWarning, match="1200"):
+        protected = protected_steel_temperature(
+            180.0,
+            300.0,
+            insulation_material("gypsum_board"),
+            0.005,
+            fire_curve=_severe,
+        )
+    assert protected.out_of_range is not None
+
+
+def test_scalar_only_fire_curve_works_in_the_unprotected_solver_too() -> None:
+    """Regression for a pre-existing crash, not just the protected path.
+
+    ``steel_temperature`` built its gas-temperature history with an
+    unconditional array call while its RK4 stages used scalar calls, so a
+    scalar-only curve -- the declared ``FloatOrArray`` signature, and the
+    natural way to write a bespoke exposure -- raised ``TypeError`` at the end
+    of an otherwise successful integration.  Verified present on the baseline
+    commit before this change.
+    """
+    from truss_analysis.exceptions import SteelTemperatureRangeWarning
+    from truss_analysis.thermal.fire_curve import steel_temperature
+
+    # the severe curve pushes the steel past the material model's ceiling, so
+    # the range warning is expected here and is asserted separately
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SteelTemperatureRangeWarning)
+        result = steel_temperature(30.0, 200.0, fire_curve=_severe)
+    assert np.isfinite(result.theta_steel).all()
+    assert result.theta_gas.shape == result.time_s.shape
+
+
+def test_a_normal_fire_does_not_warn_about_the_material_ceiling() -> None:
+    """The warning must be specific to exceeding the range, not to heating."""
+    import warnings as _warnings
+
+    from truss_analysis.exceptions import SteelTemperatureRangeWarning
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("error", SteelTemperatureRangeWarning)
+        result = protected_steel_temperature(
+            60.0, 200.0, insulation_material("gypsum_board"), 0.02
+        )
+    assert result.out_of_range is None
+
+
+def test_parametric_fire_range_warning_has_its_own_category() -> None:
+    """It named a different warning class in its own message.
+
+    The previous text read "LumpedCapacityWarning-adjacent scope note" and was
+    raised as a bare ``UserWarning``: a caller filtering on category could not
+    catch it, and a caller reading it was pointed at the lumped-capacitance
+    *member* model when the finding is about the *gas curve*.
+    """
+    from truss_analysis.exceptions import ParametricFireRangeWarning
+    from truss_analysis.thermal.fire_curve import (
+        Q_TD_RANGE_OF_VALIDITY,
+        ParametricFire,
+    )
+
+    lo, hi = Q_TD_RANGE_OF_VALIDITY
+    with pytest.warns(ParametricFireRangeWarning, match="range of validity"):
+        ParametricFire(opening_factor=0.04, q_td=hi * 5.0, b_value=1160.0)
+    # inside the range it stays quiet
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ParametricFireRangeWarning)
+        ParametricFire(opening_factor=0.04, q_td=0.5 * (lo + hi), b_value=1160.0)

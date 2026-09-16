@@ -34,6 +34,7 @@ Notation notes (verified against the printed standard):
 from __future__ import annotations
 
 import json
+import warnings
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,7 @@ from numpy.typing import NDArray
 
 __all__ = [
     "alpha",
+    "check_material_model_range",
     "effective_alpha",
     "eps_p",
     "eps_t",
@@ -52,6 +54,7 @@ __all__ = [
     "k_p",
     "k_s",
     "k_y",
+    "material_model_range",
     "poisson_ratio",
     "specific_heat",
     "stress_strain",
@@ -91,6 +94,88 @@ def table_temperatures() -> NDArray[np.float64]:
 
 def _is_scalar(value: FloatOrArray) -> bool:
     return np.ndim(value) == 0
+
+
+def material_model_range() -> tuple[float, float]:
+    """Temperature range [degC] over which the material model is tabulated.
+
+    Read from the shipped Table 3.1 artefact rather than hardcoded, so the
+    range this function reports and the range :func:`_clamped_theta` clamps to
+    cannot drift apart: both come from ``table_temperatures()``.
+
+    Returns
+    -------
+    tuple[float, float]
+        ``(theta_min, theta_max)``, i.e. ``(20.0, 1200.0)`` for the shipped
+        EN 1993-1-2:2005 artefact.
+    """
+    temps = table_temperatures()
+    return float(temps[0]), float(temps[-1])
+
+
+def check_material_model_range(
+    theta: FloatOrArray,
+    *,
+    warn: bool = True,
+    context: str = "steel temperature",
+) -> tuple[float, float] | None:
+    """Report how far ``theta`` leaves the material model's tabulated range.
+
+    The accessors clamp silently, which is correct for an interpolator and
+    unacceptable for a safety calculation: a member that reaches 1300 degC gets
+    the 1200 degC properties and an answer that looks ordinary.  This function
+    is the single place that turns the clamp into a statement.
+
+    Parameters
+    ----------
+    theta : float or numpy.ndarray
+        Temperature or temperatures [degC] to check.
+    warn : bool, default True
+        Issue :class:`~truss_analysis.exceptions.SteelTemperatureRangeWarning`
+        when the range is exceeded.  Set ``False`` to query without emitting.
+    context : str, default "steel temperature"
+        Subject of the warning message, so the reader knows which quantity left
+        the range.
+
+    Returns
+    -------
+    tuple[float, float] or None
+        ``(min(theta), max(theta))`` when the range was exceeded, else ``None``.
+        Returning the observed extremes rather than a boolean is deliberate: the
+        message that matters says by how much.
+    """
+    arr = np.atleast_1d(np.asarray(theta, dtype=float))
+    if arr.size == 0:
+        return None
+    lo, hi = material_model_range()
+    observed_min = float(np.min(arr))
+    observed_max = float(np.max(arr))
+    if observed_min >= lo and observed_max <= hi:
+        return None
+    if warn:
+        from ..exceptions import SteelTemperatureRangeWarning
+
+        parts = []
+        if observed_max > hi:
+            parts.append(
+                f"reaches {observed_max:.1f} degC, {observed_max - hi:.1f} degC "
+                f"above the {hi:.0f} degC ceiling"
+            )
+        if observed_min < lo:
+            parts.append(
+                f"reaches {observed_min:.1f} degC, {lo - observed_min:.1f} degC "
+                f"below the {lo:.0f} degC floor"
+            )
+        warnings.warn(
+            f"{context} {' and '.join(parts)}. EN 1993-1-2 Table 3.1 and "
+            "clause 3.4 tabulate carbon steel over "
+            f"[{lo:.0f}, {hi:.0f}] degC and the accessors clamp outside it, so "
+            "values beyond that point are extrapolations of the last tabulated "
+            "row, not code-compliant properties.",
+            SteelTemperatureRangeWarning,
+            stacklevel=3,
+        )
+    return observed_min, observed_max
 
 
 def _clamped_theta(theta: FloatOrArray) -> NDArray[np.float64]:

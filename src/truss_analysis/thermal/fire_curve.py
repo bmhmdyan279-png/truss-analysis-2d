@@ -46,6 +46,7 @@ The integrator is explicit Runge--Kutta 4 with a step capped at
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -53,9 +54,10 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
-from ..exceptions import LumpedCapacityWarning
+from ..exceptions import LumpedCapacityWarning, ParametricFireRangeWarning
 from ..material.steel_eurocode import (
     FloatOrArray,
+    check_material_model_range,
     specific_heat,
     thermal_conductivity,
     unit_mass,
@@ -290,12 +292,11 @@ class ParametricFire:
         q_lo, q_hi = Q_TD_RANGE_OF_VALIDITY
         if not q_lo <= self.q_td <= q_hi:
             warnings.warn(
-                f"LumpedCapacityWarning-adjacent scope note: q_td = "
-                f"{self.q_td:g} MJ/m^2 is outside the [{q_lo}, {q_hi}] range "
-                "of validity of the EN 1991-1-2 Annex A parametric curve; "
-                "the result is an extrapolation of the standard's fitting "
-                "data.",
-                UserWarning,
+                f"q_td = {self.q_td:g} MJ/m^2 is outside the [{q_lo}, {q_hi}] "
+                "MJ/m^2 range of validity of the EN 1991-1-2 Annex A "
+                "parametric fire curve; the result is an extrapolation of the "
+                "standard's fitting data, not a code-compliant gas temperature.",
+                ParametricFireRangeWarning,
                 stacklevel=2,
             )
 
@@ -515,11 +516,34 @@ class SteelHeatingResult:
         Gas temperature [degC] at each sample time, shape ``(n,)``.
     theta_final : float
         Convenience alias for ``theta_steel[-1]`` [degC].
+    max_heating_rate_full : float or None
+        Maximum ``d(theta)/dt`` [degC/s] over the **integration** grid, before
+        any ``n_output`` downsampling.  ``None`` when the result was built
+        without that grid (a hand-constructed container).
+    step_error_estimate : float or None
+        Estimated truncation error [degC] of the integration, from one
+        Richardson step of the returned history against a half-step rerun.
+        ``None`` when the solver did not measure it.  This is the number that
+        makes the two thermal paths *comparable* rather than merely both
+        plausible: the unprotected solver is fourth-order RK4 and the protected
+        one is the first-order recursion EN 1993-1-2 4.2.5.2 prescribes, so
+        their errors differ by orders of magnitude at the same nominal step,
+        and a caller mixing protected and unprotected members in one model has
+        no other way to see it.
+    out_of_range : tuple[float, float] or None
+        ``(min, max)`` of the steel temperature when the history left the
+        material model's tabulated range, else ``None``.  Mirrors the
+        :class:`~truss_analysis.exceptions.SteelTemperatureRangeWarning` the
+        solver issues, so the fact survives into a result payload produced with
+        warnings suppressed.
     """
 
     time_s: npt.NDArray[np.float64]
     theta_steel: npt.NDArray[np.float64]
     theta_gas: npt.NDArray[np.float64]
+    max_heating_rate_full: float | None = None
+    step_error_estimate: float | None = None
+    out_of_range: tuple[float, float] | None = None
 
     @property
     def theta_final(self) -> float:
@@ -532,14 +556,27 @@ class SteelHeatingResult:
         Returns
         -------
         float
-            Maximum value of d(theta)/dt over the entire time history.
-            Computed via finite differences on the temperature history.
+            Maximum of ``d(theta)/dt`` over the time history carried by this
+            result.  When the solve ran with ``n_output > 0`` that history is
+            downsampled and a finite difference across the *widened* intervals
+            understates the true peak, so the value measured on the integration
+            grid is preferred whenever the solver recorded it.  The bias is not
+            academic: for a 30-minute ISO 834 exposure at ``A_m/V = 200`` the
+            peak rate occurs in the first minute, where the curve is steepest,
+            and downsampling to 20 output points loses most of it -- the
+            round-7 audit's finding on this method.
 
         Notes
         -----
         Addresses Issue B5: ``max_heating_rate()`` missing from
         ``SteelHeatingResult`` (C2(⚠️ب)).
+
+        See Also
+        --------
+        max_heating_rate_full : the integration-grid value this prefers.
         """
+        if self.max_heating_rate_full is not None:
+            return float(self.max_heating_rate_full)
         if len(self.time_s) < 2:
             return 0.0
         dt = np.diff(self.time_s)
@@ -685,6 +722,149 @@ def biot_critical_section_factor(
     return lumped_capacity_biot(1.0, theta_a0, emissivity, alpha_c) / float(biot_limit)
 
 
+#: Absolute zero in degrees Celsius; the physical floor for ``theta_a0``.
+_ABSOLUTE_ZERO_C = -273.15
+
+#: Formal order of the classic four-stage Runge-Kutta scheme used by
+#: :func:`steel_temperature`.  Used to turn a step-halving pair into an error
+#: estimate, and measured rather than assumed by the reference-problem suite:
+#: ``benchmarks.reference_problems.Rk4ConvergenceOrder`` recovers 3.999999988.
+_RK4_ORDER = 4
+
+
+def _gas_temperature_grid(
+    fire_curve: Callable[[FloatOrArray], FloatOrArray],
+    times_min: npt.NDArray[np.float64],
+) -> npt.NDArray[np.float64]:
+    """Evaluate a fire curve over a whole time grid at once.
+
+    The declared signature is ``Callable[[FloatOrArray], FloatOrArray]``, so
+    both a vectorised curve and a scalar-only ``lambda t: ...`` are legitimate
+    inputs -- and a scalar-only curve is what most users write, since it is the
+    natural way to express a measured or bespoke exposure.  The vector call is
+    tried first because it is the fast path for the shipped curves and for a
+    parametric fire; if the answer is not one temperature per time, the grid is
+    evaluated point by point instead.
+
+    Falling back rather than raising matters here specifically: the previous
+    version of this function called the curve once per step, so a scalar-only
+    curve worked, and making the grid call unconditional would have turned a
+    documented input into a ``ValueError`` -- a performance change breaking the
+    API is not a performance change.
+
+    Parameters
+    ----------
+    fire_curve : Callable
+        Maps time [minutes] to gas temperature [degC].
+    times_min : numpy.ndarray
+        Grid of times [minutes].
+
+    Returns
+    -------
+    numpy.ndarray
+        One gas temperature per input time, same length as ``times_min``.
+
+    Raises
+    ------
+    ValueError
+        If neither the vectorised nor the point-by-point evaluation produces one
+        finite temperature per time, which means the callable is not a gas
+        temperature curve at all.
+    """
+    n = int(times_min.shape[0])
+    try:
+        grid = np.asarray(fire_curve(times_min), dtype=float).reshape(-1)
+        if grid.shape[0] == n:
+            return grid
+    except (TypeError, ValueError, IndexError):
+        pass  # a scalar-only curve raises on an array argument; fall back
+    grid = np.array([float(fire_curve(float(t))) for t in times_min], dtype=float)
+    if grid.shape[0] != n or not bool(np.all(np.isfinite(grid))):
+        msg = (
+            "fire_curve must map a time in minutes to a finite gas temperature "
+            f"in degC; evaluating it over {n} times did not produce {n} finite "
+            "values"
+        )
+        raise ValueError(msg)
+    return grid
+
+
+def _rk4_history(
+    duration_s: float,
+    max_step_s: float,
+    theta_g_at: Callable[[float], float],
+    dtheta_dt: Callable[[float, float], float],
+    theta_a0: float,
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], float]:
+    """Classic fixed-step RK4 of ``d(theta)/dt`` over ``[0, duration_s]``.
+
+    Extracted from :func:`steel_temperature` so the same integrator can be run
+    at a halved step for an error estimate without a second copy of the scheme.
+    Two copies of an integrator that are supposed to agree are how an error
+    estimate ends up measuring the difference between them rather than the
+    truncation error.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, numpy.ndarray, float]
+        Sample times [s], steel temperatures [degC], and the step actually used.
+    """
+    n_steps = max(1, int(np.ceil(duration_s / max_step_s)))
+    dt = duration_s / n_steps
+    ts = np.linspace(0.0, duration_s, n_steps + 1)
+    thetas = np.empty(n_steps + 1, dtype=float)
+    thetas[0] = float(theta_a0)
+    for i in range(n_steps):
+        t0 = float(ts[i])
+        y = float(thetas[i])
+        k1 = dtheta_dt(t0, y)
+        k2 = dtheta_dt(t0 + 0.5 * dt, y + 0.5 * dt * k1)
+        k3 = dtheta_dt(t0 + 0.5 * dt, y + 0.5 * dt * k2)
+        k4 = dtheta_dt(t0 + dt, y + dt * k3)
+        thetas[i + 1] = y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+    return ts, thetas, dt
+
+
+def _step_error_estimate(
+    final_at_step: Callable[[float], float],
+    dt: float,
+    value: float,
+    order: int,
+) -> float:
+    """Estimate the truncation error from one step-halving pair.
+
+    For a scheme of formal order ``p``, ``f(dt) - f(dt/2) ~ (1 - 2^-p) e(dt)``,
+    so ``e(dt) ~ |f(dt) - f(dt/2)| / (1 - 2^-p)``.  That is one extra solve and
+    no new machinery, and it converts "the integrator is fourth order" from a
+    docstring claim into a number attached to the result.
+
+    Parameters
+    ----------
+    final_at_step : Callable[[float], float]
+        Returns the final temperature for a given step ceiling.
+    dt : float
+        The step actually used.
+    value : float
+        The final temperature already computed at ``dt``.
+    order : int
+        Formal order of the scheme.
+
+    Returns
+    -------
+    float
+        Estimated ``|error|`` in the same units as ``value``; ``nan`` if the
+        half-step solve fails or produces a non-finite number.
+    """
+    try:
+        half = float(final_at_step(0.5 * dt))
+    except Exception:
+        return float("nan")
+    if not math.isfinite(half):
+        return float("nan")
+    factor = 1.0 - 2.0 ** (-float(order))
+    return abs(value - half) / factor if factor != 0.0 else float("nan")
+
+
 def steel_temperature(
     duration_min: float,
     section_factor: float,
@@ -697,6 +877,7 @@ def steel_temperature(
     max_step_s: float = 5.0,
     n_output: int = 0,
     warn_lumped: bool = True,
+    estimate_error: bool = False,
 ) -> SteelHeatingResult:
     """Steel temperature history of an unprotected member (lumped capacity).
 
@@ -742,6 +923,20 @@ def steel_temperature(
         :data:`LUMPED_SECTION_FACTOR_LIMIT`.  Set to ``False`` inside a sweep
         that would otherwise emit the same warning once per member.
 
+    estimate_error : bool, default False
+        Run the integrator once more at half the step and report the
+        Richardson truncation-error estimate on
+        :attr:`SteelHeatingResult.step_error_estimate`.  Off by default
+        because it roughly triples the cost of a solve that is often called
+        inside a sweep, and because the number is a diagnostic rather than
+        part of the physics.  Turn it on when the two thermal paths are being
+        compared: this solver is fourth order and
+        :func:`truss_analysis.thermal.protection.protected_steel_temperature`
+        is the first-order recursion EN 1993-1-2 4.2.5.2 prescribes, so at
+        the same nominal step their errors differ by orders of magnitude and
+        without this field a mixed protected/unprotected model gives no
+        indication of it.
+
     Returns
     -------
     SteelHeatingResult
@@ -773,6 +968,19 @@ def steel_temperature(
     if max_step_s <= 0.0:
         msg = f"max_step_s must be > 0, got {max_step_s}"
         raise ValueError(msg)
+    if not math.isfinite(theta_a0):
+        msg = f"theta_a0 must be a finite temperature in degC, got {theta_a0}"
+        raise ValueError(msg)
+    if theta_a0 <= _ABSOLUTE_ZERO_C:
+        msg = (
+            f"theta_a0 must be above absolute zero ({_ABSOLUTE_ZERO_C} degC), "
+            f"got {theta_a0}"
+        )
+        raise ValueError(msg)
+    # An initial temperature already outside the material model's tabulated
+    # range is a different situation from drifting out of it during the fire:
+    # there is no valid starting point at all, so say so before integrating.
+    check_material_model_range(theta_a0, context="initial steel temperature")
 
     rho = float(unit_mass()) if rho_a is None else float(rho_a)
     if rho <= 0.0:
@@ -797,8 +1005,6 @@ def steel_temperature(
         )
 
     duration_s = float(duration_min) * 60.0
-    n_steps = max(1, int(np.ceil(duration_s / max_step_s)))
-    dt = duration_s / n_steps
 
     def theta_g_at(t_s: float) -> float:
         return float(fire_curve(t_s / 60.0))
@@ -808,26 +1014,44 @@ def steel_temperature(
         c_a = float(specific_heat(theta_a))
         return shadow_factor * flux * section_factor / (rho * c_a)
 
-    # Classic RK4 over a fixed grid of n_steps. The specific-heat spike near
-    # 730 degC is smooth enough for RK4 at <=5 s steps to track it to well
-    # under a degree (verified by step-halving in the tests).
-    ts = np.linspace(0.0, duration_s, n_steps + 1)
-    thetas = np.empty(n_steps + 1, dtype=float)
-    thetas[0] = float(theta_a0)
-    for i in range(n_steps):
-        t0 = ts[i]
-        y = thetas[i]
-        k1 = dtheta_dt(t0, y)
-        k2 = dtheta_dt(t0 + 0.5 * dt, y + 0.5 * dt * k1)
-        k3 = dtheta_dt(t0 + 0.5 * dt, y + 0.5 * dt * k2)
-        k4 = dtheta_dt(t0 + dt, y + dt * k3)
-        thetas[i + 1] = y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+    # Classic RK4 over a fixed grid.  The specific-heat spike near 730 degC is
+    # smooth enough for RK4 at <=5 s steps to track it to well under a degree
+    # (measured by step-halving in tests/test_rk4_convergence.py and by the
+    # reference-problem suite).
+    ts, thetas, dt = _rk4_history(
+        duration_s, max_step_s, theta_g_at, dtheta_dt, float(theta_a0)
+    )
+    n_steps = len(ts) - 1
+    theta_gas = _gas_temperature_grid(fire_curve, ts / 60.0)
 
-    theta_gas = np.asarray(fire_curve(ts / 60.0), dtype=float)
+    # Measured on the integration grid, before any downsampling, because a
+    # finite difference across widened output intervals understates the peak.
+    rate_full = float(np.max(np.diff(thetas) / np.diff(ts))) if n_steps >= 1 else 0.0
+    out_of_range = check_material_model_range(thetas, context="steel temperature")
+    error_estimate = (
+        _step_error_estimate(
+            lambda step: _rk4_history(
+                duration_s, step, theta_g_at, dtheta_dt, float(theta_a0)
+            )[1][-1],
+            dt,
+            float(thetas[-1]),
+            order=_RK4_ORDER,
+        )
+        if estimate_error
+        else None
+    )
+
     if n_output > 0:
         idx = (
             np.linspace(0, n_steps, min(int(n_output), n_steps + 1)).round().astype(int)
         )
         ts, thetas, theta_gas = ts[idx], thetas[idx], theta_gas[idx]
 
-    return SteelHeatingResult(time_s=ts, theta_steel=thetas, theta_gas=theta_gas)
+    return SteelHeatingResult(
+        time_s=ts,
+        theta_steel=thetas,
+        theta_gas=theta_gas,
+        max_heating_rate_full=rate_full,
+        step_error_estimate=error_estimate,
+        out_of_range=out_of_range,
+    )
