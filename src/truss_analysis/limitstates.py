@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 import numpy as np
@@ -39,7 +39,12 @@ from .criticality.engine import (
     total_load_vector,
 )
 from .criticality.scenarios import T_AMBIENT
-from .exceptions import BucklingCheckWarning, LegacyBucklingModelWarning
+from .exceptions import (
+    BucklingCheckWarning,
+    LegacyBucklingModelWarning,
+    SystemInstabilityWarning,
+)
+from .material.steel_eurocode import effective_alpha
 from .material.steel_eurocode import k_E as eurocode_k_E
 from .material.steel_eurocode import k_y as eurocode_k_y
 from .model import Element, Node
@@ -203,6 +208,32 @@ class MemberLimitState:
         ``YIELD`` when ``lambda_bar`` is at or below
         :data:`~truss_analysis.sections.LAMBDA_BAR_BUCKLING_LIMIT` (0.2), so
         buckling need not be considered; ``BUCKLING`` otherwise.
+    dcr : float
+        Member demand-capacity ratio ``|axial_force| / capacity``.  This
+        identity is an **invariant of the class**: no code path mutates
+        ``dcr`` after construction, so a caller can always reconstruct it
+        from the two fields beside it and check that the payload is
+        self-consistent.  System-level instability is reported separately in
+        :attr:`system_dcr` rather than folded in here.
+    lambda_cr : float or None
+        Linearised system bifurcation load factor, or ``None`` when
+        :func:`dcr_field` was called with ``check_system_stability=False``.
+        The same value on every member of the result -- it is a property of
+        the system, carried per member so that it travels inside the payload
+        even when warnings are filtered or suppressed.  ``inf`` means no
+        bifurcation exists under load amplification.
+    system_stability_factor : float
+        The factor :attr:`system_dcr` amplifies :attr:`dcr` by.  ``1.0`` when
+        no adjustment applies (check disabled, ``lambda_cr > 1``, or a tension
+        member); ``1 / lambda_cr`` for a compression member when
+        ``0 < lambda_cr <= 1``; ``inf`` for every member when the base state is
+        already a mechanism.  Exposed so the amplification is inspectable
+        rather than baked invisibly into a ratio.
+    system_dcr : float or None
+        ``dcr * system_stability_factor`` -- the demand-capacity ratio read
+        against *system* stability rather than against the member's own
+        cross-section.  ``None`` when ``check_system_stability=False``, so an
+        absent check is reported as absent instead of as a factor of one.
     """
 
     member_id: str
@@ -218,6 +249,9 @@ class MemberLimitState:
     lambda_bar: float | None = None
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI
     buckling_curve: str = DEFAULT_BUCKLING_CURVE
+    lambda_cr: float | None = None
+    system_stability_factor: float = 1.0
+    system_dcr: float | None = None
 
 
 @dataclass(frozen=True)
@@ -279,6 +313,8 @@ def member_axial_forces(
     elements: Sequence[Element],
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float],
+    *,
+    use_effective_alpha: bool = False,
 ) -> dict[str, float]:
     """Member axial forces [N] (tension positive) at the given temperatures.
 
@@ -291,8 +327,25 @@ def member_axial_forces(
     the demand the DCR must see.  Elements without ``alpha`` /
     ``delta_L_free`` reduce exactly to the previous stiffness-degradation-only
     result.
+
+    Parameters
+    ----------
+    use_effective_alpha : bool, default False
+        Build ``dL_pre`` from the EN 1993-1-2 secant coefficient
+        :func:`~truss_analysis.material.steel_eurocode.effective_alpha` at each
+        member's own temperature instead of its constant ``alpha``; forwarded
+        to :func:`~truss_analysis.criticality.engine.prestress_lengths`, which
+        documents the measured size of the gap (a restrained member's force is
+        low by 17.1% at 600 degC on a constant ``alpha = 1.2e-5``).
+
+        This is the entry point of the fire demand chain, so the flag has to be
+        accepted *here*: :class:`~truss_analysis.exceptions.ConstantAlphaWarning`
+        tells the caller to pass it, and a warning that names a parameter no
+        reachable function accepts is a promise the library cannot keep.
     """
-    setup = build_engine(nodes, elements, loads, temps)
+    setup = build_engine(
+        nodes, elements, loads, temps, use_effective_alpha=use_effective_alpha
+    )
     u = base_displacement(setup, total_load_vector(nodes, loads, setup))
     forces = member_forces(setup, u)
     return {eid: float(forces[i]) for i, eid in enumerate(setup.ids)}
@@ -323,6 +376,30 @@ class UniformForceScan:
     the difference between ``O(grid * n^3)`` and ``O(n^3)`` on the hot paths
     of the retrofit triage.
 
+    The EN 1993-1-2 secant coefficient does not break the closed form
+    ------------------------------------------------------------------
+    With ``use_effective_alpha=True`` the imposed strain follows
+    ``eps_th(T)`` instead of a straight line, so member ``e``'s coefficient
+    becomes ``alpha_eff(T) m_e`` where ``alpha_eff(T)`` is the *single* secant
+    value at the uniform temperature and ``m_e = 1`` when ``alpha_e != 0`` and
+    ``0`` otherwise (a member modelled as fixed in length stays fixed in
+    length -- the same rule :func:`~truss_analysis.criticality.engine.prestress_lengths`
+    applies).  The thermal right-hand side is then still a scalar multiple of
+    one temperature-independent vector:
+
+    .. code-block:: text
+
+        u(T)   = z_m / k_E(T) + alpha_eff(T) (T - T_0) z_unit + z_free
+        N_e(T) = k_E(T) k0_e ( b_e.u(T)
+                               - alpha_eff(T) (T - T_0) m_e L_e - dL_free,e )
+
+    with ``z_unit = K_0^-1 B^T (k0 m L)``.  So the exactness and the
+    ``O(n^3)``-once cost both survive; what changes is which precomputed
+    vector the scalar multiplies.  ``z_unit`` is built unconditionally -- one
+    extra back-substitution against a factorisation that already exists, which
+    is noise next to the factorisation itself -- so a scan carries both bases
+    and :attr:`use_effective_alpha` records which one :meth:`forces_at` reads.
+
     Scope limit
     -----------
     Exact solver for the **special case of a uniform scalar stiffness
@@ -350,6 +427,16 @@ class UniformForceScan:
         ``alpha_e * L_e`` [m/degC], ``(m,)``.
     delta_l_free : np.ndarray
         Free length change ``delta_L_free,e`` [m], ``(m,)``.
+    el_unit : np.ndarray
+        ``b_e . z_unit`` — elongation per unit ``alpha_eff(T) (T - T_0)`` from
+        restrained expansion, ``(m,)``.  The secant-coefficient counterpart of
+        :attr:`el_alpha`.
+    unit_lengths : np.ndarray
+        ``m_e * L_e`` [m], ``(m,)`` — member length where the member expands
+        and zero where it was modelled as fixed in length.
+    use_effective_alpha : bool
+        Which basis :meth:`forces_at` reads.  Recorded on the instance so a
+        scan cannot be mistaken for the other mode after construction.
     """
 
     ids: tuple[str, ...]
@@ -359,6 +446,9 @@ class UniformForceScan:
     el_free: np.ndarray
     alpha_lengths: np.ndarray
     delta_l_free: np.ndarray
+    el_unit: np.ndarray
+    unit_lengths: np.ndarray
+    use_effective_alpha: bool = False
 
     @classmethod
     def build(
@@ -366,8 +456,21 @@ class UniformForceScan:
         nodes: Sequence[Node],
         elements: Sequence[Element],
         loads: Mapping[str, Mapping[str, float]],
+        *,
+        use_effective_alpha: bool = False,
     ) -> UniformForceScan:
-        """Factorise the ambient state once and prepare the three solves."""
+        """Factorise the ambient state once and prepare the solves.
+
+        Parameters
+        ----------
+        use_effective_alpha : bool, default False
+            Read the thermal term from the secant-coefficient basis
+            (:attr:`el_unit` / :attr:`unit_lengths`) rather than the constant
+            ``alpha`` basis (:attr:`el_alpha` / :attr:`alpha_lengths`).  Both
+            bases are always computed; the flag only selects which one
+            :meth:`forces_at` uses, so the result is bit-identical to calling
+            :func:`member_axial_forces` with the same flag at each temperature.
+        """
         temps0 = {e.id: T_AMBIENT for e in elements}
         setup = build_engine(nodes, elements, loads, temps0)
         # At T_AMBIENT the Eurocode reduction is exactly 1, so k_axial is the
@@ -390,9 +493,15 @@ class UniformForceScan:
         )
         alpha_arr = np.array([e.alpha for e in elements], dtype=float)
         alpha_lengths = alpha_arr * lengths
+        # m_e = 1 where the member expands, 0 where it was modelled as fixed in
+        # length.  prestress_lengths applies exactly this rule, so the scan and
+        # the per-point engine cannot disagree about which members expand.
+        unit_lengths = np.where(alpha_arr != 0.0, lengths, 0.0)
 
         q_alpha = setup.b_free.T @ (setup.k_axial * alpha_lengths)
         el_alpha = setup.b_free @ base_displacement(setup, q_alpha)
+        q_unit = setup.b_free.T @ (setup.k_axial * unit_lengths)
+        el_unit = setup.b_free @ base_displacement(setup, q_unit)
         q_free = setup.b_free.T @ (setup.k_axial * setup.dl_pre)
         el_free = setup.b_free @ base_displacement(setup, q_free)
         return cls(
@@ -403,6 +512,9 @@ class UniformForceScan:
             el_free=el_free,
             alpha_lengths=alpha_lengths,
             delta_l_free=setup.dl_pre.copy(),
+            el_unit=el_unit,
+            unit_lengths=unit_lengths,
+            use_effective_alpha=use_effective_alpha,
         )
 
     def forces_at(self, temperature: float) -> np.ndarray:
@@ -423,9 +535,19 @@ class UniformForceScan:
             )
             raise MechanismError(msg)
         dt = float(temperature) - T_AMBIENT
-        # b.u(T) = el_mech / s + dt * el_alpha + el_free
-        elong = self.el_mech / s + dt * self.el_alpha + self.el_free
-        dl_pre = self.alpha_lengths * dt + self.delta_l_free
+        if self.use_effective_alpha:
+            # alpha_eff(T) * (T - T_0) is exactly eps_th(T) - eps_th(T_0), the
+            # standard's own elongation, and it multiplies the unit-alpha basis.
+            thermal = float(effective_alpha(temperature, T_AMBIENT)) * dt
+            coef_lengths = self.unit_lengths
+            el_th = self.el_unit
+        else:
+            thermal = dt
+            coef_lengths = self.alpha_lengths
+            el_th = self.el_alpha
+        # b.u(T) = el_mech / s + thermal * el_th + el_free
+        elong = self.el_mech / s + thermal * el_th + self.el_free
+        dl_pre = coef_lengths * thermal + self.delta_l_free
         forces: np.ndarray = np.asarray(s * self.k0 * (elong - dl_pre), dtype=float)
         return forces
 
@@ -609,7 +731,8 @@ def dcr_field(
     f_y: float,
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
-    check_system_stability: bool = True,
+    check_system_stability: bool = False,
+    use_effective_alpha: bool = False,
 ) -> dict[str, MemberLimitState]:
     """DCR state of every member at the given member temperatures.
 
@@ -617,6 +740,26 @@ def dcr_field(
     :func:`member_axial_forces`), so a heated member of a redundant truss is
     checked against the compression it really develops, not only against the
     redistribution of the mechanical loads.
+
+    Two distinct limit states, reported in two distinct fields
+    ----------------------------------------------------------
+    A truss whose compressed chords are code-safe member by member can still
+    bifurcate as a system, and the two failures have different remedies.  They
+    are therefore kept apart rather than folded into one number:
+
+    * :attr:`MemberLimitState.dcr` is the **member** check,
+      ``|axial_force| / capacity``.  That identity holds unconditionally --
+      no code path mutates ``dcr`` after construction -- so a caller can always
+      reconstruct it from the payload and verify the result is
+      self-consistent.
+    * :attr:`MemberLimitState.system_dcr` is the same ratio read against
+      **system** stability, ``dcr * system_stability_factor``, and is ``None``
+      unless ``check_system_stability=True``.  An absent check is reported as
+      absent rather than as a factor of one.
+
+    ``lambda_cr`` and ``system_stability_factor`` are carried on every member
+    so the amplification is inspectable, and so the system verdict travels
+    inside the payload even when warnings are filtered or suppressed.
 
     Parameters
     ----------
@@ -627,52 +770,152 @@ def dcr_field(
         Compression capacity model; see :class:`BucklingModel`.
     buckling_curve : str, default "c"
         Flexural buckling curve, only used by ``EUROCODE_CHI``.
-    check_system_stability : bool, default True
-        If True, compute the linearised system buckling load factor
-        ``lambda_cr``. When ``lambda_cr < 1``, all compression members
-        receive a DCR adjustment to reflect system-level instability risk
-        (A1: connect lambda_cr to dcr_field).
+    check_system_stability : bool, default False
+        Also compute the linearised system bifurcation load factor and report
+        it in :attr:`MemberLimitState.system_dcr`.  Off by default for two
+        reasons.  It costs a full eigen-analysis -- a dense motor build, a
+        factorisation and a Lanczos sweep -- on *every* call, which inside a
+        retrofit search is paid once per candidate decision.  And it used to be
+        on by default while silently multiplying compression DCRs by
+        ``1 / lambda_cr`` through ``object.__setattr__`` on a frozen dataclass,
+        which broke the ``dcr == |N| / capacity`` invariant with no warning and
+        no field recording that it had happened.  Opt in deliberately.
+
+    use_effective_alpha : bool, default False
+        Build the imposed strain from the EN 1993-1-2 secant coefficient
+        instead of each member's constant ``alpha``; forwarded to
+        :func:`member_axial_forces`.  A fire DCR computed on a constant
+        ``alpha`` is un-conservative by the same percentage as the restrained
+        strain (17.1%% at 600 degC on ``alpha = 1.2e-5``), so this is the flag
+        that closes that gap on the demand side.
 
     Returns
     -------
     dict[str, MemberLimitState]
-        Limit state per member id. When ``check_system_stability=True`` and
-        ``lambda_cr < 1``, compression members have their DCR increased by
-        the factor ``1 / lambda_cr`` to account for system instability.
+        Limit state per member id.
+
+    Warns
+    -----
+    SystemInstabilityWarning
+        When ``check_system_stability=True`` and ``lambda_cr <= 1``, or when
+        the tangent state is already a mechanism at the applied load.  The
+        numbers are still returned; the warning states that the system, not
+        any single member, is what governs.
+
+    Notes
+    -----
+    ``lambda_cr`` is the criticality of the **linearised tangent state**, not
+    the ultimate load of the real structure.  For a shallow system the true
+    collapse is a limit point (snap-through) that the linearised factor
+    approximates from the base configuration; use
+    :func:`truss_analysis.stability.imperfection_sensitivity` to measure how
+    much of the reserve survives an imperfection.  ``1 / lambda_cr`` is
+    likewise a *demand amplifier of last resort*, not a code formula: it says
+    the applied load already exceeds the bifurcation load, so no member-level
+    ratio computed at that load level can be trusted on its own.
     """
-    forces = member_axial_forces(nodes, elements, loads, temps)
+    forces = member_axial_forces(
+        nodes, elements, loads, temps, use_effective_alpha=use_effective_alpha
+    )
     result = _limit_states_from_forces(
         nodes, elements, forces, temps, f_y, buckling_model, buckling_curve
     )
+    if not check_system_stability:
+        return result
 
-    # A1: Connect lambda_cr to dcr_field for system stability
-    if check_system_stability:
-        try:
-            # warn_shallow=False: this is a member-level code check that
-            # borrows lambda_cr for a system-stability DCR adjustment.  The
-            # shallow-geometry advisory belongs to a deliberate stability
-            # study, not to every dcr_field() call on every model shape.
-            buckling_result = linearized_buckling_load_factor(
+    collapsed = False
+    try:
+        # warn_shallow=False: the shallow-geometry advisory belongs to a
+        # deliberate stability study, not to every dcr_field() call on every
+        # model shape.  The system verdict itself is still reported below.
+        lambda_cr = float(
+            linearized_buckling_load_factor(
                 nodes, elements, loads, temps, warn_shallow=False
+            ).lambda_cr
+        )
+    except MechanismError:
+        # The tangent stiffness is not positive definite at the applied load,
+        # so there is no load factor to bifurcation to quote: the structure is
+        # already past it.  lambda_cr = 0.0 records "no reserve" in a JSON-safe
+        # way (NaN would not survive serialisation), and the collapse is
+        # system-wide -- unlike a bifurcation, which is compression-driven, a
+        # mechanism means the load cannot be carried at all, so every member
+        # is reported unbounded rather than only the compressed ones.
+        collapsed = True
+        lambda_cr = 0.0
+
+    if collapsed:
+        # No reserve at all: the structure cannot carry the applied load, so
+        # every member's system-level demand is unbounded.
+        governs = True
+        amplification = float("inf")
+    elif np.isfinite(lambda_cr) and lambda_cr <= 1.0:
+        # The applied load has reached or passed the bifurcation point.  The
+        # comparison is ``<=`` and not ``<`` on purpose: at exactly 1.0 the
+        # reserve is zero, which is a verdict worth reporting even though the
+        # amplification it implies is exactly one.  A strict ``<`` would have
+        # called a system with no reserve unremarkable.
+        governs = True
+        amplification = 1.0 / lambda_cr
+    else:
+        # ``inf`` (no bifurcation under load amplification) and anything above
+        # the applied load level both mean the member check governs.
+        governs = False
+        amplification = 1.0
+
+    if governs:
+        n_governed = (
+            len(result)
+            if collapsed
+            else sum(
+                1 for ls in result.values() if ls.compression and ls.p_cr is not None
             )
-            lambda_cr = buckling_result.lambda_cr
+        )
+        warnings.warn(
+            "dcr_field: the system, not any single member, governs. "
+            + (
+                "The tangent stiffness is already indefinite at the applied "
+                "load (MechanismError from the bifurcation solve), so the "
+                "structure cannot carry it and every member's system_dcr is "
+                "reported as inf. "
+                if collapsed
+                else f"The linearised bifurcation load factor is {lambda_cr:.4f} "
+                "<= 1, i.e. the applied load has reached or passed the "
+                f"bifurcation point; the member DCRs of the {n_governed} "
+                "compression member(s) are amplified by 1/lambda_cr = "
+                f"{amplification:.4f} in system_dcr. "
+            )
+            + "Member-level dcr is left untouched and still satisfies "
+            "dcr == |axial_force| / capacity. Note that lambda_cr is the "
+            "criticality of the linearised tangent state, not the ultimate "
+            "load of the real structure: for a shallow system the true "
+            "collapse is a snap-through limit point, and "
+            "stability.imperfection_sensitivity() measures how much of the "
+            "reserve survives an imperfection.",
+            SystemInstabilityWarning,
+            stacklevel=2,
+        )
 
-            # If lambda_cr < 1, the system is unstable at current load level
-            # Adjust DCR for compression members to reflect this
-            if lambda_cr < 1.0:
-                stability_factor = 1.0 / lambda_cr
-                for ls in result.values():
-                    if ls.compression and ls.p_cr is not None:
-                        # Scale DCR by stability factor
-                        # This ensures DCR > 1 when system is unstable
-                        object.__setattr__(ls, "dcr", ls.dcr * stability_factor)
-        except MechanismError:
-            # Base state already unstable - all compression members should fail
-            for ls in result.values():
-                if ls.compression:
-                    object.__setattr__(ls, "dcr", float("inf"))
+    def _factor(ls: MemberLimitState) -> float:
+        # A bifurcation is compression-driven, so the amplification applies to
+        # compression members only: multiplying a tie rod's DCR by
+        # 1 / lambda_cr would claim demand the physics does not put there and
+        # would push a safe tie past 1.0 for a failure mode it cannot
+        # participate in.  A *mechanism* is different in kind -- the load
+        # cannot be carried at all -- so it is system-wide.
+        if collapsed or (ls.compression and ls.p_cr is not None):
+            return amplification
+        return 1.0
 
-    return result
+    return {
+        mid: replace(
+            ls,
+            lambda_cr=lambda_cr,
+            system_stability_factor=_factor(ls),
+            system_dcr=ls.dcr * _factor(ls),
+        )
+        for mid, ls in result.items()
+    }
 
 
 def member_critical_temperature(
@@ -685,6 +928,7 @@ def member_critical_temperature(
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
     tolerance: float = BISECT_XTOL,
+    use_effective_alpha: bool = False,
 ) -> float | None:
     """Scalar facade of :func:`member_critical_temperature_detailed`.
 
@@ -705,6 +949,7 @@ def member_critical_temperature(
         buckling_model,
         buckling_curve,
         tolerance=tolerance,
+        use_effective_alpha=use_effective_alpha,
     ).theta
 
 
@@ -718,6 +963,7 @@ def member_critical_temperature_detailed(
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
     tolerance: float = BISECT_XTOL,
+    use_effective_alpha: bool = False,
 ) -> CriticalTemperatureResult:
     """Smallest uniform temperature at which ``DCR_member >= 1``.
 
@@ -780,7 +1026,9 @@ def member_critical_temperature_detailed(
     if tolerance <= 0.0:
         msg = f"tolerance must be > 0 degC, got {tolerance}"
         raise ValueError(msg)
-    scan = UniformForceScan.build(nodes, elements, loads)
+    scan = UniformForceScan.build(
+        nodes, elements, loads, use_effective_alpha=use_effective_alpha
+    )
     if member_id not in scan.ids:
         msg = f"member_critical_temperature: unknown member {member_id!r}"
         raise KeyError(msg)
@@ -847,6 +1095,7 @@ def system_critical_temperature(
     temp_grid: Sequence[float] = _TEMP_GRID,
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+    use_effective_alpha: bool = False,
 ) -> float:
     """Scalar facade of :func:`system_critical_temperature_detailed`.
 
@@ -864,6 +1113,7 @@ def system_critical_temperature(
         temp_grid,
         buckling_model,
         buckling_curve,
+        use_effective_alpha=use_effective_alpha,
     ).theta  # type: ignore[return-value]  # never None for the system scan
 
 
@@ -875,6 +1125,7 @@ def system_critical_temperature_detailed(
     temp_grid: Sequence[float] = _TEMP_GRID,
     buckling_model: BucklingModel = BucklingModel.EUROCODE_CHI,
     buckling_curve: str = DEFAULT_BUCKLING_CURVE,
+    use_effective_alpha: bool = False,
 ) -> CriticalTemperatureResult:
     """First loss of acceptability along the monotone heating path.
 
@@ -907,7 +1158,9 @@ def system_critical_temperature_detailed(
     single :class:`UniformForceScan` factorisation, which is what keeps the
     retrofit triage (a ``theta_sys`` per candidate decision) affordable.
     """
-    scan = UniformForceScan.build(nodes, elements, loads)
+    scan = UniformForceScan.build(
+        nodes, elements, loads, use_effective_alpha=use_effective_alpha
+    )
     last_safe = float(temp_grid[0])
     for t in temp_grid:
         try:
@@ -938,6 +1191,7 @@ def ci_two_component(
     temps: Mapping[str, float],
     alpha: float,
     f_y: float,
+    use_effective_alpha: bool = False,
 ) -> TwoComponentResult:
     """Two-component CI: ``max(u_ratio - 1, DCR_ratio - 1)`` per member.
 
@@ -967,7 +1221,9 @@ def ci_two_component(
     :func:`member_axial_forces` and with the rank-1 numerator in
     :func:`~truss_analysis.criticality.engine.ci_sweep`.
     """
-    setup = build_engine(nodes, elements, loads, temps)
+    setup = build_engine(
+        nodes, elements, loads, temps, use_effective_alpha=use_effective_alpha
+    )
     f_free = total_load_vector(nodes, loads, setup)
     u = base_displacement(setup, f_free)
     u_max_base = float(np.max(np.abs(u)))
@@ -978,7 +1234,11 @@ def ci_two_component(
     # the undamaged structure in the same temperature field, so temperature
     # degradation can never leak into the perturbation criticality.
     forces_cold = member_axial_forces(
-        nodes, elements, loads, {e.id: T_AMBIENT for e in elements}
+        nodes,
+        elements,
+        loads,
+        {e.id: T_AMBIENT for e in elements},
+        use_effective_alpha=use_effective_alpha,
     )
 
     components: dict[str, ComponentCI] = {}

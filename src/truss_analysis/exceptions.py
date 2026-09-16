@@ -256,3 +256,38 @@ class IllConditionedPerturbationWarning(UserWarning):
     :func:`~truss_analysis.criticality.engine.brute_force_ci` or split the
     simultaneous perturbation (round-5 audit C8#4, wired up in round 6).
     """
+
+
+class SystemInstabilityWarning(UserWarning):
+    """Warning issued when a system-level instability governs the reported DCRs.
+
+    Issued (not raised) by :func:`truss_analysis.limitstates.dcr_field` when it
+    is called with ``check_system_stability=True`` and the linearised
+    bifurcation load factor satisfies ``lambda_cr <= 1`` -- that is, when the
+    *system* loses positive definiteness of its tangent stiffness at or below
+    the load level actually applied, independently of whether any single
+    member has reached its own ``DCR = 1``.
+
+    This exists because the adjustment it accompanies used to be applied
+    silently.  A member DCR was multiplied by ``1 / lambda_cr`` through
+    ``object.__setattr__`` on a frozen dataclass, with no warning and no field
+    recording that it had happened, so ``dcr`` stopped being reconstructible
+    from ``|axial_force| / capacity`` and a caller reading the payload could
+    not tell an amplified number from a member-level one.  In a library whose
+    rule is never to emit a silent number, that was the one place the rule was
+    broken on a safety-relevant quantity.
+
+    The warning is deliberately separate from the member-level checks: a
+    truss whose compressed chords are code-safe member by member can still
+    bifurcate as a system, and the two failures have different remedies.
+
+    .. note::
+
+       ``lambda_cr`` is the criticality of the *linearised tangent state*, not
+       the ultimate load of the real structure.  For shallow systems the true
+       collapse is a limit point (snap-through) that the linearised factor
+       approximates from the base configuration; see
+       :func:`truss_analysis.stability.imperfection_sensitivity` for how much
+       of the reserve survives an imperfection.  Post-buckling paths and
+       arc-length continuation are out of scope.
+    """

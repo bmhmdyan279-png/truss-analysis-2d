@@ -639,12 +639,25 @@ def _solve_perturbed_full(
     alpha: float,
     member_index: int,
     k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
+    *,
+    use_effective_alpha: bool = False,
 ) -> np.ndarray:
     """Solve the reference system with one member additionally scaled by alpha.
 
     Mirrors the rank-1 physics exactly: the perturbed member's stiffness is
     scaled by ``alpha`` **and** its equivalent thermal force with it (the
     imposed elongation itself is a geometric input and does not scale).
+
+    Parameters
+    ----------
+    use_effective_alpha : bool, default False
+        Forwarded to :func:`prestress_lengths`.  This is a *reference path*:
+        it exists to verify the rank-1 engine, so it must build the same base
+        state the engine was built with.  A caller that constructed its engine
+        with ``use_effective_alpha=True`` and then fell back to brute force
+        used to get a column computed on a constant-``alpha`` prestress -- a
+        hidden disagreement appearing exactly where the fallback is supposed to
+        be the trusted one.
     """
     k_scale = {e.id: float(k_e_func(temps[e.id])) for e in elements}
     k_scale[elements[member_index].id] *= alpha
@@ -654,7 +667,9 @@ def _solve_perturbed_full(
     lu = lu_factor(k_ff)
     _check_lu(lu)
     b_free = b[:, list(free)]
-    dl_pre = prestress_lengths(nodes, elements, temps)
+    dl_pre = prestress_lengths(
+        nodes, elements, temps, use_effective_alpha=use_effective_alpha
+    )
     f_free = load_vector(nodes, loads, free) + b_free.T @ (k * dl_pre)
     u_pert: np.ndarray = lu_solve(lu, f_free)
     return u_pert
@@ -871,10 +886,24 @@ def brute_force_ci(
     alpha: float,
     tol: float = 1e-9,
     k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
+    *,
+    use_effective_alpha: bool = False,
 ) -> tuple[dict[str, float], float, float]:
     """Compute CI values by brute force: one full factorisation per member.
 
     Reference path used to verify the rank-1 engine.
+
+    Parameters
+    ----------
+    use_effective_alpha : bool, default False
+        Forwarded to :func:`prestress_lengths` for the base state *and* for
+        every perturbed column.  A reference path has to reproduce the state it
+        is referenced against: if the engine under test was built with the
+        EN 1993-1-2 secant coefficient and this column is built with a constant
+        one, the comparison measures the disagreement between two different
+        prestress fields rather than the correctness of the rank-1 update --
+        and it does so silently, in the one place a caller goes when they have
+        stopped trusting the fast path.
 
     Returns
     -------
@@ -887,7 +916,9 @@ def brute_force_ci(
     lu = lu_factor(np.einsum("i,ip,iq->pq", k, b, b)[np.ix_(free, free)])
     _check_lu(lu)
     b_free = b[:, list(free)]
-    dl_pre = prestress_lengths(nodes, elements, temps)
+    dl_pre = prestress_lengths(
+        nodes, elements, temps, use_effective_alpha=use_effective_alpha
+    )
     f_free = load_vector(nodes, loads, free) + b_free.T @ (k * dl_pre)
     u = lu_solve(lu, f_free)
     if u.size == 0:
@@ -901,7 +932,16 @@ def brute_force_ci(
         if u_max_base < tol:
             ci[e.id] = 0.0
             continue
-        u_p = _solve_perturbed_full(nodes, elements, loads, temps, alpha, i, k_e_func)
+        u_p = _solve_perturbed_full(
+            nodes,
+            elements,
+            loads,
+            temps,
+            alpha,
+            i,
+            k_e_func,
+            use_effective_alpha=use_effective_alpha,
+        )
         m = float(np.max(np.abs(u_p)))
         u_max_pert = max(u_max_pert, m)
         ci[e.id] = m / u_max_base - 1.0
@@ -917,6 +957,8 @@ def compute_ci_for_topology(
     t_target: float,
     alpha: float = 0.7,
     tol: float = 1e-9,
+    *,
+    use_effective_alpha: bool = False,
 ) -> TopologyResult:
     """Run the full CI pipeline on the rank-1 engine (no special-cased scenarios).
 
@@ -924,10 +966,26 @@ def compute_ci_for_topology(
     scenario: uniform-temperature invariance of the ranking is a measured
     outcome, not an input.  ``tau_vs_base`` is populated with tau-b between
     the CI field at ``t_target`` and the one at :data:`T_AMBIENT`.
+
+    Parameters
+    ----------
+    use_effective_alpha : bool, default False
+        Build the imposed strain from the EN 1993-1-2 secant coefficient
+        instead of each member's constant ``alpha``; see
+        :func:`prestress_lengths`.  The flag reaches **all four** places this
+        pipeline forms a base state -- the hot engine, the hot brute-force
+        fallback column, the cold reference engine and the cold reference
+        column -- because a ranking is only comparable to its own reference if
+        both were built on the same prestress field.  The cold reference sits at
+        :data:`T_AMBIENT`, where the secant coefficient degenerates to ``0`` and
+        the temperature rise is ``0`` as well, so the two paths agree there by
+        construction rather than by luck.
     """
     del supports  # boundary conditions live on the Node flags
     temps = get_scenario_temperatures(nodes, elements, scenario, t_target)
-    setup = build_engine(nodes, elements, loads, temps)
+    setup = build_engine(
+        nodes, elements, loads, temps, use_effective_alpha=use_effective_alpha
+    )
     f_free = total_load_vector(nodes, loads, setup)
     u = base_displacement(setup, f_free)
     u_max_base = float(np.max(np.abs(u)))
@@ -939,7 +997,13 @@ def compute_ci_for_topology(
         u_max_perturbed_max = 0.0
     else:
         brute = lambda i: _solve_perturbed_full(  # noqa: E731
-            nodes, elements, loads, temps, alpha, i
+            nodes,
+            elements,
+            loads,
+            temps,
+            alpha,
+            i,
+            use_effective_alpha=use_effective_alpha,
         )
         sweep = ci_sweep(setup, u, alpha, brute_column=brute)
         ci_values = sweep.ci_values
@@ -958,7 +1022,13 @@ def compute_ci_for_topology(
             tau_res: TauResult = tau_b(ci_values, ci_values, quantize=1e-10)
         else:
             temps_base = get_scenario_temperatures(nodes, elements, scenario, T_AMBIENT)
-            setup0 = build_engine(nodes, elements, loads, temps_base)
+            setup0 = build_engine(
+                nodes,
+                elements,
+                loads,
+                temps_base,
+                use_effective_alpha=use_effective_alpha,
+            )
             u0 = base_displacement(setup0, total_load_vector(nodes, loads, setup0))
             if float(np.max(np.abs(u0))) >= tol:
                 # the cold reference sweep takes the SAME guard routing as
@@ -966,7 +1036,13 @@ def compute_ci_for_topology(
                 # cold member can be near-mechanism, so the brute-force
                 # fallback must flag those members instead of raising
                 brute0 = lambda i: _solve_perturbed_full(  # noqa: E731
-                    nodes, elements, loads, temps_base, alpha, i
+                    nodes,
+                    elements,
+                    loads,
+                    temps_base,
+                    alpha,
+                    i,
+                    use_effective_alpha=use_effective_alpha,
                 )
                 sweep0 = ci_sweep(setup0, u0, alpha, brute_column=brute0)
                 tau_res = tau_b(ci_values, sweep0.ci_values, quantize=1e-10)
