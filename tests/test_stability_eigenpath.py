@@ -53,6 +53,9 @@ from truss_analysis.stability import (
 #   sweeps pass a single amplitude and are about the study's shape.
 pytestmark = [
     pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
+    pytest.mark.filterwarnings(
         "ignore::truss_analysis.exceptions.ShallowSystemWarning"
     ),
     pytest.mark.filterwarnings("ignore::truss_analysis.exceptions.InputIgnoredWarning"),

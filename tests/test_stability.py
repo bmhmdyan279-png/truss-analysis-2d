@@ -57,6 +57,9 @@ from truss_analysis.stability import (
 #   same matrix is noise on top of that assertion.
 pytestmark = [
     pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
+    pytest.mark.filterwarnings(
         "ignore::truss_analysis.exceptions.ShallowSystemWarning"
     ),
     pytest.mark.filterwarnings("ignore::scipy.linalg.LinAlgWarning"),

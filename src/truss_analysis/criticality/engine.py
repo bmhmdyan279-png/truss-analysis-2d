@@ -100,8 +100,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.linalg import LinAlgWarning, lapack, lu_factor, lu_solve
 
-from ..exceptions import IllConditionedPerturbationWarning
-from ..material.steel_eurocode import FloatOrArray
+from ..exceptions import ConstantAlphaWarning, IllConditionedPerturbationWarning
+from ..material.steel_eurocode import FloatOrArray, effective_alpha, thermal_strain
 from ..material.steel_eurocode import k_E as eurocode_k_E
 from ..model import Element, Node, fixed_dof_indices
 from .indices import NciResult, compute_nci
@@ -246,10 +246,55 @@ def member_matrices(
     return b, k
 
 
+#: Member temperature [degC] above which a constant ``alpha`` is reported.
+#:
+#: Measured, not chosen for roundness.  Against the EN 1993-1-2 elongation curve
+#: ``eps_th(T)`` a constant ``alpha = 1.2e-5`` understates the imposed strain by
+#: 3.9% at 100 degC and 12.3% at 400 degC.  150 degC is where the error first
+#: exceeds 5%, which is the band below which a linear approximation of a thermal
+#: strain is ordinarily accepted without comment; above it the gap is large
+#: enough to move a utilisation ratio and has to be said out loud.
+ALPHA_CONSTANCY_LIMIT = 150.0
+
+
+def constant_alpha_understatement(theta: float, alphas: Sequence[float]) -> float:
+    """Percent by which a constant-``alpha`` strain understates ``eps_th(T)``.
+
+    Computed from the ``alpha`` values actually used, so the number in the
+    warning is about the caller's model rather than about a nominal 1.2e-5: a
+    user who already put a secant coefficient into ``Element.alpha`` gets told
+    the truth about their own input instead of being warned about somebody
+    else's.
+
+    Parameters
+    ----------
+    theta : float
+        Steel temperature [degC].
+    alphas : Sequence[float]
+        The expansion coefficients the constant path used [1/K].
+
+    Returns
+    -------
+    float
+        Understatement in percent, ``0.0`` when the curve cannot be evaluated
+        (no temperature rise) or the imposed strain is already larger than the
+        curve's, in which case nothing is being understated.
+    """
+    if not alphas:
+        return 0.0
+    curve = float(thermal_strain(theta, T_AMBIENT))
+    if curve <= 0.0:
+        return 0.0
+    linear = float(np.mean(np.asarray(alphas, dtype=float))) * (theta - T_AMBIENT)
+    shortfall = 1.0 - linear / curve
+    return max(0.0, shortfall * 100.0)
+
+
 def prestress_lengths(
     nodes: Sequence[Node],
     elements: Sequence[Element],
     temps: Mapping[str, float] | None = None,
+    use_effective_alpha: bool = False,
 ) -> np.ndarray:
     """Imposed (thermal + fabrication) elongation per member, shape ``(nE,)``.
 
@@ -275,20 +320,85 @@ def prestress_lengths(
         Model elements (supply ``alpha`` and ``delta_L_free``).
     temps : Mapping[str, float] or None, optional
         Member id -> steel temperature [degC].
+    use_effective_alpha : bool, default False
+        Replace each member's constant ``alpha`` with the **secant** coefficient
+        :func:`~truss_analysis.material.steel_eurocode.effective_alpha` at that
+        member's own temperature, so the imposed strain follows the EN 1993-1-2
+        elongation curve ``eps_th(T)`` exactly instead of a straight line through
+        the origin.  ``False`` keeps the historical constant-``alpha`` behaviour
+        **bit for bit** -- changing the default would silently move every result
+        ever published with this library, which is not a change to make quietly.
+
+        With ``alpha = 1.2e-5`` the constant path understates the imposed strain
+        by 3.9% at 100 degC, 12.3% at 400, 17.1% at 600 and 19.4% at 700.  In a
+        restrained member the thermal force is proportional to that strain, so a
+        hot fire analysis run on the default reports demand that is low by the
+        same percentage against an unchanged capacity -- an un-conservative DCR.
+        A member whose ``alpha`` is exactly zero is left alone under either
+        setting: zero is an explicit statement that the member does not expand,
+        not an unfilled default, so "correcting" it to the Eurocode curve would
+        invert what the model says.
+
+        A :class:`~truss_analysis.exceptions.ConstantAlphaWarning` is issued
+        when a supplied field exceeds :data:`ALPHA_CONSTANCY_LIMIT` and this flag
+        is not set, so the choice is made deliberately rather than inherited.
 
     Returns
     -------
     np.ndarray
         ``dL_pre`` per member [m], in element order.
+
+    Warns
+    -----
+    ConstantAlphaWarning
+        When ``temps`` contains a member above :data:`ALPHA_CONSTANCY_LIMIT` and
+        ``use_effective_alpha`` is ``False``.
     """
     node_idx = {n.id: i for i, n in enumerate(nodes)}
     out = np.zeros(len(elements))
+    thetas: list[float] = []
+    alphas: list[float] = []
     for i, e in enumerate(elements):
         ii = node_idx[e.node_i]
         jj = node_idx[e.node_j]
         length = float(np.hypot(nodes[jj].x - nodes[ii].x, nodes[jj].y - nodes[ii].y))
         delta_t = 0.0 if temps is None else float(temps[e.id]) - T_AMBIENT
-        out[i] = e.alpha * delta_t * length + e.delta_L_free
+        if temps is None:
+            alpha = e.alpha
+        elif use_effective_alpha and e.alpha != 0.0:
+            # Replace the ambient coefficient with the secant coefficient of the
+            # EN 1993-1-2 elongation curve at this member's own temperature.
+            #
+            # A member whose ``alpha`` is exactly zero is skipped deliberately.
+            # Zero is not an unfilled default here: it is an explicit statement
+            # that the member does not expand -- a tie rod modelled as fixed in
+            # length, or a fabrication-only element whose whole imposed
+            # elongation is ``delta_L_free``.  Overriding it would turn "this
+            # member cannot expand" into "this member expands per Eurocode",
+            # which is the opposite of what the model says.
+            alpha = float(effective_alpha(float(temps[e.id]), T_AMBIENT))
+        else:
+            alpha = e.alpha
+            if float(temps[e.id]) > ALPHA_CONSTANCY_LIMIT:
+                thetas.append(float(temps[e.id]))
+                alphas.append(alpha)
+        out[i] = alpha * delta_t * length + e.delta_L_free
+
+    if thetas:
+        worst = max(thetas)
+        warnings.warn(
+            f"{len(thetas)} member(s) reach {worst:.0f} degC but the imposed "
+            "strain is being built from a constant alpha: against the EN "
+            "1993-1-2 elongation curve eps_th(T) that understates the thermal "
+            f"strain by about {constant_alpha_understatement(worst, alphas):.1f}% "
+            "at this temperature, and in a restrained member the force is low by "
+            "the same amount -- an un-conservative DCR. Pass "
+            "use_effective_alpha=True to follow the curve exactly, or set each "
+            "Element.alpha to effective_alpha(T) yourself. The default is "
+            "unchanged so that previously published results stay reproducible.",
+            ConstantAlphaWarning,
+            stacklevel=2,
+        )
     return out
 
 
@@ -391,6 +501,7 @@ def build_engine(
     loads: Mapping[str, Mapping[str, float]],
     temps: Mapping[str, float] | None = None,
     k_e_func: Callable[[FloatOrArray], FloatOrArray] = eurocode_k_E,
+    use_effective_alpha: bool = False,
 ) -> EngineSetup:
     """Factorise the (thermally degraded) base state for rank-1 sweeps.
 
@@ -402,6 +513,12 @@ def build_engine(
     :func:`ci_sweep` — sees one consistent demand state.  ``loads`` is kept in
     the signature for API symmetry but the force vector is built by
     :func:`total_load_vector` at solve time.
+
+    ``use_effective_alpha`` is passed straight to :func:`prestress_lengths` and
+    has no other effect: the stiffness degradation ``k_E(T) E`` is identical
+    either way, so the flag changes only how much thermal strain the imposed
+    elongation carries.  See that function for the measured size of the
+    difference and for why the default is the constant-``alpha`` path.
     """
     del loads  # force vector assembled at solve time
     k_scale = (
@@ -425,7 +542,9 @@ def build_engine(
         k_axial=k,
         z=z,
         d=d,
-        dl_pre=prestress_lengths(nodes, elements, temps),
+        dl_pre=prestress_lengths(
+            nodes, elements, temps, use_effective_alpha=use_effective_alpha
+        ),
         guard_tol=_guard_tolerance(k_ff, lu),
     )
 

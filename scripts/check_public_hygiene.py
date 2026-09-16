@@ -69,7 +69,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VOCABULARY_PATH = Path(__file__).resolve().parent / "hygiene_terms.yaml"
-VOCABULARY_SCHEMA = "truss-analysis/hygiene-terms/v1"
+VOCABULARY_SCHEMA = "truss-analysis/hygiene-terms/v2"
 
 
 @dataclass(frozen=True)
@@ -84,11 +84,22 @@ class TermRule:
         Human-readable description of what the term is.
     pattern : re.Pattern[str]
         Compiled matcher.
+    matches : tuple[str, ...]
+        Strings the pattern must match.  Declared beside the rule rather than in
+        a test file, because this file is the one path exempt from scanning -- so
+        the examples can be the real literals instead of paraphrases that happen
+        to dodge the very rule they are meant to exercise.
+    not_matches : tuple[str, ...]
+        Strings the pattern must *not* match.  This is the half that catches a
+        rule that is too wide, which is the failure mode that turns a control
+        into something contributors work around.
     """
 
     rule_id: str
     label: str
     pattern: re.Pattern[str]
+    matches: tuple[str, ...] = ()
+    not_matches: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -123,6 +134,50 @@ class Vocabulary:
 _FLAG_MAP = {"ignorecase": re.IGNORECASE, "multiline": re.MULTILINE}
 
 
+def _check_examples(rule: TermRule) -> None:
+    """Refuse a rule whose declared examples contradict its pattern.
+
+    This makes the vocabulary a *checked specification* rather than a comment. A
+    regex that has drifted from what its author thought it matched fails here, at
+    load, with the offending string quoted -- instead of silently over- or
+    under-matching every file in the repository until someone notices a hook
+    firing on ordinary prose.
+
+    The over-broad direction is the one that matters most. ``\\breviewers?\\b``
+    was a correct regex for a wrong rule: it matched the noun a contributing guide
+    has to use, so the response to it firing was to rewrite prose around the word
+    rather than to question the rule. Requiring every rule to ship strings it must
+    *not* match is what makes that mistake load-bearing rather than cosmetic.
+
+    Raises
+    ------
+    ValueError
+        If a rule declares no examples at all, or an example on the wrong side.
+    """
+    if not rule.matches or not rule.not_matches:
+        msg = (
+            f"hygiene rule {rule.rule_id!r} must declare both `matches` and "
+            "`not_matches` examples; a rule nobody has demonstrated firing is a "
+            "rule nobody knows works, and a rule nobody has demonstrated staying "
+            "quiet is a rule that will be worked around"
+        )
+        raise ValueError(msg)
+    for text in rule.matches:
+        if not rule.pattern.search(text):
+            msg = (
+                f"hygiene rule {rule.rule_id!r} does not match its own declared "
+                f"example {text!r}"
+            )
+            raise ValueError(msg)
+    for text in rule.not_matches:
+        if rule.pattern.search(text):
+            msg = (
+                f"hygiene rule {rule.rule_id!r} wrongly matches its declared "
+                f"non-example {text!r} -- the pattern is too wide"
+            )
+            raise ValueError(msg)
+
+
 def load_vocabulary(path: Path = VOCABULARY_PATH) -> Vocabulary:
     """Read and compile the forbidden-term vocabulary.
 
@@ -155,6 +210,17 @@ def load_vocabulary(path: Path = VOCABULARY_PATH) -> Vocabulary:
     if not isinstance(raw, dict):
         msg = f"hygiene vocabulary at {path} is not a mapping"
         raise ValueError(msg)
+    # Checked before anything else: a file declaring a schema this scanner does
+    # not understand may use fields that do not exist yet, so reporting a
+    # per-rule complaint about it would be reporting a symptom of the version
+    # mismatch rather than the mismatch.
+    schema = str(raw.get("schema", ""))
+    if schema != VOCABULARY_SCHEMA:
+        msg = (
+            f"hygiene vocabulary schema mismatch: file declares {schema!r}, "
+            f"scanner expects {VOCABULARY_SCHEMA!r}"
+        )
+        raise ValueError(msg)
 
     rules: list[TermRule] = []
     for row in raw.get("terms") or ():
@@ -169,15 +235,17 @@ def load_vocabulary(path: Path = VOCABULARY_PATH) -> Vocabulary:
         except re.error as exc:
             msg = f"term {row.get('id')!r} has an invalid pattern: {exc}"
             raise ValueError(msg) from exc
-        rules.append(
-            TermRule(
-                rule_id=str(row["id"]),
-                label=str(row.get("label", row["id"])),
-                pattern=compiled,
-            )
+        rule = TermRule(
+            rule_id=str(row["id"]),
+            label=str(row.get("label", row["id"])),
+            pattern=compiled,
+            matches=tuple(str(x) for x in (row.get("matches") or ())),
+            not_matches=tuple(str(x) for x in (row.get("not_matches") or ())),
         )
+        _check_examples(rule)
+        rules.append(rule)
     return Vocabulary(
-        schema=str(raw.get("schema", "")),
+        schema=schema,
         rules=tuple(rules),
         exempt_paths=frozenset(str(x) for x in (raw.get("exempt_paths") or ())),
     )

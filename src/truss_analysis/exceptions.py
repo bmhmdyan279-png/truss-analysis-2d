@@ -165,6 +165,42 @@ class LumpedCapacityWarning(UserWarning):
     """
 
 
+class ConstantAlphaWarning(UserWarning):
+    """Warning issued when a hot field is expanded with a constant ``alpha``.
+
+    The imposed-elongation term is ``alpha * (T - T_ref) * L``.  With a constant
+    ``alpha`` -- ``Element.alpha``, the ambient coefficient the user supplied --
+    that is a *linear* approximation of the EN 1993-1-2 thermal-elongation curve
+    ``eps_th(T)``, which is itself nonlinear and departs from any straight line
+    through the origin by a wide margin once the steel is hot.
+
+    Measured against the curve, with ``alpha = 1.2e-5``:
+
+    .. code-block:: text
+
+        theta [degC]   100    200    300    400    500    600    700
+        understated   3.9%   6.8%   9.6%  12.3%  14.8%  17.1%  19.4%
+
+    In a restrained member the thermal force is proportional to that strain, so
+    a 600 degC fire analysis run with a constant ``alpha`` reports a restrained
+    force about 17% *low* -- and a low demand against an unchanged capacity is an
+    un-conservative DCR.  It is not a modelling preference: the same library
+    exposes the secant coefficient
+    :func:`~truss_analysis.material.steel_eurocode.effective_alpha`, which
+    reproduces ``eps_th`` exactly, so the accurate path exists and is one flag
+    away.
+
+    Emitted by
+    :func:`truss_analysis.criticality.engine.prestress_lengths` when a supplied
+    temperature field exceeds
+    :data:`~truss_analysis.criticality.engine.ALPHA_CONSTANCY_LIMIT` and
+    ``use_effective_alpha`` is not set.  The default stays constant-``alpha``
+    because changing it would silently move every previously published result;
+    the warning exists so that the choice is made deliberately rather than
+    inherited.
+    """
+
+
 class ParametricFireRangeWarning(UserWarning):
     """Warning issued when a parametric fire's inputs leave the code's range.
 

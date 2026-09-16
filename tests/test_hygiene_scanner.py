@@ -106,6 +106,20 @@ def test_missing_vocabulary_is_a_hard_error(tmp_path: Path) -> None:
         hygiene.load_vocabulary(tmp_path / "absent.yaml")
 
 
+def _minimal_yaml(*extra: str) -> str:
+    """A syntactically valid vocabulary with one well-formed rule."""
+    base = (
+        f"schema: {hygiene.VOCABULARY_SCHEMA}\n"
+        "terms:\n"
+        "  - id: probe\n"
+        "    label: probe rule\n"
+        "    pattern: 'zzz'\n"
+        "    matches: ['zzz here']\n"
+        "    not_matches: ['clean line']\n"
+    )
+    return base + "".join(extra)
+
+
 def test_empty_vocabulary_is_a_hard_error(tmp_path: Path) -> None:
     bad = tmp_path / "terms.yaml"
     bad.write_text(
@@ -113,6 +127,15 @@ def test_empty_vocabulary_is_a_hard_error(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="empty rule set"):
         hygiene.load_vocabulary(bad)
+
+
+def test_a_well_formed_vocabulary_loads(tmp_path: Path) -> None:
+    """The positive case for the loader, so the error tests are not vacuous."""
+    good = tmp_path / "terms.yaml"
+    good.write_text(_minimal_yaml(), encoding="utf-8")
+    loaded = hygiene.load_vocabulary(good)
+    assert len(loaded.rules) == 1
+    assert loaded.rules[0].rule_id == "probe"
 
 
 def test_wrong_schema_is_a_hard_error(tmp_path: Path) -> None:
@@ -128,10 +151,12 @@ def test_wrong_schema_is_a_hard_error(tmp_path: Path) -> None:
 def test_duplicate_rule_ids_are_a_hard_error(tmp_path: Path) -> None:
     bad = tmp_path / "terms.yaml"
     bad.write_text(
-        f"schema: {hygiene.VOCABULARY_SCHEMA}\n"
-        "terms:\n"
-        "  - id: dup\n    pattern: 'a'\n"
-        "  - id: dup\n    pattern: 'b'\n",
+        _minimal_yaml(
+            "  - id: probe\n"
+            "    pattern: 'yyy'\n"
+            "    matches: ['yyy here']\n"
+            "    not_matches: ['clean']\n"
+        ),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="duplicate term ids"):
@@ -143,7 +168,11 @@ def test_unknown_flag_and_bad_regex_are_hard_errors(tmp_path: Path) -> None:
     bad.write_text(
         f"schema: {hygiene.VOCABULARY_SCHEMA}\n"
         "terms:\n"
-        "  - id: x\n    pattern: 'a'\n    flags: [verbose_please]\n",
+        "  - id: x\n"
+        "    pattern: 'a'\n"
+        "    flags: [verbose_please]\n"
+        "    matches: ['a']\n"
+        "    not_matches: ['b']\n",
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="unknown flag"):
@@ -152,7 +181,10 @@ def test_unknown_flag_and_bad_regex_are_hard_errors(tmp_path: Path) -> None:
     bad.write_text(
         f"schema: {hygiene.VOCABULARY_SCHEMA}\n"
         "terms:\n"
-        "  - id: x\n    pattern: '(unclosed'\n",
+        "  - id: x\n"
+        "    pattern: '(unclosed'\n"
+        "    matches: ['a']\n"
+        "    not_matches: ['b']\n",
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="invalid pattern"):
@@ -441,46 +473,16 @@ def test_cli_scans_the_whole_tracked_tree_cleanly(
 # --------------------------------------------------------------------------
 # rules must target what they are for, not the nearest noun
 # --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        "Reviewer 2 asked for a nonlinear solver",
-        "see the referee report before merging",
-        "handled by the peer-referee process",
-        "Response to Reviewers",
-        "reviewer #3 requested more validation",
-    ],
-)
-def test_internal_review_vocabulary_is_caught(line: str) -> None:
-    """The phrasing of a private review workflow leaking into a public file."""
-    rule = _rule("referee_term")
-    assert rule.pattern.search(line), line
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        "A reviewer is entitled to know which commits were generated",
-        "ask a reviewer to check the physics",
-        "reviewers may request changes",
-        "the reviewer of this pull request",
-    ],
-)
-def test_the_ordinary_english_noun_is_not_caught(line: str) -> None:
-    """The rule was `\breviewers?\b` and that was wrong.
-
-    A bare common noun is not internal vocabulary, and banning it forced
-    CONTRIBUTING.md -- a document that has to talk about people reviewing pull
-    requests -- to be rewritten around the word. Erasing a term is not the same
-    as removing what the term stood in for, and a lexicon check on an ordinary
-    noun costs real clarity in the documents it governs. What is actually worth
-    catching is the phrasing of a private process, which is what the narrowed
-    pattern matches.
-    """
-    rule = _rule("referee_term")
-    assert not rule.pattern.search(line), line
+#
+# The example strings live in scripts/hygiene_terms.yaml and are read from there,
+# never written into this file. A test of a forbidden-term detector cannot
+# contain the forbidden terms: this file is scanned by `--all`, so inlining a real
+# positive case would make the repository fail its own hook. The fix for that is
+# not to reassemble the terms from fragments -- which is the technique this round
+# removed from the scanner -- but to put the examples in the one file whose entire
+# purpose is to carry the vocabulary, and have the loader verify them. That is
+# also why the rule's `not_matches` half is enforced: it is what catches a pattern
+# too wide to obey.
 
 
 def _rule(rule_id: str) -> hygiene.TermRule:
@@ -493,21 +495,98 @@ def _rule(rule_id: str) -> hygiene.TermRule:
     raise AssertionError(msg)
 
 
-def test_every_shipped_rule_has_a_positive_and_negative_case() -> None:
-    """No rule may be untestable, and none may match ordinary prose.
-
-    A rule that cannot be demonstrated to fire is a rule nobody knows works; a
-    rule that fires on neutral text is a rule that will be worked around rather
-    than obeyed. Both are checked structurally: each compiled pattern must match
-    its own id-shaped token and must not match a sentence of plain technical
-    English about this library.
-    """
-    neutral = (
-        "The solver assembles a global stiffness matrix from pin-jointed "
-        "members and reports member forces, displacements and reactions."
-    )
+def test_every_shipped_rule_declares_both_halves_of_its_examples() -> None:
+    """The loader enforces this; the test pins that it does."""
     loaded = hygiene.load_vocabulary(VOCABULARY_PATH)
     for rule in loaded.rules:
+        assert rule.matches, rule.rule_id
+        assert rule.not_matches, rule.rule_id
+
+
+def test_every_shipped_rule_matches_its_declared_examples() -> None:
+    """A rule that cannot be demonstrated firing is a rule nobody knows works."""
+    for rule in hygiene.load_vocabulary(VOCABULARY_PATH).rules:
+        for text in rule.matches:
+            assert rule.pattern.search(text), (rule.rule_id, text)
+
+
+def test_no_shipped_rule_matches_its_declared_non_examples() -> None:
+    """The half that catches a rule too wide to obey.
+
+    ``referee_term`` used to be a bare common English noun, which banned the word
+    from CONTRIBUTING.md -- a document that has to talk about people reviewing
+    pull requests -- and the response was to rewrite prose around it rather than
+    to question the rule. Every rule now ships strings it must not match, and
+    ``load_vocabulary`` refuses one that violates them.
+    """
+    for rule in hygiene.load_vocabulary(VOCABULARY_PATH).rules:
+        for text in rule.not_matches:
+            assert not rule.pattern.search(text), (rule.rule_id, text)
+
+
+def test_the_narrowed_referee_rule_separates_process_from_prose() -> None:
+    """The specific rule the round-7 audit called theatre, checked both ways."""
+    rule = _rule("referee_term")
+    assert rule.matches, "the rule must ship positive examples"
+    assert rule.not_matches, "and negative ones -- that is the whole point"
+    # the negatives are ordinary contributing-guide prose; assert their shape
+    # rather than their text, so this file never has to contain a positive case
+    assert any("pull request" in t for t in rule.not_matches)
+
+
+def test_a_rule_with_contradictory_examples_will_not_load(tmp_path: Path) -> None:
+    """The self-check must be load-bearing, not decorative."""
+    bad = tmp_path / "terms.yaml"
+    bad.write_text(
+        f"schema: {hygiene.VOCABULARY_SCHEMA}\n"
+        "terms:\n"
+        "  - id: broken\n"
+        "    pattern: 'zzz'\n"
+        "    matches: ['this does not contain the token']\n"
+        "    not_matches: ['fine']\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="does not match its own declared example"):
+        hygiene.load_vocabulary(bad)
+
+
+def test_an_over_broad_rule_will_not_load(tmp_path: Path) -> None:
+    bad = tmp_path / "terms.yaml"
+    bad.write_text(
+        f"schema: {hygiene.VOCABULARY_SCHEMA}\n"
+        "terms:\n"
+        "  - id: toowide\n"
+        "    pattern: 'the'\n"
+        "    matches: ['the thing']\n"
+        "    not_matches: ['also the thing']\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="too wide"):
+        hygiene.load_vocabulary(bad)
+
+
+def test_a_rule_without_examples_will_not_load(tmp_path: Path) -> None:
+    bad = tmp_path / "terms.yaml"
+    bad.write_text(
+        f"schema: {hygiene.VOCABULARY_SCHEMA}\n"
+        "terms:\n"
+        "  - id: noexamples\n"
+        "    pattern: 'zzz'\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="must declare both"):
+        hygiene.load_vocabulary(bad)
+
+
+def test_no_shipped_rule_fires_on_neutral_technical_prose() -> None:
+    """A rule that matches ordinary prose gets worked around, not obeyed."""
+    neutral = (
+        "The solver assembles a global stiffness matrix from pin-jointed "
+        "members and reports member forces, displacements and reactions. "
+        "Steel properties degrade with temperature per EN 1993-1-2, and a "
+        "reviewer may request changes to a pull request."
+    )
+    for rule in hygiene.load_vocabulary(VOCABULARY_PATH).rules:
         assert not rule.pattern.search(neutral), (
             f"rule {rule.rule_id!r} fires on neutral technical prose: "
             f"{rule.pattern.pattern}"

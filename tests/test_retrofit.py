@@ -30,6 +30,9 @@ from truss_analysis.sections import idealised_square_hss
 # decisions rather than diagnostics.
 pytestmark = [
     pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
+    pytest.mark.filterwarnings(
         "ignore::truss_analysis.exceptions.BucklingCheckWarning"
     ),
 ]

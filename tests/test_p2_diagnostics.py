@@ -49,6 +49,9 @@ from truss_analysis.uncertainty.sampling import (
 # complaint and the sparse-to-dense downgrade notice.
 pytestmark = [
     pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
+    pytest.mark.filterwarnings(
         "ignore::truss_analysis.exceptions.IllConditionedWarning"
     ),
     pytest.mark.filterwarnings("ignore::truss_analysis.exceptions.InputIgnoredWarning"),

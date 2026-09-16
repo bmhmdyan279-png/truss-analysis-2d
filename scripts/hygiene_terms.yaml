@@ -3,95 +3,174 @@
 # Why this is a data file and not a table in scripts/check_public_hygiene.py:
 #
 # The scanner used to build these patterns out of concatenated string fragments
-# ("review" + "er", "Pha" + "se", "manu" + "script") so that its own source
-# would not match its own rules, and then exempted itself a second time through a
-# SELF_PATHS allowlist. That is not a quality control, it is a performance of
-# one: the mechanism exists to avoid being caught by itself, and the fragments
-# make the actual forbidden vocabulary unreadable to anyone trying to review
-# whether the list is still correct.
+# ("review" + "er", "Pha" + "se", "manu" + "script") so that its own source would
+# not match its own rules, and then exempted itself a second time through a
+# SELF_PATHS allowlist. Both mechanisms existed for one purpose: to keep the
+# checker from catching itself.
+#
+# That is not a quality control. It is unreadable -- a maintainer cannot tell what
+# the forbidden vocabulary is without mentally reassembling eighteen fragments --
+# and it is unreviewable, because the policy is not written down anywhere as text
+# and so cannot be diffed against the rule that implements it. The round-7 audit
+# called this process theatre and the criticism is correct.
 #
 # Keeping the vocabulary here means the scanner's source contains no forbidden
 # term and needs no self-exemption, and the list itself is readable, reviewable
-# and editable without touching code. This file is the single documented
-# exemption -- its entire purpose is to hold the terms -- and the scanner refuses
-# to run if the file is missing rather than silently degrading to an empty rule
-# set, which is what an unreadable config would otherwise become.
+# and editable without touching code.
+#
+# Every rule also carries `matches` and `not_matches` examples, and
+# scripts/check_public_hygiene.py refuses to load a vocabulary whose examples do
+# not behave as declared. That makes this file a *checked specification* rather
+# than a comment: a rule that drifts from what its author thought it matched fails
+# at import, and nobody has to guess whether a pattern is too wide or too narrow.
+# It is also why the examples live here and not in tests/ -- a test file that
+# contained the positive cases would itself be scanned and would fail the very
+# hook it was testing, and the fix for that must not be to reassemble the terms
+# from fragments again.
+#
+# A missing or malformed vocabulary file is a hard error rather than an empty rule
+# set: a scanner that silently degrades to checking nothing reports success while
+# guarding nothing.
 #
 # Scope note: these are *internal project vocabulary* -- phase labels, draft
 # document terms, publication venues, private decision ids. They are forbidden in
 # public files because they leak a private working context, not because the words
 # are objectionable. `bootstrap` is deliberately absent: it is a standard
 # statistical resampling term. `gini` is handled separately in the scanner because
-# it is a legitimate eponym in code identifiers and only out of place in narrative
-# documents.
+# its rule is path-conditional rather than a plain match.
 
-schema: truss-analysis/hygiene-terms/v1
+schema: truss-analysis/hygiene-terms/v2
 
 terms:
   - id: phase_label
     label: internal project phase label
     pattern: 'Phase[ _-]?\d'
     flags: [ignorecase]
+    matches:
+      - "delivered in Phase 2 of the plan"
+      - "phase-3 scope note"
+    not_matches:
+      - "the plastic phase of the material response"
+      - "a phase diagram for the steel alloy"
 
   - id: hypothesis_label
     label: internal hypothesis label
     pattern: '\bH[1-4]\b'
     flags: []
+    matches:
+      - "this tests H2 against the measured value"
+    not_matches:
+      - "an H100 section was modelled"
+      - "the H-section buckled about its weak axis"
 
   - id: proposition_label
     label: internal proposition label
     pattern: 'Lemma'
     flags: [ignorecase]
+    matches:
+      - "see Lemma 4 for the bound"
+    not_matches:
+      - "see Theorem 4 for the bound"
+      - "the proposition is proved in the appendix"
 
   - id: example_name
     label: internal example name
     pattern: 'uniform_beta'
     flags: [ignorecase]
+    matches:
+      - "sampled from uniform_beta(0.9)"
+    not_matches:
+      - "a uniform temperature field was applied"
+      - "beta is the reliability index"
 
   - id: attack_phrase
     label: informal attack phrase
     pattern: 'kill.?shot'
     flags: [ignorecase]
+    matches:
+      - "that argument was the kill shot"
+      - "a killshot objection"
+    not_matches:
+      - "the solver was killed after the timeout"
+      - "a shotgun sweep of parameters"
 
   - id: decision_id
     label: internal decision id
     pattern: '\bD-0\d\d?\b'
     flags: []
+    matches:
+      - "recorded as D-014"
+      - "see decision D-07"
+    not_matches:
+      - "a D-section was used"
+      - "the DOF numbering starts at D0 only in the draft"
 
   - id: log_id
     label: internal log id
     pattern: '\bD[RL]-0\d\d?\b'
     flags: []
+    matches:
+      - "logged under DR-003"
+      - "entry DL-09 explains it"
+    not_matches:
+      - "DR is the demand-to-capacity ratio"
 
   - id: context_file
     label: internal context file
     pattern: 'CONTEXT_LOCK'
     flags: []
+    matches:
+      - "pinned in CONTEXT_LOCK for the session"
+    not_matches:
+      - "the context is locked by the boundary conditions"
 
   - id: prompt_reference
     label: internal prompt reference
     pattern: 'prompt-0*\d'
     flags: [ignorecase]
+    matches:
+      - "from prompt-007 in the transcript"
+      - "see prompt-12"
+    not_matches:
+      - "the user prompt asked for a truss analysis"
 
   - id: publication_venue
     label: publication venue marker
     pattern: 'Nature_2025'
     flags: []
+    matches:
+      - "prepared for Nature_2025 submission"
+    not_matches:
+      - "published in 2025 in a structural engineering journal"
+      - "natural frequency of the first mode"
 
   - id: case_name
     label: internal case name
     pattern: 'paper_case'
     flags: [ignorecase]
+    matches:
+      - "run paper_case_3 and compare"
+    not_matches:
+      - "the paper describes a simply supported beam"
+      - "a test case with three panels"
 
   - id: artifact_name
     label: internal artifact name
     pattern: 'CI_results'
     flags: []
+    matches:
+      - "archived under CI_results/round4"
+    not_matches:
+      - "the CI results are published on the workflow page"
 
   - id: draft_document
     label: draft-document term
     pattern: 'manuscript'
     flags: [ignorecase]
+    matches:
+      - "as stated in the manuscript draft"
+    not_matches:
+      - "the manufacturer's certified properties were used"
 
   # Narrowed in round 7, and the narrowing is the point.
   #
@@ -104,33 +183,64 @@ terms:
   # clarity in the documents it governs.
   #
   # What the rule is actually for is *internal process vocabulary*: the phrasing
-  # of a private review workflow leaking into public files, where a reader would
-  # reasonably wonder who "Reviewer 2" is and why the code answers them. That is
-  # detectable from the phrasing, not from the noun.
+  # of a private review workflow leaking into a public file, where a reader would
+  # reasonably wonder who the numbered person is and why the code answers them.
+  # That is detectable from the phrasing, not from the noun.
   - id: referee_term
     label: internal review-process vocabulary
     pattern: '(reviewer|referee)\s*[#:]?\s*[1-9]\b|peer[- ]referee|referee\s+report|response\s+to\s+(reviewers?|referees?)'
     flags: [ignorecase]
+    # These are the real literals, written out rather than paraphrased: this
+    # file is the single exempt path precisely so that the examples a rule is
+    # checked against can be the strings the rule is meant to catch.
+    matches:
+      - "Reviewer 2 asked for a nonlinear solver"
+      - "reviewer #3 requested more validation"
+      - "see the referee report before merging"
+      - "handled by the peer-referee process"
+      - "Response to Reviewers"
+    not_matches:
+      - "A reviewer is entitled to know which commits were generated"
+      - "ask a reviewer to check the physics"
+      - "reviewers may request changes"
+      - "the reviewer of this pull request"
 
   - id: internal_acronym
     label: internal acronym
     pattern: '\bSSOT\b'
     flags: []
+    matches:
+      - "kept in the SSOT for the material table"
+    not_matches:
+      - "a single source of truth for the material table"
+      - "the SSO configuration is out of scope"
 
   - id: persian_proposal
     label: Persian proposal term
     pattern: 'پروپوزال'
     flags: []
+    matches:
+      - "در پروپوزال آمده است"
+    not_matches:
+      - "در مستندات آمده است"
 
   - id: persian_paper
     label: Persian paper term
     pattern: 'مقاله'
     flags: []
+    matches:
+      - "این بخش از مقاله است"
+    not_matches:
+      - "این بخش از مستندات است"
 
   - id: persian_hypothesis
     label: Persian hypothesis term
     pattern: 'فرضیه'
     flags: []
+    matches:
+      - "فرضیهٔ پژوهش"
+    not_matches:
+      - "فرضِ محاسبه"
 
 # Files whose entire purpose is to carry this vocabulary, and which are therefore
 # exempt from the keyword scan.

@@ -26,6 +26,9 @@ from truss_analysis.model import Element, Node
 #   missing data, asserted in test_dcr_field_on_campaign_truss.
 pytestmark = [
     pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
+    pytest.mark.filterwarnings(
         "ignore::truss_analysis.exceptions.LegacyBucklingModelWarning"
     ),
     pytest.mark.filterwarnings(

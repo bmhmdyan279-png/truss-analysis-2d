@@ -37,6 +37,9 @@ from truss_analysis.topology_generator import TopologyGenerator
 # factorisation is expected, and the assertions are about the library's diagnosis
 # of the same state.
 pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
     pytest.mark.filterwarnings("ignore::scipy.linalg.LinAlgWarning"),
 ]
 

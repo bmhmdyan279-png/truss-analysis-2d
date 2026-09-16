@@ -52,6 +52,9 @@ from truss_analysis.solver import solve
 # the model it exercises warns by design.
 pytestmark = [
     pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
+    pytest.mark.filterwarnings(
         "ignore::truss_analysis.exceptions.LegacyBucklingModelWarning"
     ),
 ]

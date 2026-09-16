@@ -34,6 +34,20 @@ from truss_analysis.material.steel_eurocode import k_E as eurocode_k_E
 from truss_analysis.model import Element, Node
 from truss_analysis.topology_generator import generate_topology
 
+# ConstantAlphaWarning: this module exercises the fire chain with hot
+# temperature fields, which is the path that warns by design -- a member
+# above 150 degC expanded with a constant alpha understates the EN
+# 1993-1-2 imposed strain by 4-19% and the solver says so. These tests
+# pin the *default* behaviour bit for bit, which is exactly what the
+# warning says it is preserving; the warning itself, the opt-in
+# `use_effective_alpha` path and the measured size of the gap are
+# asserted in tests/test_thermal_demand.py.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ConstantAlphaWarning"
+    ),
+]
+
 PACKAGE_DIR = (
     Path(__file__).resolve().parents[1] / "src" / "truss_analysis" / "criticality"
 )
