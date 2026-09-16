@@ -1218,3 +1218,131 @@ def test_vertical_truss_is_measured_the_same_way_as_a_horizontal_one() -> None:
     assert vertical is not None
     assert vertical == pytest.approx(horizontal)
     assert vertical < 1.0, "a span along y must not produce a ratio above one"
+
+
+# --------------------------------------------------------------------------
+# round-7 audit, item 5: two positive-definiteness verdicts, no agreement test.
+#
+# The dense path decides by attempting a Cholesky; the sparse path decides by
+# Sylvester inertia plus `_definiteness_tolerance`. The docstring of the latter
+# claims the two are equivalent, and a round-6 commit records finding a
+# boundary state where one accepted and the other refused -- but nothing pinned
+# the agreement. This is the metamorphic check that was missing.
+#
+# The property asserted is the *safety* direction: the sparse path must never
+# accept a base state the dense path rejects. The converse (sparse refusing
+# where dense accepts) is conservative and expected within a tolerance band,
+# because the tolerance deliberately errs toward declaring instability --
+# Frobenius overstates ||A||_2, so the bound is slightly wide by design.
+# --------------------------------------------------------------------------
+
+
+def _verdict_dense(a_mat: np.ndarray) -> bool:
+    """True when the dense path would accept ``a_mat`` as positive definite."""
+    from scipy.linalg import LinAlgError, cholesky
+
+    try:
+        cholesky(a_mat, lower=True, check_finite=False)
+    except LinAlgError:
+        return False
+    return True
+
+
+def _verdict_sparse(a_mat: np.ndarray) -> bool:
+    """True when the sparse path would accept the same matrix."""
+    import scipy.sparse as sp
+
+    from truss_analysis.stability import (
+        _definiteness_tolerance,
+        _factor_sparse_base,
+        _sparse_inertia,
+        _sparse_smallest_eigenvalue,
+    )
+
+    a = sp.csr_matrix(a_mat)
+    try:
+        a_inv, lu = _factor_sparse_base(a)
+    except MechanismError:
+        return False
+    n_negative, n_zero = _sparse_inertia(lu)
+    if n_negative or n_zero:
+        return False
+    scale = float(sp.linalg.norm(a, "fro"))
+    tol = _definiteness_tolerance(int(a.shape[0]), scale)
+    return bool(_sparse_smallest_eigenvalue(a, a_inv) > tol)
+
+
+@pytest.mark.parametrize("n", [6, 24, 64])
+@pytest.mark.parametrize(
+    "target_ratio", [1e-3, 1e-2, 1e-1, 0.5, 1.0, 2.0, 10.0, 1e2, 1e3]
+)
+def test_sparse_verdict_is_never_more_permissive_than_dense(
+    n: int, target_ratio: float
+) -> None:
+    """Sweep ``lambda_min / (n eps ||A||_F)`` across four decades of the boundary.
+
+    The matrix is built with a prescribed spectrum -- one eigenvalue placed
+    exactly at ``target_ratio * tol`` and the rest far above it -- so the sweep
+    lands *on* the boundary band rather than hoping a physical model happens to
+    pass through it.  This is the region the round-6 audit found a disagreement
+    in, and the region `eigen_solver="auto"` enters at n_free >= 400.
+    """
+    import scipy.sparse as sp
+
+    from truss_analysis.stability import _definiteness_tolerance
+
+    rng = np.random.default_rng(1000 + n + int(target_ratio * 1e6))
+    q, _ = np.linalg.qr(rng.normal(size=(n, n)))
+    spectrum = np.full(n, 1e6)
+    spectrum[0] = 1.0
+    a0 = q @ np.diag(spectrum) @ q.T
+    tol = _definiteness_tolerance(n, float(sp.linalg.norm(sp.csr_matrix(a0), "fro")))
+    a_mat = a0 + (target_ratio * tol - spectrum[0]) * np.eye(n)
+    a_mat = 0.5 * (a_mat + a_mat.T)  # kill round-off asymmetry
+
+    dense_ok = _verdict_dense(a_mat)
+    sparse_ok = _verdict_sparse(a_mat)
+
+    assert not (sparse_ok and not dense_ok), (
+        "the sparse path accepted a base state the dense Cholesky rejected -- "
+        f"n={n}, target ratio={target_ratio:g}"
+    )
+    # the sweep must actually straddle the boundary, or the assertion above is
+    # vacuous: at large ratios both accept, at small ratios the sparse path
+    # refuses first.
+    if target_ratio >= 10.0:
+        assert dense_ok
+        assert sparse_ok
+    if target_ratio <= 0.1:
+        assert not sparse_ok
+
+
+@pytest.mark.parametrize("dl_free", [0.0, 1e-4, 3e-4, 5e-4, 6.5e-4, 7e-4, 8e-4, 2e-3])
+def test_both_paths_reach_the_same_verdict_across_the_prestress_sweep(
+    dl_free: float,
+) -> None:
+    """End-to-end version of the same property, on a real physical model.
+
+    Sweeps the fabrication prestrain from healthy through the loss of
+    positive definiteness.  Both paths must either raise ``MechanismError`` or
+    return the same ``lambda_cr``; a state where one answers and the other
+    refuses is the failure this pins.
+    """
+    nodes, elements, loads = _fan(dl_free=dl_free)
+    outcomes = {}
+    for solver in ("dense", "sparse"):
+        try:
+            res = linearized_buckling_load_factor(
+                nodes, elements, loads, eigen_solver=solver, warn_shallow=False
+            )
+            outcomes[solver] = ("value", res.lambda_cr)
+        except MechanismError:
+            outcomes[solver] = ("refused", None)
+
+    dense_kind, dense_value = outcomes["dense"]
+    sparse_kind, sparse_value = outcomes["sparse"]
+    assert not (sparse_kind == "value" and dense_kind == "refused"), (
+        f"dl_free={dl_free}: sparse answered {sparse_value} where dense refused"
+    )
+    if dense_kind == "value" and sparse_kind == "value":
+        assert sparse_value == pytest.approx(dense_value, rel=1e-8)

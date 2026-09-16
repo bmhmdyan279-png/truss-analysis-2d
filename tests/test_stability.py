@@ -25,6 +25,7 @@ import math
 
 import numpy as np
 import pytest
+import scipy.sparse as sp
 from scipy.linalg import eig as dense_generalized_eig
 
 from truss_analysis.assembly import assemble_global_matrices, member_geometry
@@ -35,7 +36,7 @@ from truss_analysis.criticality.engine import (
     member_forces,
     total_load_vector,
 )
-from truss_analysis.model import Element, Node
+from truss_analysis.model import Element, Node, fixed_dof_indices
 from truss_analysis.stability import (
     geometric_stiffness,
     linearized_buckling_load_factor,
@@ -101,6 +102,46 @@ def _fan(dl_free: float = 0.0, theta: float = 0.01):
         Element(id="post", node_i="A", node_j="B", E=E_STEEL, A=1e-6, I_sec=1e-12),
     ]
     loads = {"A": {"Fx": 0.0, "Fy": -50.0}}
+    return nodes, elements, loads
+
+
+def _pratt_redundant(n_panels: int = 8, span: float = 32.0, depth: float = 2.0):
+    """A statically indeterminate Pratt girder: straight chords, real DOF count.
+
+    Redundant on purpose -- the sparse/dense assembly paths must agree on a
+    model whose free-DOF map is not a contiguous prefix, and whose member set
+    is large enough for a COO duplicate-summation slip to show up.
+    """
+    dx = span / n_panels
+    nodes: list[Node] = []
+    elements: list[Element] = []
+    for i in range(n_panels + 1):
+        nodes.append(
+            Node(
+                id=f"b{i}",
+                x=i * dx,
+                y=0.0,
+                is_support=i in (0, n_panels),
+                support_dx=i == 0,
+                support_dy=i in (0, n_panels),
+            )
+        )
+        nodes.append(Node(id=f"t{i}", x=i * dx, y=depth))
+    for i in range(n_panels):
+        elements += [
+            Element(id=f"bc{i}", node_i=f"b{i}", node_j=f"b{i + 1}", E=E_STEEL, A=AREA),
+            Element(id=f"tc{i}", node_i=f"t{i}", node_j=f"t{i + 1}", E=E_STEEL, A=AREA),
+            Element(id=f"v{i}", node_i=f"b{i}", node_j=f"t{i}", E=E_STEEL, A=AREA),
+            Element(
+                id=f"d{i}", node_i=f"b{i}", node_j=f"t{i + 1}", E=E_STEEL, A=0.6 * AREA
+            ),
+        ]
+    elements.append(
+        Element(
+            id="vl", node_i=f"b{n_panels}", node_j=f"t{n_panels}", E=E_STEEL, A=AREA
+        )
+    )
+    loads = {nd.id: {"Fx": 0.0, "Fy": -50e3} for nd in nodes if not nd.is_support}
     return nodes, elements, loads
 
 
@@ -583,3 +624,108 @@ def test_geometric_stiffness_is_homogeneous_in_the_base_state() -> None:
     k_t = k_e[np.ix_(free, free)] + k_g_high[np.ix_(free, free)]
     assert np.linalg.norm(k_g_high[np.ix_(free, free)]) > 1e-3
     assert np.linalg.norm(k_t) < np.linalg.norm(k_e[np.ix_(free, free)])
+
+
+# --------------------------------------------------------------------------
+# round-7 audit, item 6: the sparse and dense geometric-stiffness assemblies
+# are two separate code paths and nothing pinned them to each other.
+#
+# `geometric_stiffness(sparse=True)` builds its dyads from the member-LOCAL
+# 4-vectors and scatters them through a COO triplet list with restrained DOFs
+# masked out; the dense path scatters into the full `(m, n_dof)` matrix with
+# `member_geometric_vectors` and then slices columns.  A round-6 commit message
+# records that this change "briefly fell into" a restricted-vs-unrestricted
+# indexing trap.  A trap that was fallen into once needs a test that stays
+# fallen-into-able, not a note that it was fixed.
+# --------------------------------------------------------------------------
+
+
+def _mixed_sign_forces(elements) -> dict[str, float]:
+    """Alternate tension and compression so no sign symmetry hides a bug."""
+    return {e.id: (-1.0) ** i * (1e5 + 3e4 * i) for i, e in enumerate(elements)}
+
+
+@pytest.mark.parametrize("restrain", ["none", "one", "both", "alternating"])
+def test_geometric_stiffness_sparse_equals_dense_matrix(
+    restrain: str,
+) -> None:
+    """Bit-for-bit matrix equality of the two assembly paths, at every
+    level of DOF restriction.
+
+    The restricted cases are the ones that matter: masking restrained DOFs out
+    of a COO triplet list and slicing columns out of a dense matrix are
+    different operations, and they agree only if the global-to-free index map
+    is applied identically in both.
+    """
+    nodes, elements, _ = _toggle(0.15)
+    n_dof = 2 * len(nodes)
+    all_dofs = list(range(n_dof))
+
+    if restrain == "none":
+        free = all_dofs
+    elif restrain == "one":
+        free = all_dofs[:-1]
+    elif restrain == "both":
+        free = all_dofs[:-2]
+    else:  # alternating: the map is not a contiguous slice
+        free = [d for d in all_dofs if d % 2 == 0]
+
+    forces = _mixed_sign_forces(elements)
+    dense = geometric_stiffness(nodes, elements, forces, free_dofs=free, sparse=False)
+    sparse = geometric_stiffness(nodes, elements, forces, free_dofs=free, sparse=True)
+
+    assert np.asarray(dense).shape == (len(free), len(free))
+    np.testing.assert_allclose(
+        np.asarray(sparse.toarray()),
+        np.asarray(dense),
+        rtol=1e-14,
+        atol=1e-14,
+        err_msg=f"sparse and dense K_G disagree with free_dofs={restrain}",
+    )
+
+
+def test_geometric_stiffness_sparse_equals_dense_unrestricted() -> None:
+    """The ``free_dofs=None`` case, on a larger model with both sign patterns."""
+    nodes, elements, _ = _pratt_redundant()
+    forces = _mixed_sign_forces(elements)
+    dense = geometric_stiffness(nodes, elements, forces, sparse=False)
+    sparse = geometric_stiffness(nodes, elements, forces, sparse=True)
+    np.testing.assert_allclose(
+        np.asarray(sparse.toarray()), np.asarray(dense), rtol=1e-14, atol=1e-14
+    )
+
+
+def test_geometric_stiffness_sparse_is_symmetric_and_correctly_sparse() -> None:
+    """Symmetry is what licenses the whitened eigenproblem; nnz is the point."""
+    nodes, elements, _ = _pratt_redundant()
+    forces = _mixed_sign_forces(elements)
+    k_g = geometric_stiffness(nodes, elements, forces, sparse=True)
+
+    assert isinstance(k_g, sp.csr_matrix)
+    delta = (k_g - k_g.T).toarray()
+    assert float(np.max(np.abs(delta))) == 0.0
+    # 4x4 dyads per member, so nnz is linear in the member count, not
+    # quadratic in the DOF count -- which is the entire reason the path exists.
+    assert k_g.nnz <= 16 * len(elements)
+    assert k_g.nnz < k_g.shape[0] ** 2
+
+
+def test_sparse_dense_agreement_survives_a_thermal_prestress() -> None:
+    """The path the fire chain actually takes: imposed forces from a temp field."""
+    nodes, elements, loads = _toggle(0.15)
+    temps = {e.id: 400.0 + 50.0 * i for i, e in enumerate(elements)}
+    setup = build_engine(nodes, elements, loads, temps)
+    u = base_displacement(setup, total_load_vector(nodes, loads, setup))
+    forces = {
+        e.id: float(v) for e, v in zip(elements, member_forces(setup, u), strict=True)
+    }
+
+    restrained = set(fixed_dof_indices(nodes))
+    free = [d for d in range(2 * len(nodes)) if d not in restrained]
+    dense = geometric_stiffness(nodes, elements, forces, free_dofs=free, sparse=False)
+    sparse = geometric_stiffness(nodes, elements, forces, free_dofs=free, sparse=True)
+    np.testing.assert_allclose(
+        np.asarray(sparse.toarray()), np.asarray(dense), rtol=1e-14, atol=1e-14
+    )
+    # and the prestress must actually be doing something, or the test is vacuous
+    assert float(np.max(np.abs(np.asarray(dense)))) > 0.0
