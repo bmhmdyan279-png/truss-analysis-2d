@@ -60,6 +60,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TEST_MAP: dict[str, tuple[str, ...]] = {
     "limitstates.py": (
         "tests/test_limitstates.py",
+        "tests/test_limitstates_boundaries.py",
         "tests/test_dcr_system_stability.py",
         "tests/test_effective_alpha_chain.py",
         "tests/test_thermal_demand.py",

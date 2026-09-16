@@ -83,6 +83,13 @@ def test_member_lengths_survive_translating_the_model() -> None:
     """
 
     def build(dx: float, dy: float):
+        # Redundant on purpose.  The first version of this fixture was a
+        # two-bar toggle: determinate, so restrained thermal expansion produces
+        # no force at all and `alpha_lengths` never reaches a result.  The
+        # mutant survived a test that set alpha, translated the model and
+        # compared both scan bases -- three changes that each looked sufficient.
+        # A third member down to a pinned node makes the apex redundant, which
+        # is what turns a length error into a force error.
         nodes = [
             Node(
                 id="L",
@@ -100,11 +107,52 @@ def test_member_lengths_survive_translating_the_model() -> None:
                 support_dx=True,
                 support_dy=True,
             ),
+            Node(
+                id="B",
+                x=0.0 + dx,
+                y=-1.0 + dy,
+                is_support=True,
+                support_dx=True,
+                support_dy=True,
+            ),
             Node(id="A", x=0.0 + dx, y=0.4 + dy, is_support=False),
         ]
+        # alpha must be non-zero, and this is what the first version of this
+        # test got wrong.  Inside UniformForceScan.build the local `lengths`
+        # array feeds ONLY `alpha_lengths = alpha * lengths` and `unit_lengths =
+        # where(alpha != 0, lengths, 0)`; the geometric lengths the stiffness
+        # comes from are computed independently by the assembler.  With
+        # Element's default `alpha = 0.0` both of those are zero vectors, so
+        # `lengths` never reaches a force and the mutant survives a test that
+        # reads exactly like this one.  The probe is what showed it.
         elements = [
-            Element(id="r1", node_i="L", node_j="A", E=E_STEEL, A=2.0e-3, I_sec=1.0e-6),
-            Element(id="r2", node_i="R", node_j="A", E=E_STEEL, A=2.0e-3, I_sec=1.0e-6),
+            Element(
+                id="r1",
+                node_i="L",
+                node_j="A",
+                E=E_STEEL,
+                A=2.0e-3,
+                I_sec=1.0e-6,
+                alpha=1.2e-5,
+            ),
+            Element(
+                id="r2",
+                node_i="R",
+                node_j="A",
+                E=E_STEEL,
+                A=2.0e-3,
+                I_sec=1.0e-6,
+                alpha=1.2e-5,
+            ),
+            Element(
+                id="r3",
+                node_i="B",
+                node_j="A",
+                E=E_STEEL,
+                A=2.0e-3,
+                I_sec=1.0e-6,
+                alpha=1.2e-5,
+            ),
         ]
         loads = {"A": {"Fx": 3.0e4, "Fy": -8.0e4}}
         return nodes, elements, loads
@@ -119,10 +167,18 @@ def test_member_lengths_survive_translating_the_model() -> None:
         assert f_moved[eid] == pytest.approx(f_base[eid], rel=1e-12), eid
 
     # and the same invariance through the closed-form scan, which computes the
-    # lengths itself rather than inheriting them from the assembler
-    s_base = UniformForceScan.build(*base).forces_at(400.0)
-    s_moved = UniformForceScan.build(*moved).forces_at(400.0)
-    assert np.allclose(s_base, s_moved, rtol=1e-12)
+    # lengths itself rather than inheriting them from the assembler.  Both bases
+    # are checked, because `lengths` reaches `alpha_lengths` in the constant
+    # basis and `unit_lengths` in the secant one, and a mutant in the shared
+    # computation has to be caught by whichever path actually reads it.
+    for flag in (False, True):
+        s_base = UniformForceScan.build(*base, use_effective_alpha=flag).forces_at(
+            400.0
+        )
+        s_moved = UniformForceScan.build(*moved, use_effective_alpha=flag).forces_at(
+            400.0
+        )
+        assert np.allclose(s_base, s_moved, rtol=1e-12), (flag, s_base, s_moved)
 
 
 # ---------------------------------------------------------------------------
@@ -507,3 +563,55 @@ def test_the_equivalent_mutants_are_equivalent_for_a_stated_reason() -> None:
     assert (nan > 0.0) is False
     assert (nan >= 0.0) is False
     assert (nan > 0.0) == (nan >= 0.0), "the two arms are indistinguishable"
+
+
+def test_the_euler_only_governing_tie_breaks_towards_buckling() -> None:
+    """``p_cr <= n_rd`` at exact equality reports BUCKLING, not YIELD.
+
+    The last genuine survivor in the mutation probe on this module.  Reaching
+    ``p_cr == n_rd`` exactly means solving for the second moment of area rather
+    than choosing one: at ambient ``k_y = 1`` and ``gamma_M,fi = 1``, so
+    ``n_rd = f_y A`` and ``p_cr = pi^2 E I / (k L)^2`` meet when
+    ``I = f_y A L^2 / (pi^2 E)``.  That member has ``lambda_bar = 1.0``, so it
+    is not stocky and the branch is reached.
+
+    The tie-break direction is not arbitrary.  Under ``EULER_ONLY`` the capacity
+    is ``min(p_cr, n_rd)``, and at equality the two are the same number -- so
+    the *capacity* is unaffected and only the reported governing limit state
+    changes.  But ``capacity_governing`` is what tells a reader which physical
+    mode to go and fix, and at ``lambda_bar = 1`` the member is squarely in the
+    buckling range: reporting YIELD there would send them to check a cross-
+    section that is not the problem.  Buckling is also the conservative reading,
+    since it is the mode whose reserve degrades faster with temperature.
+    """
+    from truss_analysis.limitstates import BucklingModel
+
+    area = 0.01
+    length = 3.0
+    i_exact = F_Y * area * length**2 / (math.pi**2 * E_STEEL)
+
+    nodes = [
+        Node(id="1", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(
+            id="2", x=0.0, y=length, is_support=True, support_dx=True, support_dy=False
+        ),
+    ]
+    elements = [
+        Element(id="c", node_i="1", node_j="2", E=E_STEEL, A=area, I_sec=i_exact)
+    ]
+    loads = {"2": {"Fx": 0.0, "Fy": -1.0e5}}
+    temps = {"c": 20.0}
+
+    ls = dcr_field(
+        nodes, elements, loads, temps, F_Y, buckling_model=BucklingModel.EULER_ONLY
+    )["c"]
+    assert ls.p_cr == pytest.approx(ls.n_rd, rel=1e-12), (
+        "the fixture must land exactly on the tie, or the operator is untested"
+    )
+    assert ls.lambda_bar == pytest.approx(1.0, rel=1e-12)
+    assert ls.capacity_governing is Governing.BUCKLING
+
+    # the capacity itself is the same either way at the tie -- which is exactly
+    # why the label is the only thing this test can pin, and why it is worth
+    # pinning: nothing else in the payload would move
+    assert ls.capacity == pytest.approx(min(ls.p_cr, ls.n_rd), rel=1e-12)
