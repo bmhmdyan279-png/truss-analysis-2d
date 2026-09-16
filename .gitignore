@@ -53,3 +53,7 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Sphinx build artifacts / auto-generated API docs
+docs/_build/
+docs/api/generated/
