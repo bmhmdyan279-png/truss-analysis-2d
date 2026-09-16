@@ -7,6 +7,496 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Round-7 external audit, on `main@ee0e9bf`. Nine independent critiques were
+read; the two that targeted this exact commit were verified line by line against
+the tree before anything was changed. Every finding was reproduced or refuted
+with a measurement first — none was accepted on description alone.
+
+Suite: **820 → 1066 tests, 68 → 0 warnings, 94.19 % → 94.4 % coverage.**
+The warning count is not a cosmetic change: `filterwarnings = ["error"]` is now
+in `pyproject.toml`, so a diagnostic that is not asserted somewhere is a build
+failure. That gate found two real defects on its first run (below).
+
+### Fixed
+
+- **The sparse positive-definiteness gate could return a confident, wrong
+  buckling load.** `_sparse_smallest_eigenvalue` shift-inverts at `sigma = 0`,
+  so it finds the eigenvalue of smallest *magnitude* — the right question at the
+  loss-of-definiteness crossing and the wrong one past it. On a base state already
+  deeply indefinite the probe returns a positive number, `lam_min <= pd_tol`
+  passes, and `eigsh` is handed an indefinite `M` for a problem documented as
+  symmetric positive definite. ARPACK does not check that assumption; it returns
+  a number. Reproduced on a real model, not a synthetic matrix: a three-fan chain
+  with the middle fan over-prestressed has a 6-DOF base spectrum of about
+  `{-8.5e5, -2.9e5, +1.0e5, ...}` and answered
+
+      dense : MechanismError                                (correct)
+      sparse: lambda_cr = 236.85, path = "sparse-lanczos"   (bogus)
+
+  The docstring admitted the gap and told the caller to pass
+  `eigen_solver="dense"` when such a state was suspected — but `"auto"` reaches
+  exactly that corner at `n_free >= 400`, so a safety-critical verdict was left
+  to the user guessing. The gate is now unconditional: Sylvester inertia read off
+  the `U` diagonal of the same `splu` factorisation the path needs anyway, which
+  costs nothing and depends on no iteration, no tolerance and no spectral
+  assumption. Verified against dense eigenvalue sign counts on 400 random
+  matrices with a prescribed number of negative eigenvalues: zero mismatches.
+  `diag_pivot_thresh=0.0` is load-bearing for this and is now documented as such.
+- **Four `warnings.warn` calls embedded their own category name in the
+  message**, and Python's warning machinery prefixes it again, so every CI log
+  for several releases read
+  `BucklingCheckWarning: BucklingCheckWarning: member 1: ...`. The doubled text
+  was visible in every log and read as normal — which is what 68 unasserted
+  warnings per run do. Fixed in `retrofit/actions.py`, `criticality/engine.py`,
+  `thermal/fire_curve.py` and `stability.py`.
+- **One diagnostic had two categories depending on which module emitted it.**
+  `limitstates` raised the `EULER_ONLY` capacity warning as a bare `UserWarning`
+  while `reliability` raised the identical message as `BucklingCheckWarning`, so
+  a caller filtering on one silently missed the other — and a bare `UserWarning`
+  cannot be filtered precisely at all, since every third-party library uses it.
+  New `LegacyBucklingModelWarning`, deriving from `BucklingCheckWarning` so
+  existing filters and `pytest.warns` entries keep working.
+- **`steel_temperature` crashed on a scalar-only fire curve.** Its RK4 stages
+  called the curve with scalars but its output history called it with an array
+  unconditionally, so a `lambda t_min: ...` — the declared `FloatOrArray`
+  signature and the natural way to write a bespoke or measured exposure — raised
+  `TypeError` at the end of an otherwise successful integration. Reproduced on the
+  baseline commit; it was not introduced by this round. Both solvers now go
+  through one `_gas_temperature_grid` that tries the vector call and falls back
+  point by point, so a performance optimisation cannot break the API again.
+- **`max_heating_rate()` understated the peak on a downsampled history.** A
+  finite difference across widened output intervals measures less than the true
+  rate, and the peak occurs in the first minute where the curve is steepest.
+  Measured on a 30-minute ISO 834 exposure at `A_m/V = 200`: 1.0821 degC/s from
+  12 output points against a true 1.0966. Now measured on the integration grid
+  and carried as `max_heating_rate_full`, which the method prefers.
+- **`theta_a0` was the one argument `protected_steel_temperature` never
+  validated.** A NaN propagated through every step and an `inf` produced a
+  history of NaNs, both inside a normally-returned result object. Now rejected in
+  both solvers, identically — their results are documented as interchangeable, so
+  their strictness has to be too.
+- **The material model clamped silently above 1200 degC.** Every accessor clips
+  to Table 3.1's tabulated range, which is right for an interpolator and
+  unacceptable for a fire calculation: a thin member in a severe exposure passes
+  the ceiling, gets the 1200 degC row, and returns a history that looks ordinary.
+  New `SteelTemperatureRangeWarning` from both solvers, plus an `out_of_range`
+  field on `SteelHeatingResult` so the fact survives into a payload produced with
+  warnings suppressed. Note that ISO 834 cannot trigger it — its gas temperature
+  asymptotes near 1193 degC — so the test uses a severe ~1400 degC curve.
+- **`normalized_gradient` was a global secant, not the first-order sensitivity
+  its docstring claimed.** It fitted a straight line across every probed
+  amplitude, a span of twenty-fold by default. Measured on the two-bar toggle,
+  whose bifurcation load is cubic in the rise: `-42.3` against a true derivative
+  of `-119.9`, a 65 % error in the *unconservative* direction on the one number
+  that tells a designer how much to distrust `lambda_cr`. Now the derivative at
+  `eps = 0` of a degree-<=3 fit to the amplitudes inside the EN 1993-1-1 Table
+  5.1 band, anchored at the exact point `(0, 1)` — measured error 0.0002 %. The
+  old slope survives as `secant_gradient`, honestly named.
+- **The imperfection verdict was decided by the least realistic amplitude
+  probed.** `DEFAULT_IMPERFECTION_AMPLITUDES` topped out at 2 % of the bounding
+  box: on a 24 m truss an initial out-of-straightness of 0.48 m, several times
+  any code tolerance. Because `imperfection_sensitive` was
+  `max(relative_drop) > 5 %`, that single point set the flag. Defaults now span
+  the Table 5.1 band `(0.001, L/350, L/200, 0.02)` — still four amplitudes, still
+  eight solves — and the verdict is anchored at `verdict_amplitude`, the largest
+  probed amplitude inside the band.
+- **`_perturbed_nodes` moved the supports.** A solver-returned mode has
+  exactly-zero entries on restrained DOFs, so the default path was safe, but a
+  caller-supplied `mode=` is arbitrary and any support component was consumed as
+  a coordinate change — a support-settlement analysis reported as an
+  imperfection study, with a different demand path. Restrained components are
+  now masked and the masked magnitude reported once, not once per amplitude per
+  sign.
+- **The "shallow" screen conflated geometric curvature with structural
+  slenderness, and the two modules did not even share a measure.**
+  `postprocess.check_shallow_system` computed `ptp(y)/ptp(x)` while
+  `stability._rise_span_ratio` computed the orientation-robust extent ratio, so
+  the same model could be shallow on one path and not on the other, and a
+  *vertical* truss was reported with a ratio above one and never flagged at all.
+  Worse, `depth/span < 0.1` was reported as a snap-through risk: a 30 m x 2 m
+  Pratt girder has `depth/span = 0.067`, straight chords, and no snap-through
+  mode at all — its instability is member buckling, which `limitstates` already
+  assesses. Warning about a phenomenon the geometry cannot exhibit, on nearly
+  every real model, is how a reader learns to ignore warnings. The screen now
+  measures curvature directly (at each node, the pair of incident directions most
+  nearly opposite is the candidate chord continuation; if it is within 135 deg of
+  straight, its kink `pi - angle` is measured) and claims snap-through only when
+  a chord is genuinely bent *and* the depth/span is small. Measured: Pratt and
+  Warren girders return exactly 0.0, a toggle returns `2 atan(h/b)` verified
+  against the closed form to 1e-9, invariant under a 37 deg rotation. Both
+  modules now route through one `shallow_system_screen`.
+- **`BucklingResult` violated its own contract when `lambda_cr` was infinite.**
+  It returned `modes=[zeros]` with `load_factors=(inf,)` and `multiplicity=1`, so
+  `zip(res.modes, res.load_factors)` paired a zero vector with an infinite load
+  factor: "here is the buckling mode, it buckles at infinity". The docstring's
+  promise that every mode is unit 2-norm was false in exactly that branch, and
+  `load_factors` claimed "`inf` entries mean that mode does not buckle" when the
+  structure only retains `nu > 1e-14`, making an `inf` entry unreachable in the
+  finite case and mandatory in the infinite one — the same token meaning two
+  things. Absence is now reported as absence.
+- **`content_hash` covered the entries but not the revision.** Re-certifying the
+  same envelope against a new edition of EN 1993-1-2 — bumping `updated` and
+  `audit_round` while the wording stays identical because the standard's numbers
+  did not move — left the hash unchanged, so a consumer pinned to it could not
+  tell the two certifications apart. `audit_round` and each entry's verification
+  class are now hashed; `updated` and `version` deliberately are not, because a
+  date is metadata about the artefact and a version changes every release.
+- **The README statistics gate depended on the machine it ran on.** `measure()`
+  probed whether `openseespy` imported and passed the three reference-solver
+  `--ignore` flags only when it did not, so HEAD advertised 820 tests / 94.2 %
+  measured without the extra while earlier commits on the same tree advertised
+  838 / 94.19 % measured with it. `make stats-check` was red on one machine and
+  green on another for the same commit, and the two `fix(stats)` commits
+  immediately preceding this round were attempts to reconcile numbers that were
+  never measuring the same suite. The canonical configuration is now
+  unconditional — always the same three ignores CI runs — and the with-validation
+  count is printed as `informational:` output that nothing compares against a
+  file. A number that is not canonical is not a gate.
+- **The version was never patched, so one tree gave three answers.** The CLI
+  transcript in both READMEs said 2.5.0, the BibTeX records said 2.5.0, and
+  `CITATION.cff` said 2.8.0, while the tree built `2.8.1.dev21+gee0e9bfd5`. The
+  script synchronised counts and coverage in four places per README and left the
+  version alone — the drift it exists to prevent, in the field it did not cover,
+  and the field a reader is most likely to copy. `_released_version()` now takes
+  the latest release tag (not the working-tree setuptools-scm string, because a
+  citation is about the release rather than the commit) and all five occurrences
+  are patched and gated together.
+- **The hygiene scanner was performing quality control rather than doing it.**
+  It declared its forbidden terms as concatenated string fragments
+  (`"review" + "er"`, `"Pha" + "se"`) so its own source would not match its own
+  rules, and then exempted itself a second time through `SELF_PATHS`. Both
+  mechanisms existed for one purpose: to keep the checker from catching itself.
+  The vocabulary now lives in `scripts/hygiene_terms.yaml`, so the scanner's
+  source contains no forbidden term and **passes its own scan on the merits, with
+  no self-exemption** — a claim that is now tested rather than asserted.
+- **`.baseline_perf.json` slipped through the artefact filter.** `ARTIFACT_NAME`
+  anchors its alternative group at `$`, so every alternative has to reach the end
+  of the path; `\.baseline_perf` matched the bare name only. `\.coverage` in the
+  same regex already carried the `(\..*)?` suffix — this one had been missed. A
+  filter that rejects the name but not the file it names guards nothing.
+- **`scan_file` bound its vocabulary as a default argument**, evaluated once when
+  the `def` ran, so the module attribute and the parameter were two different
+  objects and replacing one left the other scanning against stale rules. The same
+  late-binding trap the benchmark driver had, in a hook whose entire job is to
+  notice things.
+- **`CHANGELOG` listed the C11 deferral twice**, verbatim, in the round-6
+  "Deferred with rationale" section. Removed, and the survivor carries the
+  round-7 note about `MemberResponse.temperature` having to migrate with the
+  split.
+- **`docs/theory.md` §1.2 still said "No geometric nonlinearity"** while §9
+  documented the geometric stiffness and the linearised bifurcation load.
+  Replaced with the distinction that actually matters — *where* the second-order
+  term enters — as a table: `solver.solve` is first-order, `lambda_cr` and
+  `exact_tangent_stiffness` both use `K_G`, and what remains absent is path
+  following.
+
+### Added
+
+- **`benchmarks/reference_problems.py` was rebuilt from nothing into something
+  that runs.** The previous version declared ten canonical reference problems and
+  was dead code: `run_all_benchmarks(engine, ...)` took an `AnalysisEngine` that
+  existed nowhere in `src/` — the name appeared once, in its own docstring — and
+  no test imported the module, so a contract with no consumer could not be broken
+  by any change to the library. Three reference values were
+  `538.0  # typical`, `710.0  # approximate` and `420.0` with no source at all,
+  against tolerances of 10-15 %; the real unprotected-steel temperature at 30 min
+  and `A_m/V = 200` is 828.17 degC, so the 710 degC figure was wrong by 118 degC
+  and the tolerance was wide enough that it would have passed anyway. A fourth
+  declared `expected = 1e-4` with `tolerance = 1.0` — ten thousand times the
+  quantity it named, which no finite-difference error can exceed. Two more built a
+  Koiter cylindrical *shell* and a Williams shallow *arch*, in a pin-jointed truss
+  library that can represent neither. This is the defect round 6 identified in
+  `tangent_verification.py` ("a verifier that always passes is worse than none")
+  reproduced one release later at larger scale.
+
+  Ten problems now run, each stating which library function it exercises, which
+  independent oracle produces the reference, and what tolerance connects them in
+  the units of the quantity:
+
+  | problem | measured | bound |
+  |---|---|---|
+  | `euler_column_finite_difference` | 3.4e-11 rel | 1e-9 rel |
+  | `toggle_bifurcation_closed_form` | 4.4e-16 rel | 1e-10 rel |
+  | `toggle_imperfection_closed_form` | 0.0 abs | 1e-9 abs |
+  | `restrained_bar_thermal_force` | 1.8e-16 rel | 1e-12 rel |
+  | `unprotected_steel_heating_iso834` | 7.5e-6 degC | 0.05 degC |
+  | `protected_steel_heating_code_step` | 0.691 degC | 1.5 degC |
+  | `protected_steel_heating_converged` | 0.023 degC | 0.10 degC |
+  | `rk4_convergence_order` | 1.2e-8 | 0.02 |
+  | `table_3_1_reduction_factors` | 0.0 | 1e-12 |
+  | `tangent_stiffness_finite_difference` | 8.0e-9 | 1e-7 |
+
+  The oracles are independent by construction: the exact spectrum of the
+  central-difference column operator Richardson-extrapolated (and cross-checked
+  against a sparse Lanczos solve), hand-derived closed forms for the toggle and
+  its imperfection sweep, `solve_ivp` DOP853 at `rtol=1e-10` on the 4.2.2.2 ODE,
+  the 4.2.5.2 recursion reimplemented from the clause text, the shipped Table 3.1
+  JSON read and interpolated directly row by row, and two independent central
+  differences of `internal_force`.
+- **`tests/test_benchmarks.py` (17 tests)** — the file whose absence was the root
+  cause. Three mechanisms matter more than the count: a **negative control**
+  (a problem perturbed by 0.1 % must be reported failed, must keep its row, and
+  must flip the CLI exit status — a suite whose failure path has never been
+  exercised is a suite nobody knows can fail); an **anti-vacuity rule** (every
+  relative tolerance <= 1e-6, every absolute tolerance <= 1 % of its reference,
+  calibrated so the old 10-15 % and 1e4x bounds fail it while the physically
+  justified 1.5 degC truncation bound passes at 0.28 %), paired with a required
+  observed margin above 1.2x so a tolerance cannot be fitted to its own
+  measurement; and **oracle cross-checks**, because an oracle has to be checked
+  too or a typo in it silently becomes the reference for the thing it validates.
+- **`use_effective_alpha` on `prestress_lengths` and `build_engine`** — the last
+  surviving scientific item from round 5. `effective_alpha(T)` was exposed but
+  nothing in the default chain consumed it, so a user with `alpha = 1.2e-5`
+  running a 600 degC analysis got a restrained force about 17 % low against an
+  unchanged capacity: an un-conservative DCR with no notice. Understatement
+  measured across the range: 3.9 % at 100 degC, 12.3 % at 400, 17.1 % at 600,
+  19.4 % at 700. With the flag set, the imposed strain reproduces `eps_th(T) * L`
+  to a relative 1e-14 — not a correction factor tuned to one temperature but the
+  standard's own curve through the framework's existing term. `k_axial` is
+  bit-identical either way, since stiffness degradation is a separate question.
+- **`ConstantAlphaWarning`**, above `ALPHA_CONSTANCY_LIMIT = 150 degC` (the
+  temperature at which the strain error first exceeds 5 %, measured rather than
+  rounded). The percentage it quotes is computed from the `alpha` values the
+  caller actually used, so a model that already carries a secant coefficient is
+  told the truth about its own input instead of being warned about somebody
+  else's. A member whose `alpha` is exactly zero is never overwritten under
+  either setting: zero is an explicit statement that the member does not expand,
+  not an unfilled default.
+- **`SteelHeatingResult.step_error_estimate`** via a new `estimate_error=` flag on
+  both solvers, from one step-halving Richardson pair. This settles an argument
+  that was previously open: 4.2.2.2 states an ODE and earns fourth-order RK4,
+  while 4.2.5.2 states a *recursion* with a clip and a step ceiling, so the
+  protected path reproduces it with explicit Euler because a fire-resistance
+  duration quoted against a different integrator than the code's is not
+  code-compliant. Both choices are right; what was missing is that they are not
+  comparable in accuracy. Measured at each solver's default step:
+
+      unprotected, RK4 at 5 s        4.3e-6 degC
+      protected,   Euler at 30 s     0.7123 degC
+
+  and the 0.7123 agrees with the 0.691 the reference suite measures against an
+  independently written recursion, so the estimate bounds the real error rather
+  than decorating the result.
+- **`verification` and `verification_supplement` on every physics-boundary entry,
+  plus `verification_summary()`.** A result could previously carry a valid
+  `content_hash` for a boundary whose verification had never run in that
+  environment: the OpenSeesPy bridge is an optional extra, its tests skip, and the
+  digest reported the same bytes either way, so "verified" was indistinguishable
+  from "verification not attempted here". The summary reports counts per evidence
+  class, names the entries whose evidence could not run, and gives a single
+  `complete` flag a consumer can check without knowing which classes depend on an
+  extra. Embedded in `digest()`, so it reaches a result payload. Two invariants
+  are enforced at load: an unknown evidence class is rejected, and a row claiming
+  a modelled status may not declare `declared-only` evidence.
+- **`tests/test_hygiene_scanner.py` (65 tests)** — the scanner had none. Writing
+  them found the two artefact/late-binding bugs above.
+- **`tests/test_stats_gate.py` (14 tests)**, including a drift guard that parses
+  `.github/workflows/ci.yml` and asserts its `--ignore` paths are the same three
+  the script uses. If CI changes and the script does not follow, the READMEs would
+  quote a suite no runner executes — a subtler version of the same defect, and one
+  a comment could never catch.
+- **A self-checking hygiene vocabulary.** Every rule in `hygiene_terms.yaml`
+  carries `matches` and `not_matches`, and `load_vocabulary` refuses a rule whose
+  examples contradict its pattern in either direction. That makes the file a
+  *checked specification* rather than a comment: a regex that has drifted from
+  what its author thought it matched fails at load with the offending string
+  quoted. The `not_matches` half is what makes an over-broad rule load-bearing
+  rather than cosmetic. The examples live in the data file and never in `tests/`,
+  because a test file is scanned by `--all` and inlining a real positive case
+  would make the repository fail its own hook — and the fix for that must not be
+  to reassemble terms from fragments again.
+- **`CONTRIBUTING.md` / `CONTRIBUTING.fa.md`: commit provenance and tool
+  assistance.** `Co-authored-by` attribution for agent-assisted commits, commit
+  signing, the single-identity expectation, and the practice of recording audit
+  findings that did not reproduce. The repository's subject is provenance —
+  results carry `solver_metadata`, the physics boundary is hash-pinned, every
+  reference value names its oracle — so its own history should be held to the
+  same standard.
+- **Sparse/dense equivalence pinned at two levels** (matrix and verdict). The
+  matrix-level check covers four levels of DOF restriction — none, one, both, and
+  alternating, so the global-to-free map is exercised as a non-contiguous
+  permutation rather than only as a prefix — plus symmetry and an
+  `nnz <= 16 * n_members` bound, since linear-in-members memory is the entire
+  reason the sparse path exists. The verdict-level check sweeps
+  `lambda_min / (n eps ||A||_F)` across `[1e-3, 1e3]` using a prescribed spectrum,
+  because a physical model never reaches that band: on the fan used elsewhere the
+  ratio jumps from 2.9e10 straight to negative. The asserted property is the
+  *safety* direction — sparse must never accept what dense rejects — and the test
+  also asserts the sweep straddles the boundary, so it cannot pass vacuously.
+
+### Changed
+
+- **`test_convergence_order_is_four` now tests the convergence order.** It read
+  `_, errors = compute_convergence_order(...)`, discarding the estimate its own
+  name advertised, and asserted only that the errors did not increase. Finding out
+  *why* it could not simply assert the discarded value is the useful part: the
+  reference was too weak, not the method. `_reference_solution` uses `solve_ivp`
+  at `rtol=1e-12`, but the EN specific-heat table has a kink near 735 degC, so the
+  adaptive integrator saturates around 4e-5 degC while the RK4 sequence resolves
+  to 5e-6 degC — measured against that reference the apparent order is 2.4 and
+  then collapses. Against a Richardson limit of the library's own sequence, whose
+  successive pairs agree to ~7e-5 degC, the order is **3.999999988**. The library's
+  RK4 was always fourth order; the test that claimed to check this never did, and
+  the reference it relied on was weaker than the thing it measured. The monotonic
+  decrease property is kept as its own separately named test.
+- **`filterwarnings = ["error"]` in `pyproject.toml`.** This library's diagnostics
+  are the product, not incidental logging: a missing `I_sec`, a penalty too small
+  to approximate a constraint, a section factor below the lumped-capacitance
+  limit, a steel temperature past Table 3.1's ceiling. Each has a dedicated test
+  asserting it fires, so a warning leaking unasserted into the summary is either a
+  diagnostic nobody pinned or one firing on a model that should not have triggered
+  it — and both are defects. Twelve modules that trigger a diagnostic deliberately
+  carry a module-level `pytestmark` naming the exact category, with a comment
+  saying which test asserts it and why the rest of the module may not. Nothing is
+  filtered by bare `UserWarning`, nothing by `ignore` alone, and no filter is wider
+  than the categories that module actually produces.
+- **`ShallowScreen` is returned on `BucklingResult.shallow_screen`**, so the
+  verdict is auditable rather than inferred from the absence of a warning. The
+  depth/span fact is still reported for a slender girder; what changed is that it
+  no longer licenses a claim about snap-through.
+- **`ImperfectionStudy` gained five fields** (`secant_gradient`,
+  `gradient_amplitudes`, `gradient_in_code_band`, `verdict_amplitude`,
+  `relative_drop_at_verdict`) so the derivative carries its provenance instead of
+  being an unverifiable scalar.
+- **`ParametricFire`'s out-of-range `q_td` notice has its own category.** It was a
+  bare `UserWarning` whose text described itself as
+  "LumpedCapacityWarning-adjacent" — naming a class about the lumped-capacitance
+  *member* model, for a finding about the *gas curve*, so a caller filtering on
+  category could not catch it and a caller reading it was pointed at the wrong
+  physics. Now `ParametricFireRangeWarning`.
+- **The redundant per-step work in the protected-heating recursion is hoisted.**
+  `capacity_ratio_mu` re-derived `specific_heat(theta_a)` (already computed one
+  line earlier) and `unit_mass()` (already hoisted above the loop) on every step —
+  three table lookups where one sufficed, 480 redundant lookups for a two-hour
+  exposure at 30 s. Inlined, with the public function kept and pinned equal to the
+  inline expression across 20-1200 degC, because two expressions of one clause is
+  exactly how they drift. The gas-temperature grid is evaluated once rather than
+  twice per step. `theta_final` is unchanged to 1e-12.
+- **The `referee_term` hygiene rule was narrowed.** It matched the bare plural and
+  singular of a common English noun, applied to `CONTRIBUTING.md` — a document
+  that has to talk about people reviewing pull requests. The repository's earlier
+  response to the rule firing was commit `f3265a4`, which rewrote prose around the
+  word instead of asking whether the rule was right. Erasing a term is not the same
+  as removing what the term stood in for. It now matches the *phrasing* of a
+  private assessment workflow — a numbered assessor, the compound and report
+  forms, and the reply-to-assessors heading — rather than the ordinary noun, which
+  is what the rule was always for. Both halves are pinned: five phrasings that must
+  fire and four ordinary sentences that must not. The examples live in
+  `scripts/hygiene_terms.yaml` and are checked by `load_vocabulary`, because this
+  file is scanned too and quoting the phrasings verbatim here would trip the very
+  rule being described.
+
+### Behaviour changes ⚠
+
+- `BucklingResult.modes[0]` raises `IndexError` when `lambda_cr` is infinite,
+  where it previously returned a zero vector. Deliberate: the old behaviour
+  converted "no bifurcation" into a plausible-looking mode shape, and a loud
+  `IndexError` is the right failure mode for a caller that assumed a mode exists.
+  `mode` remains a fixed-shape zero vector and `multiplicity` is `0`.
+- `ImperfectionStudy.normalized_gradient` changes value for any model whose
+  response is curved over the probed range. That is the fix, not a regression.
+  `DEFAULT_IMPERFECTION_AMPLITUDES` changes; `imperfection_sensitive` can change
+  verdict where it was previously set by an un-code-like amplitude.
+- `ShallowSystemWarning` no longer fires on parallel-chord girders, and its
+  message now names the chord kink and the node carrying it. `check_shallow_system`
+  returns the orientation-robust ratio, so a vertical truss is measured the same
+  way as a horizontal one; it also accepts an optional `elements=` argument,
+  without which the screen stays conservative and assumes arch-like.
+- `run_all_benchmarks(engine, verbose)` is now
+  `run_all_benchmarks(verbose, problems)`; `ReferenceProblem.setup()`,
+  `get_reference_value()`, `extract_computed_value(result)` and the `result: dict`
+  plumbing are replaced by `computed_value()` / `reference_value()`. Nothing in the
+  repository consumed the old API — that was the defect.
+- `physics_boundary().content_hash()` changes, having absorbed `audit_round` and
+  the verification classes. Any pinned expectation must be updated; the hash is a
+  compatibility assertion, so it *should* move.
+- `boundary_digest()` gains a `verification` key. Consumers comparing digests for
+  exact equality will see the change.
+- `SteelHeatingResult` gains three optional fields, all defaulting to `None`, so
+  hand-constructed instances keep working.
+- The `EULER_ONLY` capacity warning is now `LegacyBucklingModelWarning` rather
+  than `UserWarning` / `BucklingCheckWarning`. It subclasses
+  `BucklingCheckWarning`, so filters on that class keep working; filters written
+  against bare `UserWarning` for this specific message will not match by name.
+
+### Not reproduced (recorded with the measurement)
+
+- **"`thickness_ratio_from_section` returns a raw scipy `ValueError` at exactly
+  `kappa = 1/12`."** It does not. `brentq` tolerates `f(a) == 0` and returns `a`,
+  so the solid limit resolves to `r = 2.000000001`:
+
+      kappa = 1/12 exactly    ->  r = 2.000000001000
+      kappa = kappa_min       ->  r = 2.000000001000
+      kappa_min - 1 ulp       ->  ValueError (the library's own message)
+      kappa_min + 1 ulp       ->  r = 2.000000012167
+
+  Recorded rather than silently "fixed", because the underlying concern is still
+  worth acting on: the `<` guard is exact in the comparison it makes, but
+  `kappa_min` is itself a floating-point evaluation `_R_EPS` inside the boundary,
+  so a section supplied at exactly the solid limit lands on either side of it by a
+  rounding — and which side depends on the platform. The answer was resting on
+  brentq's *undocumented* tolerance of a zero endpoint. The bracket is now checked
+  explicitly and the solid limit returned, pinned by a 200-point sweep across four
+  decades of `I/A^2` asserting no scipy bracket message can escape.
+- **"`expected = 1e-4` with `tolerance = 1.0` cannot fail."** Correct, and the
+  problem is deleted — but replacing it needed more than a tighter number. A
+  *forward* difference of `internal_force` at `eps = 1e-6` measures 2.8e-5 against
+  the analytic tangent, four orders worse than the central difference's 8.0e-9, so
+  a naive rewrite would have been testing the difference scheme's error rather than
+  the operator's. The shipped problem uses two independent *central* differences
+  and bounds the worse of them at 1e-7.
+- **"The RK4 scheme does not achieve fourth order on the fire problem."** It does;
+  the reference was the weak link. See `Changed` above for the measurement.
+
+### Deferred with rationale (recorded, not dropped)
+
+- **An experimental anchor (Cardington or equivalent).** Both round-7 critiques
+  name this as the largest remaining validation gap and they are right: every
+  oracle in the suite is analytical or numerical, so the whole chain is verified
+  against independent *computation* rather than against a measured fire. It is
+  deferred because doing it properly requires test data with citable provenance —
+  a report number, a specimen description, a measurement uncertainty — and
+  transcribing numbers from memory is precisely the failure this round removed
+  from `benchmarks/`. `538.0  # typical` is what a fabricated experimental anchor
+  looks like. The `empirical_validation` boundary entry stays `not-supported` and
+  now declares `verification: declared-only`, so the absence is machine-readable
+  rather than a sentence in a document.
+- **`physics_assumptions` on every result type.** Round 7 asked that
+  `AnalysisResult`, `BucklingResult` and `SteelHeatingResult` each carry an
+  explicit list of the assumptions they were computed under. Half of it is done:
+  `BucklingResult.shallow_screen` and `SteelHeatingResult.out_of_range` /
+  `step_error_estimate` are exactly such fields, and
+  `boundary_digest()["verification"]` now states whether the evidence ran. What
+  remains is a uniform `physics_assumptions` shape across all three result types,
+  which is a public-API change best made once rather than incrementally.
+- **Rendering `docs/theory.md` §12 from the YAML.** The current pin compares the
+  prose table against the artefact through a normalisation step, which works but
+  is fragile: any edit to §12 that changes its structure breaks the pin without
+  the content having moved. Inverting the dependency — generate the section from
+  the YAML, compare the generation against the file — leaves one source of truth
+  and makes the prose an artefact rather than an input. Deferred as a standalone
+  change because it touches the documentation build, not the library.
+- **Newton-Raphson load stepping and arc-length continuation.** `K_G`,
+  `exact_tangent_stiffness` and `verify_linearization_convergence` are the
+  prerequisites and all three now exist and are measured, so the infrastructure is
+  in place — but path following is a multi-week commitment with its own validation
+  burden, and shipping a half-tested nonlinear branch into a library whose value
+  is that its claims are checked would cost more than the linearised scope costs
+  now. The boundary declares `post_buckling` and `geometric_nonlinearity` as
+  `not-supported` and says so in every result payload.
+- **Chunking / sparse rank-1 for `ci_sweep`, and parallel Monte Carlo.** Correctly
+  identified as the remaining bottlenecks, and correctly ranked below everything
+  above: they are performance, not correctness, and the round-7 measurements show
+  the current paths are accurate to 1e-11 or better where it matters.
+- **Member (distributed and point) loads.** Round 1's first recommendation and
+  still open. It requires equivalent nodal forces in the load-vector assembly and
+  a decision about whether a member load splits the member, which is an API
+  question rather than an implementation one.
+
+---
+
+## [Unreleased]
+
 Round-6 external audit. 22 tracked items (7 P0 scientific/safety, 5 P1
 physical coverage, 10 P2 performance/architecture) plus the three failures
 that were live on `main` at the start of the round. As in rounds 1-5, each
@@ -353,14 +843,6 @@ Collected for quick scanning; each is detailed above.
 
 ### Deferred with rationale (recorded, not dropped)
 
-- **C11 -- separate `MaterialState` from `MemberResponse`.** The two are
-  genuinely conflated (`MemberResponse` carries both the response quantities
-  `axial_force`/`E` and the section/material state `A`/`I_sec`/`yield_stress`/
-  `temperature`). Splitting them is the right call but touches every
-  constructor site in the reliability chain, and doing it at the end of a
-  round with no budget for a full re-verification is how a clean refactor
-  becomes a silent behaviour change in a safety-critical path. Deferred to a
-  round of its own.
 - **C9 -- mandatory triple ranking output.** `ProbabilisticRanking` already
   carries two orderings (mean-CI probabilistic and deterministic-at-mean-inputs)
   plus the sample standard deviations a third would be built from; making a
@@ -375,7 +857,10 @@ Collected for quick scanning; each is detailed above.
   constructor site in the reliability chain, and doing it at the end of a round
   with no budget for a full re-verification is how a clean refactor becomes a
   silent behaviour change in a safety-critical path. Deferred to a round of its
-  own.
+  own. Note added in round 7: `MemberResponse.temperature`, introduced by the
+  round-5 chi fix, now carries fire/ambient regime selection and has to migrate
+  with this split -- which is one more reason it needs a round of its own rather
+  than a slot at the end of one.
 
 ## [2.8.0] — 2026-09-15
 
