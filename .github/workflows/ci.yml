@@ -111,6 +111,43 @@ jobs:
           --ignore=tests/validation/test_level4_rho_branches.py
           --ignore=tests/validation/test_level5_crossval.py
 
+  reference-solver:
+    name: Reference-solver bridge (mandatory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The three files the canonical stats configuration ignores are the ones
+    # that need a reference solver the other runners do not have.  Ignoring
+    # them from the *statistics* is correct -- the published test count must be
+    # the same number on every machine -- but ignoring them from *every job*
+    # meant the cross-validation column of the verification matrix was never
+    # enforced anywhere.  `physics_boundary` ships a digest of that evidence in
+    # `solver_metadata`, so a claim was travelling in the payload that no gate
+    # checked.  This job is the gate: same three files, run unconditionally,
+    # failing the build if the bridge breaks.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install package with the reference-solver extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,validation]"
+      - name: Confirm the reference solver actually imported
+        # An `importorskip` that skips is green.  If openseespy fails to install
+        # on this runner the suite below would pass while testing nothing, so
+        # the import is asserted before the tests are allowed to run.
+        run: python -c "import openseespy.opensees as o; print('opensees', o.getVersion())"
+      - name: Run the reference-solver bridge
+        run: >
+          pytest
+          tests/validation/test_level4_opensees.py
+          tests/validation/test_level4_rho_branches.py
+          tests/validation/test_level5_crossval.py
+          -q --no-header -p no:randomly --no-cov -rs
+
   stats:
     name: README statistics gate (make stats)
     runs-on: ubuntu-latest

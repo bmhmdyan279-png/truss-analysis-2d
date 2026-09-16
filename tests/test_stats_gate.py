@@ -69,6 +69,50 @@ def test_the_ignored_files_exist() -> None:
         assert (REPO_ROOT / rel).exists(), rel
 
 
+def test_the_ignored_files_are_run_by_a_mandatory_job() -> None:
+    """Ignoring a file from the *statistics* must not mean ignoring it forever.
+
+    The canonical configuration excludes the three reference-solver files so
+    the published test count is the same number on every machine.  That is the
+    right reason to exclude them from ``make stats`` and the wrong reason to
+    exclude them from CI: ``physics_boundary`` ships a digest of the
+    cross-validation evidence inside ``solver_metadata``, so a claim was
+    travelling in the payload that no gate checked.  The ``reference-solver``
+    job is that gate.
+
+    Parsed from the workflow rather than trusted from a comment, for the same
+    reason as the test above: a job that is quietly deleted, renamed, or given
+    an ``if:`` condition must fail here instead of turning the verification
+    column of the matrix back into an unenforced claim.
+    """
+    import yaml
+
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+    assert "reference-solver" in jobs, (
+        "the mandatory reference-solver job is gone; the three files the stats "
+        "gate ignores would then be run by nothing"
+    )
+    job = jobs["reference-solver"]
+    # unconditional: an `if:` here would make the gate advisory again
+    assert "if" not in job, "the reference-solver job must not be conditional"
+
+    commands = " ".join(str(step.get("run", "")) for step in job["steps"])
+    for rel in stats.REFERENCE_SOLVER_FILES:
+        assert rel in commands, f"{rel} is not run by the reference-solver job"
+    # and it must not re-introduce the ignores it exists to undo
+    assert "--ignore" not in commands, (
+        "the reference-solver job must run the bridge, not ignore it"
+    )
+    # the extra has to be installed, or every test importorskips to green
+    assert "validation" in commands, "the job must install the validation extra"
+    assert "import openseespy" in commands, (
+        "the job must assert the reference solver imported before running the "
+        "suite: an importorskip that skips is green"
+    )
+
+
 # --------------------------------------------------------------------------
 # the release version
 # --------------------------------------------------------------------------
