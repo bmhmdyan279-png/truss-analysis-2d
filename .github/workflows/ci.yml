@@ -154,10 +154,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,validation]"
       - name: Confirm the reference solver actually imported
-        # A skipped import is green.  If openseespy fails to install
-        # on this runner the suite below would pass while testing nothing, so
-        # the import is asserted before the tests are allowed to run.
-        run: python -c "import openseespy.opensees as o; print('opensees', o.getVersion())"
+        run: |
+          python -c "
+          import openseespy.opensees as o
+          v = getattr(o, 'getVersion', None) or getattr(o, 'pyversion', None)
+          assert v is not None, 'no version attribute found on openseespy.opensees'
+          print('opensees', v)
+          "
       - name: Run the reference-solver bridge
         run: >
           pytest
