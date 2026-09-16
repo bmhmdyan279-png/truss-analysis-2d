@@ -462,3 +462,128 @@ def test_the_unity_boundary_is_inclusive_on_both_sides() -> None:
     for ls in states.values():
         assert ls.system_stability_factor == 1.0
         assert ls.system_dcr == pytest.approx(ls.dcr, rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# 7. the boundary decision, as a pure function
+# ---------------------------------------------------------------------------
+
+
+def test_the_unity_boundary_is_inclusive() -> None:
+    """``<= 1.0`` and not ``< 1.0``, asked about exactly 1.0.
+
+    A mutation probe on this module found that flipping the comparison left the
+    whole suite green.  The reason is worth recording, because it is not "the
+    tests were lazy": reaching ``lambda_cr = 1.0`` from the outside requires
+    scaling a load by the measured factor, and round-off lands the result at
+    ``1 ± 1e-16``, so no load-scaling test can sit *on* the boundary.  The
+    decision was therefore extracted as a pure function that can be asked about
+    the number directly -- which is the general lesson: a boundary that cannot
+    be reached from the public API is a boundary that cannot be tested.
+    """
+    from truss_analysis.limitstates import system_stability_amplification
+
+    governs, factor = system_stability_amplification(1.0, collapsed=False)
+    assert governs is True, "zero reserve must be reported, not passed over"
+    assert factor == 1.0
+
+
+@pytest.mark.parametrize(
+    ("lambda_cr", "expected_governs", "expected_factor"),
+    [
+        (0.5, True, 2.0),
+        (0.999999999999, True, 1.0 / 0.999999999999),
+        (1.0, True, 1.0),
+        (1.000000000001, False, 1.0),
+        (2.0, False, 1.0),
+        (float("inf"), False, 1.0),
+        (1.0e-12, True, 1.0e12),
+    ],
+)
+def test_the_amplification_decision_over_its_whole_domain(
+    lambda_cr: float, expected_governs: bool, expected_factor: float
+) -> None:
+    """Every branch of the decision, including the two sides of the boundary.
+
+    The pair ``(0.999999999999, 1.000000000001)`` straddles 1.0 by less than
+    round-off from a load-scaled solve could manage, which is what makes the
+    ``<=`` pinned rather than merely described in a comment.
+    """
+    from truss_analysis.limitstates import system_stability_amplification
+
+    governs, factor = system_stability_amplification(lambda_cr, collapsed=False)
+    assert governs is expected_governs
+    assert factor == pytest.approx(expected_factor, rel=1e-12)
+
+
+@pytest.mark.parametrize("lambda_cr", [0.0, -1.0, -1.0e-9, float("nan")])
+def test_a_non_positive_factor_never_produces_a_reciprocal_or_a_silent_pass(
+    lambda_cr: float,
+) -> None:
+    """An unguarded ``1 / lambda_cr`` divides by zero at exactly 0.
+
+    The documented solver retains only positive eigenvalues, so ``lambda_cr``
+    should never arrive here non-positive -- but "should never" is what a guard
+    is for.  The collapse convention (``0.0``) and anything negative both mean
+    no reserve, and ``NaN`` must govern rather than fall through to a silent
+    pass, because a verdict that cannot be evaluated is not a verdict that
+    everything is fine.
+    """
+    from truss_analysis.limitstates import system_stability_amplification
+
+    governs, factor = system_stability_amplification(lambda_cr, collapsed=False)
+    assert governs is True
+    assert factor == float("inf")
+
+
+def test_a_collapse_overrides_whatever_lambda_cr_says() -> None:
+    """``collapsed=True`` governs even if a finite factor is passed alongside."""
+    from truss_analysis.limitstates import system_stability_amplification
+
+    for lambda_cr in (5.0, 1.0, 0.5):
+        governs, factor = system_stability_amplification(lambda_cr, collapsed=True)
+        assert governs is True
+        assert factor == float("inf")
+
+
+def test_the_factor_is_never_below_one() -> None:
+    """No input may make the adjustment *reduce* a reported demand.
+
+    Stated as a sweep rather than per-case, because the direction of the error
+    is the whole safety argument: an amplifier below one would make a fire DCR
+    look better than the member check alone, which is worse than not adjusting.
+    """
+    from truss_analysis.limitstates import system_stability_amplification
+
+    for collapsed in (False, True):
+        for lambda_cr in (1e-12, 0.25, 0.5, 1.0, 1.5, 10.0, float("inf")):
+            _governs, factor = system_stability_amplification(lambda_cr, collapsed)
+            assert factor >= 1.0, (lambda_cr, collapsed, factor)
+
+
+def test_the_warning_names_how_many_members_it_amplified() -> None:
+    """The count in the message must be the compression members, not all.
+
+    A mutation probe found that changing ``ls.compression and ls.p_cr is not
+    None`` to ``or`` in the count left the suite green: the amplification itself
+    is applied by a separate predicate that *was* tested, so only the sentence
+    was wrong.  A warning that reports the wrong number of governed members is
+    still a wrong number in the one place a reader looks when the analysis says
+    the structure is failing, so the count is pinned too.
+    """
+    nodes, elements, loads, temps = _fan(7.14e-4)
+    with pytest.warns(SystemInstabilityWarning) as caught:
+        states = dcr_field(
+            nodes, elements, loads, temps, F_Y, check_system_stability=True
+        )
+    message = str(caught[0].message)
+    n_amplified = sum(
+        1 for ls in states.values() if ls.compression and ls.p_cr is not None
+    )
+    n_tension = sum(1 for ls in states.values() if not ls.compression)
+    assert n_amplified == 2
+    assert n_tension == 1, (
+        "the fixture must have a tension member for this to mean anything"
+    )
+    assert f"{n_amplified} compression member(s)" in message
+    assert f"{len(states)} compression member(s)" not in message

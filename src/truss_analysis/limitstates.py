@@ -22,6 +22,7 @@ Consumes the temperature-dependent material reduction factors of
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -74,6 +75,7 @@ __all__ = [
     "member_critical_temperature_detailed",
     "system_critical_temperature",
     "system_critical_temperature_detailed",
+    "system_stability_amplification",
     "yield_capacity",
 ]
 
@@ -723,6 +725,67 @@ def _limit_states_from_forces(
     return out
 
 
+def system_stability_amplification(
+    lambda_cr: float, collapsed: bool
+) -> tuple[bool, float]:
+    """Decide whether the system governs, and by how much it amplifies demand.
+
+    Extracted from :func:`dcr_field` as a pure function so the boundary is
+    *deterministically* testable.  Inline it was reachable only through a load
+    scaled to make ``lambda_cr`` land on 1.0, which round-off will not do
+    reliably -- and a mutation probe confirmed the consequence: flipping
+    ``<= 1.0`` to ``< 1.0`` left every test green, because no test could put the
+    factor exactly on the boundary.  A helper taking the number directly can be
+    asked about exactly 1.0.
+
+    Parameters
+    ----------
+    lambda_cr : float
+        Linearised bifurcation load factor.  ``inf`` means no bifurcation exists
+        under load amplification; ``0.0`` is the convention for "the tangent
+        state is already indefinite" (see ``collapsed``).
+    collapsed : bool
+        Whether the bifurcation solve raised ``MechanismError``, i.e. the
+        structure cannot carry the applied load at all.
+
+    Returns
+    -------
+    tuple[bool, float]
+        ``(governs, amplification)``.  ``governs`` is whether a system-level
+        warning is owed; ``amplification`` is the factor the member DCR is
+        scaled by, and is never below ``1.0`` -- a factor below one would
+        silently *reduce* a reported demand, which is the one direction of error
+        a fire check must never make.
+
+    Notes
+    -----
+    The comparison is ``<= 1.0`` and not ``< 1.0`` deliberately: at exactly the
+    bifurcation load the reserve is zero, which is a verdict worth reporting
+    even though the amplification it implies is exactly one.  A strict ``<``
+    would call a system with no reserve unremarkable.
+    """
+    if collapsed:
+        # No reserve at all, and system-wide: unlike a bifurcation, which is
+        # compression-driven, a mechanism means the load cannot be carried.
+        return True, float("inf")
+    if math.isnan(lambda_cr):
+        # Not producible by the documented solver, which reports the collapse as
+        # 0.0 precisely because NaN does not survive serialisation.  A verdict
+        # that cannot be evaluated must govern rather than pass silently.
+        return True, float("inf")
+    if not math.isfinite(lambda_cr):
+        # +inf: no bifurcation under load amplification, so the member check
+        # governs and nothing is owed.
+        return False, 1.0
+    if lambda_cr <= 0.0:
+        # Not producible either -- the solver retains only positive eigenvalues
+        # -- but an unguarded reciprocal here would divide by zero.
+        return True, float("inf")
+    if lambda_cr <= 1.0:
+        return True, 1.0 / lambda_cr
+    return False, 1.0
+
+
 def dcr_field(
     nodes: Sequence[Node],
     elements: Sequence[Element],
@@ -844,24 +907,7 @@ def dcr_field(
         collapsed = True
         lambda_cr = 0.0
 
-    if collapsed:
-        # No reserve at all: the structure cannot carry the applied load, so
-        # every member's system-level demand is unbounded.
-        governs = True
-        amplification = float("inf")
-    elif np.isfinite(lambda_cr) and lambda_cr <= 1.0:
-        # The applied load has reached or passed the bifurcation point.  The
-        # comparison is ``<=`` and not ``<`` on purpose: at exactly 1.0 the
-        # reserve is zero, which is a verdict worth reporting even though the
-        # amplification it implies is exactly one.  A strict ``<`` would have
-        # called a system with no reserve unremarkable.
-        governs = True
-        amplification = 1.0 / lambda_cr
-    else:
-        # ``inf`` (no bifurcation under load amplification) and anything above
-        # the applied load level both mean the member check governs.
-        governs = False
-        amplification = 1.0
+    governs, amplification = system_stability_amplification(lambda_cr, collapsed)
 
     if governs:
         n_governed = (

@@ -7,6 +7,285 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Round-8 external audit, on `main@db67ee4`. Eight independent critiques were
+read. **Four of the eight had reviewed an older tree** — two said so explicitly
+("the remote `main` is still at Sep 14 and has 0 tags"), one reproduced
+findings against code that had since been fixed, and one was a restatement of
+this project's own changelog with illustrative code attached. Every finding was
+therefore reproduced or refuted against `db67ee4` before anything was changed,
+and the refutations are recorded below with the file and line that refutes
+them. Accepting a stale finding would have meant re-fixing a fixed bug and
+calling it progress.
+
+Suite: **1066 → 1103 tests, 0 → 0 warnings, 94.43 % → 94.54 % coverage.**
+
+The round closed three findings that three separate critics reached
+independently, and the two structural ones were both cases of the same defect
+class the round-7 audit named: **a quantity whose name promises something the
+value does not deliver.** `dcr` that was not `|N| / capacity`. A warning telling
+the caller to pass a parameter no reachable function accepted.
+
+### Changed
+
+- ⚠ **`dcr_field` no longer mutates its own result, and no longer checks system
+  stability by default.** With `lambda_cr < 1` the compression DCRs were
+  multiplied by `1 / lambda_cr` through `object.__setattr__` on a frozen
+  dataclass — no warning, no field recording that it had happened. Reproduced on
+  a two-bar toggle at `lambda_cr = 0.543088`:
+
+      dcr(check_system_stability=False) = 275.861571
+      dcr(check_system_stability=True)  = 507.950504   (x1.8413 = 1/lambda_cr)
+      |axial_force| / capacity          = 275.861571   != dcr
+      warnings emitted                  = 0
+
+  So an amplified ratio was indistinguishable from a member-level one, in a
+  library whose rule is never to emit a silent number, on the one quantity in
+  the fire chain that decides whether a member is acceptable. It was also on by
+  default, so every call — including once per candidate inside the retrofit
+  search — paid a dense motor build, a factorisation and a Lanczos sweep.
+
+  And when the base state was already a mechanism, only the compression members
+  were set to `inf`. On the fixture now pinned in
+  `tests/test_dcr_system_stability.py` the post was reported at `dcr = 11.7`
+  while the rafters were `inf` — a structure that could not stand up, reported
+  as having a member in reserve.
+
+  Now: `dcr` is the member check and `dcr == |axial_force| / capacity` holds in
+  **every** branch including collapse; the system verdict lives in three new
+  fields (`system_dcr`, `system_stability_factor`, `lambda_cr`) carried per
+  member so it survives warning filters and reaches the payload; amplification
+  is compression-only because a bifurcation is compression-driven, while a
+  mechanism is system-wide because the load cannot be carried at all; the
+  comparison is `<= 1` and not `< 1`, so a system with exactly zero reserve is
+  reported rather than called unremarkable; `lambda_cr = 0.0` rather than `NaN`
+  records the collapse, because `NaN` does not survive serialisation; and the
+  adjustment is never silent — `SystemInstabilityWarning` is mandatory and
+  carries both numbers plus the statement that `lambda_cr` is a linearised
+  tangent verdict and not an ultimate load.
+
+  **Twenty-two tests called `dcr_field` and not one passed
+  `check_system_stability`.** The entire adjustment ran only through its default
+  and was never asserted, which is how it came to mutate a frozen dataclass
+  unnoticed. `tests/test_dcr_system_stability.py` adds eleven.
+
+- ⚠ **`use_effective_alpha` now reaches the whole demand chain.** The flag
+  existed in exactly two functions in `src/` — `prestress_lengths` and
+  `build_engine` — while `member_axial_forces`, `dcr_field`,
+  `ci_two_component`, `compute_ci_for_topology`, `UniformForceScan` and both
+  brute-force reference paths built their base state on a constant `alpha`. The
+  consequence was that `ConstantAlphaWarning` told the caller to "pass
+  `use_effective_alpha=True`" and **no function they could reach accepted it**:
+  a warning naming a parameter the public API does not take is a promise the
+  library cannot keep.
+
+  Worse, `_solve_perturbed_full` (`engine.py:641`) and `brute_force_ci`
+  (`engine.py:874`) — the paths a caller goes to when they have stopped trusting
+  the fast one — silently disagreed with the engine they were verifying. The
+  comparison then measured the gap between two different prestress fields
+  instead of the correctness of the Woodbury update.
+
+  The flag now reaches every place the chain forms a base state, including all
+  four in `compute_ci_for_topology` (hot engine, hot fallback column, cold
+  reference engine, cold reference column), because a ranking is only comparable
+  to its own reference if both rest on the same field. The default stays
+  `False` everywhere: changing it would silently move every result ever
+  published with this library, which is not a change to make quietly.
+
+### Added
+
+- **`UniformForceScan` keeps its closed form under the secant coefficient.**
+  Under a uniform field `alpha_eff(T)` is a single scalar, so the thermal
+  right-hand side is still a scalar multiple of one temperature-independent
+  vector — it only needs a *masked* basis,
+  `z_unit = K_0^-1 B^T (k0 · m · L)` with `m_e = 1` where the member expands and
+  `0` where it was modelled fixed in length. That mask is the same rule
+  `prestress_lengths` applies, so the scan and the per-point engine cannot
+  disagree about which members are heated. Cost: one extra back-substitution
+  against a factorisation that already exists. Measured against a full per-point
+  rebuild over six temperatures in both modes: **worst relative deviation
+  5.5e-16**. Both bases are always built, and `use_effective_alpha` is recorded
+  on the instance so a scan cannot be mistaken for the other mode afterwards.
+
+- **A criticality-engine benchmark with a genuinely independent oracle.** The
+  suite verified the solver, the thermal chain and the tangent stiffness, but not
+  the four modules where the most complicated logic lives.
+  `criticality_rank1_vs_direct_resolve` pairs the rank-1 sweep against a direct
+  stiffness method assembled from geometry *inside the benchmark* and solved with
+  `numpy.linalg.solve` — no shared assembly path, factorisation or linear-algebra
+  entry point. On a seven-member redundant girder at `alpha = 0.7` the engine
+  reproduces it to a **relative error of 1.45e-16** against a 1e-12 tolerance:
+  margin 6895x, machine epsilon rather than a fitted bound. The model was chosen
+  by searching candidate member sets for the best-conditioned stable one
+  (assembled eigenvalue ratio 5.0e-2); a six-member layout tried first was
+  **singular**, which is worth recording because a mechanism has no
+  redistribution to measure and both sides would have agreed on garbage.
+
+- **`benchmarks/performance.py`: the engine's speed claim, measured.** 165.8x at
+  29 members, 562.9x at 61, 1840.5x at 93, against a floor of `m / 4`. It is
+  deliberately **not** a `ReferenceProblem`: a wall-clock ratio has no oracle,
+  because nothing outside this machine can say how long this machine takes, and
+  filing it under the verification matrix would be the category error
+  `theory.md` §8.1 exists to prevent. Speed is never reported without agreement —
+  every measurement also compares the two paths' criticality indices
+  (max `|dCI|` = 2.2e-14 to 1.5e-13) and voids the speedup if they diverge,
+  because a path that returns garbage is very fast and a guard that only timed
+  would reward exactly that.
+
+- **A mandatory `reference-solver` CI job.** The three files the canonical stats
+  configuration ignores need a reference solver the other runners lack. Excluding
+  them from the published *count* is correct — the number must be the same on
+  every machine, which is what round 7 fixed. Excluding them from *every job* was
+  a different decision wearing the same clothes: the cross-validation column of
+  the verification matrix was enforced nowhere, while `physics_boundary` shipped a
+  digest of that evidence inside `solver_metadata`. A claim was travelling in the
+  payload that no gate checked. The job asserts `openseespy` imported before
+  running them, because an `importorskip` that skips is green.
+  `test_the_ignored_files_are_run_by_a_mandatory_job` parses the workflow and
+  fails if the job is deleted, renamed, made conditional, or made to re-introduce
+  the ignores it exists to undo.
+
+- **`theory.md` §8.1 and §8.3: verification is not validation.** All five
+  columns of the matrix answer the same question — are the equations solved
+  correctly — and none answers the one a reader needs: do these equations
+  represent a real structure. §8.1 now names four kinds of evidence and marks
+  which three this project has, places the OpenSeesPy bridge explicitly in the
+  *independent numerical* row (two implementations of the same model is a strong
+  check on the algebra and no check on the physics), and calls out the entries
+  whose "independent" label is weaker than it looks. §8.3 states the validation
+  status in the vocabulary `physics_boundary.yaml` uses, so the prose and the
+  machine-readable file cannot drift: **verification strong, validation absent**,
+  and the absence is a property of the evidence rather than a defect to assume
+  away.
+
+- **`MemberLimitState.lambda_cr` / `system_stability_factor` / `system_dcr`.**
+  Carried per member rather than returned once, on the reasoning that
+  `SteelHeatingResult.out_of_range` already set: a validity limit that lives only
+  in a warning does not survive a caller who filters warnings, and the payload is
+  what gets read afterwards.
+
+- **`SystemInstabilityWarning`** (`exceptions.py`), documented with the reason it
+  exists rather than only its trigger condition.
+
+### Fixed
+
+- **`ConstantAlphaWarning` counted members that do not expand, and quoted a
+  number 3.4x too large.** A member with `alpha == 0` is an explicit statement
+  that it does not expand — `prestress_lengths` already refused to override it
+  under `use_effective_alpha=True`, with a paragraph explaining why — but the
+  warning's statistics did not get the same treatment. Because the quoted
+  percentage is built from `np.mean(alphas)`, one zero halved the mean:
+
+      two members, both alpha = 1.2e-5   -> "2 member(s) ... 17.1%"   correct
+      one at 1.2e-5, one fixed-length    -> "2 member(s) ... 58.6%"   wrong
+
+  Both the count and the number are now pinned, so a future filter cannot quietly
+  widen. A model of only non-expanding members now warns not at all: there is no
+  constant-`alpha` approximation in play, and the percentage it could quote would
+  be a division against a zero mean.
+
+- **`effective_alpha`'s documentation conflated two ratios of the same pair.**
+  At 600 degC a constant `1.2e-5` against the secant `1.448e-5` gives **17.1 %**
+  understatement of the *strain* and **20.7 %** overstatement of the *alpha
+  needed to fix it*. Both are correct; neither is interchangeable; and
+  `1/(1-x) > 1+x` means the second is always the larger. The 2.8.0 entry labelled
+  20.7 % as "understates the standard's elongation", which is the wrong label on
+  a right measurement, and a test repeated it. Both ratios are now asserted to
+  four significant figures with the ordering invariant pinned, so a swap fails.
+  The 2.8.0 entry is **annotated rather than rewritten**: a changelog that edits
+  its own history cannot be audited against it.
+
+- **`imperfection_sensitivity` bought a full base eigen-solve before validating
+  its input.** Both rejected conditions are pure shape and norm tests on the
+  `mode=` argument. They now run first, so a malformed mode is an immediate
+  `ValueError` rather than a discarded factorisation plus Lanczos. The zero-norm
+  test on the solver's *own* mode stays after the solve, because it depends on it.
+
+- **`stability.py`'s module docstring contradicted its own contents.** Line 52
+  listed "imperfection sensitivity" among the things that "remain out of scope",
+  while `imperfection_sensitivity` (line 1495) and `ImperfectionStudy` (line
+  1327) are implemented in that same file. This is the mirror image of the defect
+  class round 7 was about — a scope note disclaiming capability the module has —
+  and it is the first thing a reviewer checks against the code. The note now says
+  what is actually out of scope (post-buckling paths, arc-length continuation,
+  Newton-Raphson load stepping) and adds the boundary the linearised criterion
+  needs: `lambda_cr` is the criticality of the linearised tangent state and must
+  not be read as the ultimate load of the real structure.
+
+- **The changelog had two `[Unreleased]` sections and the released 2.9.0 had no
+  heading.** Both the round-7 and round-6 blocks were sitting under
+  `## [Unreleased]` although v2.9.0 was tagged on 2026-09-16 and shipped both.
+  `test_stats_gate.py` aligns the version across README, `CITATION.cff` and the
+  tag, and nothing checked the changelog's own structure, so the drift was
+  invisible. Both blocks are now labelled with the release they shipped in, and
+  `test_the_changelog_has_one_unreleased_and_a_heading_per_tag` makes the
+  property a gate.
+
+### Not reproduced — recorded with the measurement that refutes them
+
+Four of the eight critiques targeted a tree that no longer existed. Listed
+because a finding that is not recorded gets made again, and because "we checked
+and it was already fixed" needs the line that proves it.
+
+- **"The solver still uses `np.linalg.solve`, no Cholesky."** `solver.py:39`
+  imports `cho_factor, cho_solve`; `:265-266` uses them and reports
+  `"cholesky"` as the factorisation kind.
+- **"`check_energy` rejects self-equilibrated states via
+  `if abs(W_mech) < 1e-12`."** No such branch. `solver.py:742` is the unified
+  identity `expected = strain_energy + 0.5 * prestress_work + penalty_energy`,
+  which is exactly the Clapeyron form the finding asked for.
+- **"`limitstates.py` still uses `min(p_cr, n_rd)`."** `BucklingModel.EUROCODE_CHI`
+  is the default and `limitstates.py:497` computes `capacity = chi * n_rd`. The
+  `min` model survives only as `EULER_ONLY`, retained so results computed with it
+  stay reproducible bit for bit, and it emits `LegacyBucklingModelWarning`.
+- **"`postprocess.py` computes Euler without the effective-length factor."**
+  `postprocess.py:421` calls `euler_buckling_load(e.I_sec, L, e.E,
+  e.effective_length_factor)`.
+- **"`BucklingResult` returns only one mode."** It has `modes: list[ndarray]`,
+  `load_factors: tuple[float, ...]` and `multiplicity: int`, with `mode` kept as
+  `modes[0]` for backward compatibility. `imperfection_sensitivity` takes
+  `n_modes`.
+- **"The validation extra is not installed in any mandatory job."** `ci.yml:77`
+  installs `.[validation]` in the mandatory `test` job, and `:102`/`:128` in
+  `coverage` and `stats`. The *half* of the finding that was true — the three
+  bridge files were `--ignore`d in every job, so nothing enforced them — is fixed
+  above by the `reference-solver` job.
+- **"The `Table31ReductionFactors` docstring overclaims about a transcription
+  slip."** There is no class of that name in `steel_eurocode.py` (the module
+  exposes functions: `k_y`, `k_E`, `eps_y`, ...) and no such phrase in it.
+- **"You measured 15.1 % in v2.9.0 against 20.7 % in v2.8.0."** The string
+  `15.1` does not occur anywhere in the repository. The underlying concern was
+  nonetheless correct — two numbers *were* in circulation for one quantity — and
+  is fixed above; the real pair is 17.1 % and 20.7 %.
+
+### Deferred, with the reason
+
+- **Newton-Raphson and arc-length continuation.** Both critiques that asked for
+  them are right that `exact_tangent_stiffness` without a nonlinear solver is an
+  academic exercise. They are also outside a library whose stated boundary is
+  linear statics with a linearised stability companion, and adding them in a
+  final round would put an unverified nonlinear path next to a verified linear
+  one. The scope note now says so precisely instead of disclaiming capability the
+  module already has.
+- **Distributed and member loads.** The largest functional gap, and the one most
+  likely to matter in practice. It needs equivalent nodal forces in the
+  load-vector assembly *and* a decision about whether a member load splits the
+  member, which is an API question rather than an implementation one — the same
+  reason it was deferred in round 7, unchanged.
+- **Mutation testing.** The coverage plateau is real: 246 new tests in round 7
+  bought +0.23 pp, which is the signature of parameterised variants over branches
+  that were already covered. `cosmic-ray` runs the whole suite per mutant, and at
+  ~105 s a run on 1103 tests that is weeks of compute for the three modules worth
+  mutating — not a gate, and a nightly job that cannot finish is not a gate
+  either. What this round did instead is targeted at the same failure mode: the
+  defects it found were all in code that *was* covered and was still wrong
+  (`dcr_field`'s mutation path had 22 callers and zero assertions), so the
+  lever was tests that can fail on the branches that matter, not a higher
+  percentage.
+
+---
+
+## [2.9.0] — 2026-09-16
+
 Round-7 external audit, on `main@ee0e9bf`. Nine independent critiques were
 read; the two that targeted this exact commit were verified line by line against
 the tree before anything was changed. Every finding was reproduced or refuted
@@ -495,7 +774,7 @@ failure. That gate found two real defects on its first run (below).
 
 ---
 
-## [Unreleased]
+## [2.9.0] — 2026-09-16 · the round-6 audit, shipped in the same release
 
 Round-6 external audit. 22 tracked items (7 P0 scientific/safety, 5 P1
 physical coverage, 10 P2 performance/architecture) plus the three failures

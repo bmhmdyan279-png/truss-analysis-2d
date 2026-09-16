@@ -274,3 +274,83 @@ def test_the_committed_tree_passes_its_own_gate_without_remeasuring() -> None:
     }
     # the version patterns are language-independent, so check those exactly
     assert stats.check_stale(stats.VERSION_PATTERNS, stats.VERSION_PATTERNS, fmt) == 0
+
+
+def test_the_changelog_has_one_unreleased_and_a_heading_per_tag() -> None:
+    """The changelog's own structure, gated like every other claim in it.
+
+    ``test_stats_gate`` aligns the version across README, ``CITATION.cff`` and
+    the tag, and nothing checked the changelog -- so two ``[Unreleased]``
+    sections accumulated while ``v2.9.0`` was tagged and released with no heading
+    of its own. Both the round-7 and round-6 blocks were filed as unreleased
+    after they had shipped.
+
+    A changelog that cannot say which release a change belongs to cannot be
+    audited against the code, which is the only thing it is for. Two properties
+    are worth gating:
+
+    * at most one ``[Unreleased]`` section, and it comes first -- anything else
+      means content was appended without deciding when it ships;
+    * every reachable version tag has a ``## [x.y.z]`` heading -- a tag without
+      one is a release nobody documented.
+    """
+    import re
+    import subprocess
+
+    text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    # the whole heading line, not just the bracket: a release documented in two
+    # blocks says so after the version ("[2.9.0] - the round-6 audit ..."), and
+    # capturing only the bracket would make the two indistinguishable
+    headings = re.findall(r"^## \[(.+?)\](.*)$", text, flags=re.MULTILINE)
+    headings = [f"{v.strip()}{rest}" for v, rest in headings]
+    assert headings, "the changelog has no version headings at all"
+
+    unreleased = [h for h in headings if h.strip().lower() == "unreleased"]
+    assert len(unreleased) <= 1, (
+        f"{len(unreleased)} [Unreleased] sections: {headings[:6]}. Content was "
+        "appended without deciding which release it belongs to."
+    )
+    if unreleased:
+        assert headings[0].strip().lower() == "unreleased", (
+            "[Unreleased] must be the first section, not buried under a release"
+        )
+
+    tags = subprocess.run(
+        ["git", "tag", "--list", "v*"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert tags, "no version tags; this check cannot do its job"
+    for tag in tags:
+        version = tag.lstrip("v")
+        # A *primary* heading is the version and a date and nothing else.  The
+        # looser "version appears somewhere" test this replaced was defeated by
+        # the round-6 block, whose heading also starts with 2.9.0: deleting the
+        # release's own heading left the version present and the check green,
+        # which is the failure mode the check exists to prevent.  A release may
+        # have additional qualified blocks, but it must have its own.
+        primary = re.compile(rf"\A{re.escape(version)} — \d{{4}}-\d{{2}}-\d{{2}}\Z")
+        assert any(primary.fullmatch(h.strip()) for h in headings), (
+            f"{tag} is released but has no primary changelog heading of the "
+            f"form '## [{version}] — YYYY-MM-DD'; got "
+            f"{[h for h in headings if h.startswith(version)]}"
+        )
+
+    # headings must not repeat a version: two blocks claiming the same release
+    # is how the round-6 content went missing from 2.9.0
+    seen: dict[str, list[str]] = {}
+    for h in headings:
+        key = h.split()[0].strip()
+        if key.lower() == "unreleased":
+            continue
+        seen.setdefault(key, []).append(h)
+    # a release may be documented in more than one block only if the later
+    # blocks say what they add, rather than repeating the version bare
+    for key, blocks in seen.items():
+        if len(blocks) > 1:
+            assert all(len(b.split()) > 1 for b in blocks[1:]), (
+                f"{key} has {len(blocks)} headings and the extras do not say "
+                f"what they add: {blocks}"
+            )
