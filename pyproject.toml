@@ -92,10 +92,13 @@ where = ["src"]
 
 # setuptools_scm: `write_to` generates _version.py at build time (gitignored);
 # `fallback_version` keeps `python -m build` working in source exports that
-# carry no .git metadata (e.g. sdist rebuilds).
+# carry no .git metadata (e.g. sdist rebuilds).  Kept equal to the latest
+# release tag so a git-less export and a tagged checkout report the same
+# version -- `scripts/update_readme_stats.py` falls back to it, and
+# `tests/test_stats_gate.py` pins that it does.
 [tool.setuptools_scm]
 write_to = "src/truss_analysis/_version.py"
-fallback_version = "2.8.0"
+fallback_version = "2.9.0"
 
 # ---------------------------------------------------------------------------
 # Linting / formatting — ruff
