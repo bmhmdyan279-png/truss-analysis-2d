@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`rank_correlation`** (`src/truss_analysis/validation/metrics.py`)
+  now detects constant input explicitly and returns `nan` without
+  emitting `scipy.stats.ConstantInputWarning`.  The warning was an
+  implementation detail of `spearmanr` leaking through a function whose
+  documented contract is "return `nan` for degenerate input" — under
+  `filterwarnings = error` it turned a documented return value into a
+  test failure.  Discovered by the mandatory `reference-solver` bridge
+  job added in v2.10.0, which was the first CI gate to run
+  `tests/validation/test_level4_rho_branches.py` on Linux.
+
+### CI
+
+- `reference-solver` job: install `libblas-dev`/`liblapack-dev` and
+  symlink versioned shared objects into the linker's default path, so
+  OpenSeesPy's Linux wheel can load.  Then use `pyversion` (with
+  `getattr` fallback to `getVersion`) — the API name had changed between
+  OpenSeesPy releases and the runner's wheel does not expose `getVersion`.
+
 ## [2.10.0] — 2026-09-16
 
 Round-8 external audit, on `main@db67ee4`. Eight independent critiques were
