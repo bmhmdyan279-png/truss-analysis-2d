@@ -715,6 +715,38 @@ Which claim is supported by which kind of evidence. "Independent" means the
 check shares no factorisation, assembly path or constant with the code it
 verifies.
 
+### 8.1 Verification is not validation, and this table is the former
+
+Every column below answers **verification**: *are the equations solved
+correctly, and is the implementation the equations?* None of them answers
+**validation**: *do these equations and assumptions represent the behaviour of
+a real structure closely enough for the purpose?* Conflating the two is the
+most common way a numerical library overclaims, so the distinction is stated
+here rather than left to the reader.
+
+Four kinds of evidence appear in the matrix, and they are not equally strong:
+
+| Kind | What it establishes | Example in this project |
+|---|---|---|
+| **Analytical verification** | the implementation reproduces a closed form derived by hand | two-bar toggle bifurcation load, restrained-bar thermal force |
+| **Independent numerical verification** | the implementation agrees with a solver that shares no code path | central-difference column operator with Richardson extrapolation, `solve_ivp` DOP853 on the clause-4.2.2.2 ODE, dense QZ against sparse Lanczos |
+| **Code / standard-data verification** | the tabulated input matches the standard it was transcribed from | EN 1993-1-2 Table 3.1 read straight from the shipped JSON, ISO 834 against six published points |
+| **Physical validation** | the model reproduces measured behaviour of a real structure | **absent** — see §8.3 |
+
+A useful discipline follows from the split: the first three rows can be closed
+by computation and are closed here. The fourth cannot be closed by writing more
+tests, only by obtaining measured data, and no amount of green in the first
+three columns is evidence for it. The OpenSeesPy bridge is *independent
+numerical verification*, not validation — it compares two implementations of
+the same mathematical model, which is a genuinely strong check on the algebra
+and no check at all on the physics.
+
+Some entries labelled "independent" in the table are weaker than the label
+suggests and are called out where they occur: the finite-difference tangent
+oracle calls into `verify_tangent_stiffness` and `exact_tangent_stiffness`, so
+it is an independent *discretisation* of the same derivative rather than an
+independent model of it.
+
 | Feature | Analytical | Independent solver | Property / invariance | Brute force | Thermal |
 |---|:--:|:--:|:--:|:--:|:--:|
 | $\mathbf{K}$ assembly | ✓ | — | ✓ (sym, PSD, rank-1) | — | ✓ |
@@ -754,15 +786,57 @@ verifies.
 | Iman–Conover correlation (§11.3) | — | — | ✓ (exact permutation/stratification, realised $\rho_S$ within noise) | — | — |
 | `failure_mode` labels (§11.4) | ✓ (unloaded tie collapses at $k_E=0$) | — | ✓ (legacy facades bit-for-bit) | — | ✓ |
 | Dimensional similarity | — | — | ✓ ($s$, $s^2$ scaling oracle, thermal variant) | — | ✓ |
+| $\alpha(T)$ through the demand chain (§10.3) | ✓ (hand-derived $-k_E E A \varepsilon_{th}$ on a restrained bar) | ✓ (closed-form scan ≡ per-point rebuild, $5.5·10^{-16}$; brute-force column ≡ rank-1 sweep) | ✓ (default bit-identical, $\alpha=0$ mask exact, direction of the DCR change) | ✓ (mismatched bases *disagree* — the negative control) | ✓ (ISO 834 → $\theta_a$ → $\varepsilon_{th}$ → $N$ → DCR end to end) |
+| System-stability DCR (§4.2, §9) | — | ✓ ($\lambda_{cr}$ from the bifurcation solve, not from the DCR path) | ✓ ($dcr ≡ |N|/\text{capacity}$ in every branch incl. collapse; tension unamplified; $≤1$ boundary from both sides) | ✓ (frozen-instance write raises) | — |
 
 Gaps that are honestly open: no experimental benchmark (e.g. the Cardington
-fire tests), no FORM/SORM for small failure probabilities, no *nonlinear*
-post-buckling / snap-through or material-nonlinear solve (the linearised
-bifurcation check of §9 is now covered; the nonlinear continuation is not),
-no transient heat conduction through the section (the lumped-capacitance
-model of §10 assumes a uniform member temperature, as EN 1993-1-2 §4.2.2.2
-itself does for unprotected members), and the OpenSeesPy bridge is an
-optional extra so public CI does not run it.
+fire tests) — see §8.3; no FORM/SORM for small failure probabilities; no
+*nonlinear* post-buckling / snap-through or material-nonlinear solve (the
+linearised bifurcation check of §9 is now covered, and
+`imperfection_sensitivity` quantifies how much of that reserve survives a
+geometric imperfection, but arc-length continuation is not implemented); and no
+transient heat conduction through the section (the lumped-capacitance model of
+§10 assumes a uniform member temperature, as EN 1993-1-2 §4.2.2.2 itself does
+for unprotected members).
+
+The OpenSeesPy bridge **is** run by public CI: the `reference-solver` job
+installs the extra, asserts `openseespy` imported, and runs the three bridge
+files unconditionally. It is excluded only from the *statistics* configuration,
+so that the published test count is the same number on a machine without the
+reference solver as on one with it — excluding a file from a count and
+excluding it from a gate are different decisions, and only the first is
+correct. `tests/test_stats_gate.py` parses the workflow and fails if that job
+is removed, renamed, made conditional, or made to re-introduce the ignores it
+exists to undo.
+
+### 8.3 Validation status
+
+`src/truss_analysis/data/physics_boundary.yaml` records this machine-readably,
+and its digest travels in `solver_metadata` so a result cannot be read without
+its own validity envelope. In the vocabulary of §8.1:
+
+* **Verification: strong.** Analytical, independent-numerical and
+  standard-data evidence cover every feature row above, with measured margins
+  rather than fitted tolerances, and negative controls proving the checks can
+  fail.
+* **Validation: absent, and stated as absent.** No result in this library has
+  been compared against measured behaviour of a real structure or a published
+  physical test. `empirical_validation` is `not-supported` in the boundary
+  file and should be read as a property of the evidence, not as a defect to be
+  assumed away: the model implements a specified code procedure (EN 1993-1-2),
+  and it is verified against that procedure and against independent
+  implementations of it. Whether the procedure itself predicts reality is a
+  question the standard answers, not this library.
+
+The practical consequence for a reader: a result from this library is
+*code-compliant and correctly computed*, which is not the same claim as
+*validated against reality*. Any use where the difference matters — a
+life-safety decision, or a thesis chapter that claims predictive accuracy —
+needs the fourth row of the §8.1 table supplied from elsewhere.
+
+§12 states the same boundary per phenomenon, in the words the machine-readable
+file uses; this section is the epistemic framing, §12 is the itemised one.
+
 
 ---
 
