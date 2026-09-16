@@ -17,7 +17,7 @@ and the refutations are recorded below with the file and line that refutes
 them. Accepting a stale finding would have meant re-fixing a fixed bug and
 calling it progress.
 
-Suite: **1066 → 1140 tests, 0 → 0 warnings, 94.43 % → 94.7 % coverage.**
+Suite: **1066 → 1130 tests, 0 → 0 warnings, 94.43 % → 94.55 % coverage.**
 Mutation score on `limitstates.py`, measured by the new probe: **93.3 %**
 (42/45), with the three survivors shown to be mathematically equivalent.
 
