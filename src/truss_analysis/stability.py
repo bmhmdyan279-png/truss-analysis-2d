@@ -47,9 +47,14 @@ Scope -- stated plainly, per the round-5 audit's physics-boundary demand:
   true collapse is a limit point (snap-through) that the linearised factor
   approximates from the base configuration; the two-bar toggle test in
   ``tests/test_stability.py`` pins the closed form and shows the
-  agreement is ``O(theta_0^2)`` for shallow geometries. Post-buckling
-  paths, imperfection sensitivity and nonlinear Newton-Raphson load
-  stepping remain out of scope (roadmap).
+  agreement is ``O(theta_0^2)`` for shallow geometries.
+  :func:`imperfection_sensitivity` quantifies how much of that reserve
+  survives a geometric imperfection, by re-running the linearised analysis
+  on imperfect geometries -- it is a *sensitivity study*, not a path
+  tracer. Post-buckling equilibrium paths, arc-length continuation and
+  nonlinear Newton-Raphson load stepping remain out of scope (roadmap), so
+  ``lambda_cr`` is the criticality of the linearised tangent state and must
+  not be read as the ultimate load of the real structure.
 * **Small strains, elastic materials.** ``K_E`` carries whatever ``E`` the
   elements have (temperature-degraded ``k_E(T) E`` when a temperature
   field is supplied); no plasticity.
@@ -1586,6 +1591,29 @@ def imperfection_sensitivity(
         )
         raise ValueError(msg)
 
+    # Validate a caller-supplied imperfection shape *before* paying for the
+    # base eigen-solve.  Both checks below are pure shape/norm tests on the
+    # argument, so running them first costs nothing and turns a malformed
+    # ``mode=`` into an immediate ValueError instead of a full
+    # factorisation-plus-Lanczos that is thrown away.  The zero-norm test for
+    # the *solver's own* mode cannot move: it depends on ``base``.
+    if mode is not None:
+        supplied = np.asarray(mode, dtype=float)
+        if supplied.shape[0] != 2 * len(nodes):
+            msg = (
+                f"imperfection mode must have {2 * len(nodes)} entries, got "
+                f"{supplied.shape[0]}"
+            )
+            raise ValueError(msg)
+        if float(np.linalg.norm(supplied)) <= 0.0:
+            msg = (
+                "imperfection_sensitivity: the supplied imperfection shape is "
+                "identically zero, so it defines no direction to sweep. Pass a "
+                "non-zero vector, or omit `mode=` to use the perfect geometry's "
+                "own critical mode."
+            )
+            raise ValueError(msg)
+
     base = linearized_buckling_load_factor(
         nodes,
         elements,
@@ -1596,12 +1624,6 @@ def imperfection_sensitivity(
         warn_shallow=False,
     )
     shape = base.mode if mode is None else np.asarray(mode, dtype=float)
-    if shape.shape[0] != 2 * len(nodes):
-        msg = (
-            f"imperfection mode must have {2 * len(nodes)} entries, got "
-            f"{shape.shape[0]}"
-        )
-        raise ValueError(msg)
     shape_norm = float(np.linalg.norm(shape))
     if shape_norm <= 0.0:
         msg = (

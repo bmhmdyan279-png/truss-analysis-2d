@@ -416,12 +416,37 @@ def test_effective_alpha_reproduces_thermal_strain_exactly() -> None:
 
 
 def test_effective_alpha_quantifies_constant_coefficient_underestimate() -> None:
-    """The round-5 finding, measured: a constant ambient coefficient of
-    1.2e-5 1/K understates the restrained thermal strain at 600 degC by
-    roughly 20 % -- effective_alpha is the secant slope of a convex curve,
-    so it must exceed the ambient tangent throughout the fire range up to
-    the 750-860 degC plateau."""
+    """Both ratios of the same gap, pinned separately so they cannot be conflated.
+
+    ``effective_alpha`` is the secant slope of a convex curve, so it exceeds
+    the ambient tangent throughout the fire range up to the 750-860 degC
+    plateau.  At 600 degC a constant ``alpha_0 = 1.2e-5`` sits below the
+    secant ``alpha_sec = 1.448e-5``, and that single pair produces two
+    different percentages:
+
+    * the **strain** is understated by ``1 - alpha_0/alpha_sec = 17.1 %`` --
+      this is the demand error, the figure a restrained member's force and
+      therefore its DCR is wrong by, and the one
+      :class:`~truss_analysis.exceptions.ConstantAlphaWarning` quotes;
+    * the **coefficient** required to fix it is overstated by
+      ``alpha_sec/alpha_0 - 1 = 20.7 %`` -- a property of the correction,
+      always the larger of the two because ``1/(1-x) > 1+x``.
+
+    An earlier release quoted 20.7 % while labelling it the understatement of
+    the elongation.  The measurement was right, the label was not.  Both are
+    asserted here to four significant figures so the pair stays distinct.
+    """
+    alpha_0 = 1.2e-5
     eff_600 = ss.effective_alpha(600.0)
-    assert eff_600 > 1.15 * 1.2e-5  # measured: ~1.448e-5 (+20.7 %)
+    assert eff_600 == pytest.approx(1.448e-5, rel=1e-9)
+
+    strain_understatement = 1.0 - alpha_0 / eff_600
+    alpha_overstatement = eff_600 / alpha_0 - 1.0
+    assert strain_understatement == pytest.approx(0.1713, abs=5e-5)
+    assert alpha_overstatement == pytest.approx(0.2067, abs=5e-5)
+    # the correction is always the larger percentage -- that ordering is the
+    # invariant whose violation would signal the two had been swapped again
+    assert alpha_overstatement > strain_understatement
+
     plateau = np.arange(100.0, 750.0, 25.0)
-    assert np.all(ss.effective_alpha(plateau) > 1.2e-5)
+    assert np.all(ss.effective_alpha(plateau) > alpha_0)

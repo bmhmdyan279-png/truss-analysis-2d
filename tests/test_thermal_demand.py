@@ -650,6 +650,67 @@ def test_hot_field_warns_and_quantifies_the_gap() -> None:
     assert "un-conservative DCR" in message
 
 
+def _expanding_plus_fixed_length_pair(theta: float):
+    """Two hot members: one that expands, one explicitly modelled as fixed length.
+
+    ``alpha = 0`` is not an unfilled default in this library -- it is the
+    model saying "this member does not expand" (a tie rod held at constant
+    length, or a fabrication-only element whose whole imposed elongation is
+    ``delta_L_free``).  ``prestress_lengths`` already refuses to override it
+    under ``use_effective_alpha=True``; this fixture exercises the other half
+    of that decision, which is that such a member must also stay out of the
+    constant-``alpha`` warning's statistics.
+    """
+    nodes = [
+        Node(id="L", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="M", x=1.0, y=0.0, is_support=True, support_dx=False, support_dy=True),
+        Node(id="R", x=2.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+    ]
+    elements = [
+        Element(id="hot", node_i="L", node_j="M", E=210e9, A=1e-3, alpha=1.2e-5),
+        Element(id="tie", node_i="M", node_j="R", E=210e9, A=1e-3, alpha=0.0),
+    ]
+    return nodes, elements, {"hot": theta, "tie": theta}
+
+
+def test_fixed_length_members_do_not_pollute_the_warning() -> None:
+    """An ``alpha = 0`` member must not enter the count or the quoted percent.
+
+    Before this was fixed the member was counted, and because the percentage
+    is built from ``np.mean(alphas)`` a single zero halved the mean and
+    inflated the reported shortfall from the correct 17.1% to 58.6% -- a
+    warning that overstates the error by 3.4x on a model containing a member
+    that provably has no thermal strain at all.  Both halves are pinned: the
+    count (so a future filter cannot quietly widen) and the number.
+    """
+    nodes, elements, temps = _expanding_plus_fixed_length_pair(600.0)
+    with pytest.warns(ConstantAlphaWarning) as caught:
+        prestress_lengths(nodes, elements, temps)
+    message = str(caught[0].message)
+    assert "1 member(s)" in message, message
+    assert "17.1%" in message, message
+    assert "58.6%" not in message, message
+
+
+def test_fixed_length_members_alone_do_not_warn() -> None:
+    """A model of only non-expanding members has nothing to understate.
+
+    With every ``alpha`` zero the imposed strain is built entirely from
+    ``delta_L_free``, so the constant-``alpha`` approximation is not in play
+    and no warning is owed -- issuing one would be noise, and the percentage
+    it could quote would be meaningless (a division against a zero mean).
+    """
+    nodes, elements, temps = _expanding_plus_fixed_length_pair(600.0)
+    elements = [
+        Element(id=e.id, node_i=e.node_i, node_j=e.node_j, E=e.E, A=e.A, alpha=0.0)
+        for e in elements
+    ]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ConstantAlphaWarning)
+        got = prestress_lengths(nodes, elements, temps)
+    assert float(np.max(np.abs(got))) == 0.0
+
+
 def test_the_warning_quotes_the_callers_own_alpha() -> None:
     """A user who already supplied a secant coefficient must not be misinformed.
 

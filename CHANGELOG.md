@@ -1026,7 +1026,18 @@ numbers** are marked ⚠ and collected under *Behaviour changes*.
 - **`thermal_strain()` / `effective_alpha()` in the material layer**
   (critic 8, finding 4 - reproduced by measurement: the ambient constant
   `1.2e-5` understates the standard's elongation by **+20.7 %** at
-  600 degC, secant slope `1.448e-5`). `effective_alpha(theta, theta_0)`
+  600 degC, secant slope `1.448e-5`).
+  > **Label corrected in 2.10.0.** The measurement above is right and the
+  > label is wrong: `20.7 %` is `1.448e-5 / 1.2e-5 - 1`, the overstatement of
+  > the *coefficient needed to fix the strain*. The understatement of the
+  > *elongation itself* -- the quantity this sentence names, and the one a
+  > restrained member's force and therefore its DCR is wrong by -- is
+  > `1 - 1.2e-5 / 1.448e-5` = **17.1 %**. Both ratios are now pinned to four
+  > significant figures in `tests/test_material_golden.py` and explained in
+  > the `effective_alpha` docstring, so the pair cannot be conflated again.
+  > The entry is left as written rather than silently edited: a changelog
+  > that rewrites its own history cannot be audited against it.
+  `effective_alpha(theta, theta_0)`
   is the chord slope of the clause-3.4.1.1 elongation curve; setting
   `elem.alpha = effective_alpha(T)` makes the framework's existing
   `alpha * delta_T * L` prestress term reproduce the standard's free

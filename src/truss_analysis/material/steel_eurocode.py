@@ -398,6 +398,37 @@ def effective_alpha(theta: FloatOrArray, theta_ref: float = 20.0) -> FloatOrArra
 
     Returns ``0.0`` when ``theta == theta_ref`` (no elongation, so the
     coefficient is irrelevant and the ``0/0`` quotient is defined away).
+
+    Notes
+    -----
+    **Two different percentages describe the same gap, and mixing them up is
+    a documentation error.**  Compare a constant ambient coefficient
+    ``alpha_0`` with the secant coefficient ``alpha_sec`` this function
+    returns at the same temperature.  There are two ratios, and they are not
+    interchangeable:
+
+    .. code-block:: text
+
+        understatement of the STRAIN    1 - alpha_0 / alpha_sec
+        overstatement of the ALPHA NEEDED   alpha_sec / alpha_0 - 1
+
+    At 600 degC with ``alpha_0 = 1.2e-5`` and ``alpha_sec = 1.448e-5`` these
+    are **17.1%** and **20.7%** respectively.  The first is the number that
+    belongs in a demand error -- a restrained member's force is proportional
+    to its strain, so the force is *low* by 17.1%, and that is the figure
+    :class:`~truss_analysis.exceptions.ConstantAlphaWarning` quotes and the
+    one a DCR is wrong by.  The second is how much larger the coefficient has
+    to be to fix it, which is a property of the correction rather than of the
+    error, and is always the larger of the two because ``1/(1-x) > 1+x``.
+
+    An earlier release quoted 20.7% while labelling it as the understatement
+    of the elongation.  The measurement was right and the label was not; both
+    ratios are recorded here so the pair cannot be conflated again.
+
+    This is a **secant** coefficient over ``[theta_ref, theta]``, not the
+    instantaneous ``d eps_th / d theta`` at ``theta``.  The distinction is the
+    reason the value rises smoothly rather than tracking the kinks of the
+    clause-3.4.1.1 elongation curve.
     """
     arr = np.asarray(theta, dtype=float)
     d_theta = arr - float(theta_ref)

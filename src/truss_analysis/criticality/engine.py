@@ -352,7 +352,12 @@ def prestress_lengths(
     -----
     ConstantAlphaWarning
         When ``temps`` contains a member above :data:`ALPHA_CONSTANCY_LIMIT` and
-        ``use_effective_alpha`` is ``False``.
+        ``use_effective_alpha`` is ``False``.  Members whose ``alpha`` is
+        exactly zero are excluded from the count and from the quoted
+        percentage: they impose no thermal strain, so including them would
+        both inflate the member count and dilute the mean ``alpha`` the
+        percentage is computed from (a single ``alpha = 0`` tie rod was
+        measured to move the quoted shortfall from 17.1% to 58.6% at 600 degC).
     """
     node_idx = {n.id: i for i, n in enumerate(nodes)}
     out = np.zeros(len(elements))
@@ -379,7 +384,18 @@ def prestress_lengths(
             alpha = float(effective_alpha(float(temps[e.id]), T_AMBIENT))
         else:
             alpha = e.alpha
-            if float(temps[e.id]) > ALPHA_CONSTANCY_LIMIT:
+            # A member whose ``alpha`` is exactly zero contributes no thermal
+            # strain at all, so it is not "being built from a constant alpha"
+            # and must not enter the warning's statistics.  Counting it does
+            # two kinds of damage at once: it inflates the reported member
+            # count, and -- worse -- it drags ``np.mean(alphas)`` towards
+            # zero, which makes :func:`constant_alpha_understatement` report
+            # an ever-larger shortfall the more non-expanding members the
+            # model has.  Measured on a two-member model at 600 degC, one
+            # ``alpha = 0`` tie rod moved the quoted number from the correct
+            # 17.1% to 58.6%: a warning that overstates the error by 3.4x on
+            # a member that provably has none.
+            if float(temps[e.id]) > ALPHA_CONSTANCY_LIMIT and alpha != 0.0:
                 thetas.append(float(temps[e.id]))
                 alphas.append(alpha)
         out[i] = alpha * delta_t * length + e.delta_L_free
