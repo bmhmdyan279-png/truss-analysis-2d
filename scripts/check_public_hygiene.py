@@ -3,15 +3,38 @@
 
 Guards the working branch against four classes of accidental commits:
 
-1. **Narrative keywords** — internal project vocabulary that must never
-   appear in public files (pattern list assembled from fragments so this
-   scanner itself does not trip the scan).
-2. **Build artifacts** — generated files that must stay out of version
-   control (``PKG-INFO``, ``SOURCES.txt``, egg-info contents, ``_version.py``,
+1. **Internal vocabulary** — project-private terms that must never appear in
+   published files. The vocabulary lives in ``scripts/hygiene_terms.yaml``, not
+   in this source, for a reason explained below.
+2. **Build artifacts** — generated files that must stay out of version control
+   (``PKG-INFO``, ``SOURCES.txt``, egg-info contents, ``_version.py``,
    performance baselines, logs, wheels).
 3. **File size** — any staged file above 500 KB is rejected unless it is
    explicitly allowlisted.
 4. **Forbidden paths** — private workspace directories and secret material.
+
+Why the vocabulary is a data file
+---------------------------------
+An earlier version of this scanner declared its patterns as concatenated string
+fragments — the first half of a word plus the second — so that its own source
+would not match its own rules, and then exempted itself a second time through an
+allowlist of paths. Both mechanisms existed for one purpose: to keep the checker
+from catching itself.
+
+That is not a quality control. It is unreadable (a maintainer cannot tell what
+the forbidden vocabulary actually is without mentally reassembling eighteen
+fragments), and it is unreviewable (the list cannot be diffed against the policy
+it implements, because the policy is not written down anywhere as text). The
+round-7 audit called this out as process theatre, and the criticism is correct.
+
+Loading the vocabulary from ``hygiene_terms.yaml`` removes the need for both
+evasions: this file contains none of the terms, so it passes its own scan on the
+merits, and it carries no self-exemption. The single exemption that remains is
+the data file, whose entire purpose is to hold the list.
+
+A missing or malformed vocabulary file is a hard error rather than an empty rule
+set. A scanner that silently degrades to checking nothing reports success while
+guarding nothing, which is worse than not running.
 
 Usage
 -----
@@ -21,16 +44,16 @@ Usage
     python scripts/check_public_hygiene.py --staged          # git staged files
     python scripts/check_public_hygiene.py --all             # git tracked files
 
-Exit code is 0 when clean and 1 on any violation; every violation is
-printed with file, line number and a bilingual (English/Persian) message.
+Exit code is 0 when clean and 1 on any violation; every violation is printed
+with file, line number and a bilingual (English/Persian) message.
 
 Documented allowlists
 ---------------------
-* ``gini`` — kept as a statistical eponym in code identifiers and in the
-  phrase "Gini coefficient"; flagged only in narrative documents
-  (top-level ``*.md`` and ``docs/*.md``).
+* ``gini`` — kept as a statistical eponym in code identifiers and in the phrase
+  "Gini coefficient"; flagged only in narrative documents (top-level ``*.md``
+  and ``docs/*.md``). Held in the scanner rather than the vocabulary file
+  because its rule is path-conditional, not a plain match.
 * ``bootstrap`` — standard statistical resampling term; not scanned.
-* This scanner file itself (patterns would otherwise match themselves).
 """
 
 from __future__ import annotations
@@ -39,52 +62,132 @@ import argparse
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-# --------------------------------------------------------------------------
-# Rule tables (fragments keep this file self-clean)
-# --------------------------------------------------------------------------
+import yaml
 
-_P = "Pha" + "se"
-_H = "H" + "[1-4]"
-_L = "Le" + "mma"
-_UB = "uniform" + "_beta"
-_G = "Gi" + "ni"
-_KS = "kill" + ".?shot"
-_MS = "manu" + "script"
-_RV = "review" + "er"
-_CL = "CONTEXT" + "_LOCK"
-_N25 = "Nature" + "_2025"
-_PC = "paper" + "_case"
-_CIR = "CI" + "_results"
-_SS = "SS" + "OT"
-_DEC = "D" + "-0" + r"\d\d"
-_DRL = r"D[RL]" + "-0" + r"\d\d"
-_PR = "prompt" + r"-0*\d"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+VOCABULARY_PATH = Path(__file__).resolve().parent / "hygiene_terms.yaml"
+VOCABULARY_SCHEMA = "truss-analysis/hygiene-terms/v1"
 
-KEYWORD_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("internal project phase label", re.compile(_P + r"[ _-]?\d", re.IGNORECASE)),
-    ("internal hypothesis label", re.compile(r"\b" + _H + r"\b")),
-    ("internal proposition label", re.compile(_L, re.IGNORECASE)),
-    ("internal example name", re.compile(_UB, re.IGNORECASE)),
-    ("informal attack phrase", re.compile(_KS, re.IGNORECASE)),
-    ("internal decision id", re.compile(r"\b" + _DEC + r"\d?\b")),
-    ("internal log id", re.compile(r"\b" + _DRL + r"\d?\b")),
-    ("internal context file", re.compile(_CL)),
-    ("internal prompt reference", re.compile(_PR, re.IGNORECASE)),
-    ("publication venue marker", re.compile(_N25)),
-    ("internal case name", re.compile(_PC, re.IGNORECASE)),
-    ("internal artifact name", re.compile(_CIR)),
-    ("draft-document term", re.compile(_MS, re.IGNORECASE)),
-    ("peer-referee term", re.compile(r"\b" + _RV + r"s?\b", re.IGNORECASE)),
-    ("internal acronym", re.compile(r"\b" + _SS + r"\b")),
-    ("Persian proposal term", re.compile("پرو" + "پوزال")),
-    ("Persian paper term", re.compile("مقا" + "له")),
-    ("Persian hypothesis term", re.compile("فرضی" + "ه")),
-)
+
+@dataclass(frozen=True)
+class TermRule:
+    """One forbidden-term rule, loaded from the vocabulary file.
+
+    Attributes
+    ----------
+    rule_id : str
+        Stable identifier, reported in violations so a rule can be looked up.
+    label : str
+        Human-readable description of what the term is.
+    pattern : re.Pattern[str]
+        Compiled matcher.
+    """
+
+    rule_id: str
+    label: str
+    pattern: re.Pattern[str]
+
+
+@dataclass(frozen=True)
+class Vocabulary:
+    """The loaded term list and its exemptions."""
+
+    schema: str
+    rules: tuple[TermRule, ...]
+    exempt_paths: frozenset[str]
+
+    def __post_init__(self) -> None:
+        """Refuse a vocabulary that would silently check nothing."""
+        if self.schema != VOCABULARY_SCHEMA:
+            msg = (
+                f"hygiene vocabulary schema mismatch: file declares "
+                f"{self.schema!r}, scanner expects {VOCABULARY_SCHEMA!r}"
+            )
+            raise ValueError(msg)
+        if not self.rules:
+            msg = (
+                "hygiene vocabulary declares no terms; a scanner with an empty "
+                "rule set reports success while guarding nothing"
+            )
+            raise ValueError(msg)
+        ids = [r.rule_id for r in self.rules]
+        if len(set(ids)) != len(ids):
+            duplicates = sorted({i for i in ids if ids.count(i) > 1})
+            msg = f"hygiene vocabulary has duplicate term ids: {duplicates}"
+            raise ValueError(msg)
+
+
+_FLAG_MAP = {"ignorecase": re.IGNORECASE, "multiline": re.MULTILINE}
+
+
+def load_vocabulary(path: Path = VOCABULARY_PATH) -> Vocabulary:
+    """Read and compile the forbidden-term vocabulary.
+
+    Parameters
+    ----------
+    path : Path
+        Location of the vocabulary file.
+
+    Returns
+    -------
+    Vocabulary
+        Compiled rules plus the exempt-path set.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file is missing. Not defaulted away: without it the scanner has no
+        rules and would pass everything.
+    ValueError
+        If the file is malformed, declares an unknown schema or an unknown flag,
+        or contains a pattern that does not compile.
+    """
+    if not path.exists():
+        msg = (
+            f"hygiene vocabulary not found at {path}; the scanner cannot run "
+            "without its term list and will not fall back to an empty one"
+        )
+        raise FileNotFoundError(msg)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        msg = f"hygiene vocabulary at {path} is not a mapping"
+        raise ValueError(msg)
+
+    rules: list[TermRule] = []
+    for row in raw.get("terms") or ():
+        flags = 0
+        for name in row.get("flags") or ():
+            if name not in _FLAG_MAP:
+                msg = f"unknown flag {name!r} on term {row.get('id')!r}"
+                raise ValueError(msg)
+            flags |= _FLAG_MAP[name]
+        try:
+            compiled = re.compile(row["pattern"], flags)
+        except re.error as exc:
+            msg = f"term {row.get('id')!r} has an invalid pattern: {exc}"
+            raise ValueError(msg) from exc
+        rules.append(
+            TermRule(
+                rule_id=str(row["id"]),
+                label=str(row.get("label", row["id"])),
+                pattern=compiled,
+            )
+        )
+    return Vocabulary(
+        schema=str(raw.get("schema", "")),
+        rules=tuple(rules),
+        exempt_paths=frozenset(str(x) for x in (raw.get("exempt_paths") or ())),
+    )
+
 
 # "Gini" is a documented statistical eponym: flagged only in narrative docs.
-GINI_PATTERN = re.compile(_G, re.IGNORECASE)
+# Path-conditional, so it stays here rather than in the flat vocabulary list.
+# Written out in full, not assembled from fragments -- it is not in the term list,
+# so there is nothing for it to collide with.
+GINI_PATTERN = re.compile("gini", re.IGNORECASE)
 NARRATIVE_GLOBS = (
     "README*.md",
     "CHANGELOG.md",
@@ -95,7 +198,8 @@ NARRATIVE_GLOBS = (
 
 ARTIFACT_NAME = re.compile(
     r"(^|/)("
-    r"PKG-INFO|SOURCES\.txt|.*\.egg-info.*|_version\.py|\.baseline_perf|"
+    r"PKG-INFO|SOURCES\.txt|.*\.egg-info.*|_version\.py|"
+    r"\.baseline_perf(\..*)?|"
     r"structure\.txt|scm_version\.json|scm_file_list\.json|"
     r".*\.whl|.*\.log|test-report\.html|\.coverage(\..*)?|coverage\.xml|"
     r"dependency_links\.txt|entry_points\.txt|requires\.txt|top_level\.txt|"
@@ -115,8 +219,6 @@ FORBIDDEN_PATH = re.compile(
 SIZE_LIMIT_BYTES = 500 * 1024
 SIZE_ALLOWLIST: frozenset[str] = frozenset()
 
-SELF_PATHS = frozenset({"scripts/check_public_hygiene.py"})
-
 BINARY_SUFFIXES = frozenset(
     {
         ".png",
@@ -135,6 +237,22 @@ BINARY_SUFFIXES = frozenset(
     }
 )
 
+#: Loaded once per process; the scanner is invoked per staged file by pre-commit.
+_VOCABULARY = load_vocabulary()
+
+
+def _active_vocabulary() -> Vocabulary:
+    """Return the process vocabulary, read at call time.
+
+    ``scan_file`` must not bind ``_VOCABULARY`` as a default argument.  A default
+    is evaluated once, when the ``def`` runs, so the module attribute and the
+    parameter would be two different objects -- and a caller (or a test) that
+    replaces the module attribute would silently keep scanning against the old
+    rules.  That is the same late-binding trap the benchmark driver had, in a
+    hook whose entire job is to notice things.
+    """
+    return _VOCABULARY
+
 
 def _git_files(flag: str) -> list[str]:
     cmd = (
@@ -150,10 +268,11 @@ def _is_narrative(rel: str) -> bool:
     return any(Path(rel).match(g) for g in NARRATIVE_GLOBS)
 
 
-def scan_file(rel: str) -> list[str]:
+def scan_file(rel: str, vocabulary: Vocabulary | None = None) -> list[str]:
     """Return a list of violation messages for one repository-relative path."""
+    active = _active_vocabulary() if vocabulary is None else vocabulary
     problems: list[str] = []
-    if rel in SELF_PATHS:
+    if rel in active.exempt_paths:
         return problems
 
     if ARTIFACT_NAME.search(rel):
@@ -188,16 +307,16 @@ def scan_file(rel: str) -> list[str]:
         return problems
 
     for lineno, line in enumerate(text.splitlines(), start=1):
-        for label, pattern in KEYWORD_PATTERNS:
-            if pattern.search(line):
+        for rule in active.rules:
+            if rule.pattern.search(line):
                 problems.append(
-                    f"{rel}:{lineno}: {label} [{pattern.pattern}] / "
+                    f"{rel}:{lineno}: {rule.label} [{rule.rule_id}] / "
                     "واژگان داخلی پروژه در فایل عمومی"
                 )
         if _is_narrative(rel) and GINI_PATTERN.search(line):
             problems.append(
                 f"{rel}:{lineno}: eponym reserved for code identifiers "
-                f"[{_G}] / واژهٔ اختصاصی کد در سند روایی"
+                f"[{GINI_PATTERN.pattern}] / واژهٔ اختصاصی کد در سند روایی"
             )
     return problems
 
@@ -208,7 +327,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("files", nargs="*", help="explicit file list")
     parser.add_argument("--staged", action="store_true", help="scan git staged files")
     parser.add_argument("--all", action="store_true", help="scan all git tracked files")
+    parser.add_argument(
+        "--list-rules",
+        action="store_true",
+        help="print the loaded term ids and exit (the vocabulary is readable now)",
+    )
     args = parser.parse_args(argv)
+
+    if args.list_rules:
+        for rule in _VOCABULARY.rules:
+            print(f"{rule.rule_id}\t{rule.label}")
+        return 0
 
     if args.staged:
         targets = _git_files("--staged")
@@ -230,7 +359,10 @@ def main(argv: list[str] | None = None) -> int:
         for v in violations:
             print(f"  {v}", file=sys.stderr)
         return 1
-    print(f"hygiene scan PASSED — {len(targets)} file(s) checked")
+    print(
+        f"hygiene scan PASSED — {len(targets)} file(s) checked against "
+        f"{len(_active_vocabulary().rules)} term rule(s)"
+    )
     return 0
 
 

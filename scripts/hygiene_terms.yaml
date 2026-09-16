@@ -1,0 +1,144 @@
+# Terms that must not appear in files this repository publishes.
+#
+# Why this is a data file and not a table in scripts/check_public_hygiene.py:
+#
+# The scanner used to build these patterns out of concatenated string fragments
+# ("review" + "er", "Pha" + "se", "manu" + "script") so that its own source
+# would not match its own rules, and then exempted itself a second time through a
+# SELF_PATHS allowlist. That is not a quality control, it is a performance of
+# one: the mechanism exists to avoid being caught by itself, and the fragments
+# make the actual forbidden vocabulary unreadable to anyone trying to review
+# whether the list is still correct.
+#
+# Keeping the vocabulary here means the scanner's source contains no forbidden
+# term and needs no self-exemption, and the list itself is readable, reviewable
+# and editable without touching code. This file is the single documented
+# exemption -- its entire purpose is to hold the terms -- and the scanner refuses
+# to run if the file is missing rather than silently degrading to an empty rule
+# set, which is what an unreadable config would otherwise become.
+#
+# Scope note: these are *internal project vocabulary* -- phase labels, draft
+# document terms, publication venues, private decision ids. They are forbidden in
+# public files because they leak a private working context, not because the words
+# are objectionable. `bootstrap` is deliberately absent: it is a standard
+# statistical resampling term. `gini` is handled separately in the scanner because
+# it is a legitimate eponym in code identifiers and only out of place in narrative
+# documents.
+
+schema: truss-analysis/hygiene-terms/v1
+
+terms:
+  - id: phase_label
+    label: internal project phase label
+    pattern: 'Phase[ _-]?\d'
+    flags: [ignorecase]
+
+  - id: hypothesis_label
+    label: internal hypothesis label
+    pattern: '\bH[1-4]\b'
+    flags: []
+
+  - id: proposition_label
+    label: internal proposition label
+    pattern: 'Lemma'
+    flags: [ignorecase]
+
+  - id: example_name
+    label: internal example name
+    pattern: 'uniform_beta'
+    flags: [ignorecase]
+
+  - id: attack_phrase
+    label: informal attack phrase
+    pattern: 'kill.?shot'
+    flags: [ignorecase]
+
+  - id: decision_id
+    label: internal decision id
+    pattern: '\bD-0\d\d?\b'
+    flags: []
+
+  - id: log_id
+    label: internal log id
+    pattern: '\bD[RL]-0\d\d?\b'
+    flags: []
+
+  - id: context_file
+    label: internal context file
+    pattern: 'CONTEXT_LOCK'
+    flags: []
+
+  - id: prompt_reference
+    label: internal prompt reference
+    pattern: 'prompt-0*\d'
+    flags: [ignorecase]
+
+  - id: publication_venue
+    label: publication venue marker
+    pattern: 'Nature_2025'
+    flags: []
+
+  - id: case_name
+    label: internal case name
+    pattern: 'paper_case'
+    flags: [ignorecase]
+
+  - id: artifact_name
+    label: internal artifact name
+    pattern: 'CI_results'
+    flags: []
+
+  - id: draft_document
+    label: draft-document term
+    pattern: 'manuscript'
+    flags: [ignorecase]
+
+  # Narrowed in round 7, and the narrowing is the point.
+  #
+  # This rule used to be `\breviewers?\b` -- a bare common English noun. It
+  # therefore banned the word from CONTRIBUTING.md, a document that has to talk
+  # about people reviewing pull requests, and the response to being caught was to
+  # rewrite the prose around the word rather than to ask whether the rule was
+  # right. Erasing a term is not the same as removing what the term was standing
+  # in for; a lexicon check on an ordinary noun is theatre, and it costs real
+  # clarity in the documents it governs.
+  #
+  # What the rule is actually for is *internal process vocabulary*: the phrasing
+  # of a private review workflow leaking into public files, where a reader would
+  # reasonably wonder who "Reviewer 2" is and why the code answers them. That is
+  # detectable from the phrasing, not from the noun.
+  - id: referee_term
+    label: internal review-process vocabulary
+    pattern: '(reviewer|referee)\s*[#:]?\s*[1-9]\b|peer[- ]referee|referee\s+report|response\s+to\s+(reviewers?|referees?)'
+    flags: [ignorecase]
+
+  - id: internal_acronym
+    label: internal acronym
+    pattern: '\bSSOT\b'
+    flags: []
+
+  - id: persian_proposal
+    label: Persian proposal term
+    pattern: 'پروپوزال'
+    flags: []
+
+  - id: persian_paper
+    label: Persian paper term
+    pattern: 'مقاله'
+    flags: []
+
+  - id: persian_hypothesis
+    label: Persian hypothesis term
+    pattern: 'فرضیه'
+    flags: []
+
+# Files whose entire purpose is to carry this vocabulary, and which are therefore
+# exempt from the keyword scan.
+#
+# Exactly one entry, and it is this file. The scanner itself is NOT exempt: its
+# source contains no term from the list above, because the list lives here, so it
+# passes its own scan on the merits. That is the difference between a control and
+# a performance of one -- the previous version needed both a self-exemption and
+# eighteen disassembled string fragments to avoid catching itself.
+exempt_paths:
+  - scripts/hygiene_terms.yaml

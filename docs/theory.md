@@ -78,11 +78,33 @@ shortcut:
 
 * **No bending.** $I_{sec}$ never affects a displacement. Supplying it changes
   only the buckling report.
-* **No geometric nonlinearity.** There is no P-$\Delta$ or large-displacement
-  term. For a slender member near its buckling load, or a hot member whose
-  displacements have grown because $k_E(T)$ has fallen, the linear result
-  understates the true displacement. The reported buckling utilisation is an
-  elastic critical load, not a nonlinear collapse load.
+* **The static solve is first-order.** $\mathbf{K}$ is assembled on the
+  *undeformed* geometry, so the displacements and member forces returned by
+  `solver.solve` carry no P-$\Delta$ or large-displacement term. For a slender
+  member near its buckling load, or a hot member whose displacements have grown
+  because $k_E(T)$ has fallen, that linear result understates the true
+  displacement.
+
+  This used to be stated flatly as "no geometric nonlinearity", which stopped
+  being true when §9 added the geometric stiffness $\mathbf{K}_G$ and the
+  linearised bifurcation load. The distinction that matters is *where* the
+  second-order term enters:
+
+  | Quantity | Uses $\mathbf{K}_G$? | Consequence |
+  |---|---|---|
+  | `solver.solve` displacements, member forces | no | first-order; understates near critical |
+  | `stability.linearized_buckling_load_factor` $\lambda_{cr}$ | **yes** | a real bifurcation load, but linearised about the base state |
+  | `tangent_verification.exact_tangent_stiffness` | **yes** | the true tangent $\mathbf{K}_E + \mathbf{K}_G$, used to measure the gap |
+  | `limitstates` member utilisation | no | an elastic code check, not a collapse load |
+
+  What is still absent is *path following*: no Newton–Raphson load stepping, no
+  arc-length continuation, no post-buckling branch. $\lambda_{cr}$ is therefore a
+  tangent-stiffness criterion evaluated at the base configuration, and for a
+  shallow arch or toggle whose true collapse is a snap-through limit point it
+  approximates that limit with an error of $O(\theta_0^2)$. §9 quantifies the
+  approximation and `stability.imperfection_sensitivity` measures how much of it
+  is geometry-driven; the reported buckling utilisation remains an elastic
+  critical load, not a nonlinear collapse load.
 * **No material nonlinearity in the solve.** The five-branch EN 1993-1-2
   stress–strain law is implemented in `material/steel_eurocode.py` and used for
   capacity checks, but $\mathbf{K}$ is built from the linear modulus $k_E(T) E$.
