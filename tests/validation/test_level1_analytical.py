@@ -48,6 +48,14 @@ from truss_analysis.postprocess import calculate_element_forces, calculate_react
 from truss_analysis.sections import euler_buckling_load, idealised_square_hss
 from truss_analysis.solver import solve
 
+# A5 reproduces the legacy EULER_ONLY capacity against a published analytic value;
+# the model it exercises warns by design.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.LegacyBucklingModelWarning"
+    ),
+]
+
 REL_TOL = 1e-6  # acceptance gate (measured values are ~1e-16)
 E = 210.0e9
 A = 0.01

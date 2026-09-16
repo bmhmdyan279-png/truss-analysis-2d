@@ -32,6 +32,14 @@ from truss_analysis.criticality import compute_ci_for_topology, tau_b
 from truss_analysis.graph_validation import structural_report
 from truss_analysis.topology_generator import TopologyGenerator
 
+# Negative controls construct degenerate and singular models on purpose; that is
+# what makes them controls. scipy's LinAlgWarning from inside its own
+# factorisation is expected, and the assertions are about the library's diagnosis
+# of the same state.
+pytestmark = [
+    pytest.mark.filterwarnings("ignore::scipy.linalg.LinAlgWarning"),
+]
+
 CONTROL_INDICES = (1, 2, 3)
 SYMMETRIC_CASES = ("warren_4_shallow", "pratt_6_shallow", "howe_8_deep", "control_1")
 

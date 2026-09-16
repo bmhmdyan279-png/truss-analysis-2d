@@ -25,6 +25,15 @@ from truss_analysis.reliability import (
 from truss_analysis.solver import solve
 from truss_analysis.uncertainty import LognormalRV
 
+# The reliability engine is exercised against both buckling models, including the
+# legacy EULER_ONLY path whose margins must stay bit-for-bit reproducible. The
+# warning that path emits is asserted in the tests selecting it deliberately.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.LegacyBucklingModelWarning"
+    ),
+]
+
 _E = 200.0e9
 _A = 1.0e-3
 _LENGTH = 1.0

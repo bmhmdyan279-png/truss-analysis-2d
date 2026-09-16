@@ -39,7 +39,7 @@ from .criticality.engine import (
     total_load_vector,
 )
 from .criticality.scenarios import T_AMBIENT
-from .exceptions import BucklingCheckWarning
+from .exceptions import BucklingCheckWarning, LegacyBucklingModelWarning
 from .material.steel_eurocode import k_E as eurocode_k_E
 from .material.steel_eurocode import k_y as eurocode_k_y
 from .model import Element, Node
@@ -504,7 +504,7 @@ def _member_limit_state(
                 "out-of-straightness, overestimating capacity of intermediate-"
                 "slenderness members. The reported DCR and critical temperature "
                 "are optimistic. Use EUROCODE_CHI for code-compliant assessment.",
-                UserWarning,
+                LegacyBucklingModelWarning,
                 stacklevel=2,
             )
             capacity = min(p_cr, n_rd)

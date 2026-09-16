@@ -31,6 +31,13 @@ from truss_analysis.criticality.engine import (
 )
 from truss_analysis.model import Element, Node
 
+# scipy raises LinAlgWarning from inside its factorisations when these tests build
+# a deliberately ill-conditioned or singular member state. The library's own
+# diagnosis of that state -- which routing the guard chooses -- is the assertion.
+pytestmark = [
+    pytest.mark.filterwarnings("ignore::scipy.linalg.LinAlgWarning"),
+]
+
 E = 210e9
 
 

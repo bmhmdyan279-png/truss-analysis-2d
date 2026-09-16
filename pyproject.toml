@@ -172,6 +172,26 @@ extend-ignore-names = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --cov=src/truss_analysis --cov-report=term-missing --cov-fail-under=90"
+# Every warning is an error, globally.
+#
+# This library's diagnostics are the product: a missing I_sec, a penalty too
+# small to approximate a constraint, a section factor below the lumped-capacitance
+# limit and a steel temperature past Table 3.1's ceiling are all things the
+# solver *must* say out loud, and each has a dedicated test asserting that it
+# does. A warning that leaks unasserted into the suite summary is therefore
+# either (a) a diagnostic nobody pinned, or (b) a diagnostic firing on a model
+# that should not have triggered it -- and both are defects.
+#
+# Before this gate the suite emitted 68 warnings per run, which is how the
+# duplicated category prefix in four warning messages ("BucklingCheckWarning:
+# BucklingCheckWarning: member 1: ...") survived several releases: the doubled
+# text was visible in every CI log and read as normal.
+#
+# Modules that deliberately exercise a diagnostic add an explicit, documented
+# `pytestmark = pytest.mark.filterwarnings(...)` naming the exact category, so
+# the exception is a reviewable decision at the top of the file rather than a
+# leak in the summary.
+filterwarnings = ["error"]
 
 # ---------------------------------------------------------------------------
 # Coverage configuration (omit validation files)

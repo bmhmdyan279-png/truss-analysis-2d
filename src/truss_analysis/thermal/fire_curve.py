@@ -991,7 +991,7 @@ def steel_temperature(
     if warn_lumped and section_factor < LUMPED_SECTION_FACTOR_LIMIT:
         biot = lumped_capacity_biot(section_factor, theta_a0, emissivity, alpha_c)
         warnings.warn(
-            f"LumpedCapacityWarning: section factor A_m/V = "
+            f"section factor A_m/V = "
             f"{section_factor:.4g} 1/m is below "
             f"{LUMPED_SECTION_FACTOR_LIMIT:g} 1/m (thick section); the "
             f"Biot number is {biot:.3f} against the usual Bi < 0.1 criterion "

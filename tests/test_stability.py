@@ -43,6 +43,25 @@ from truss_analysis.stability import (
     member_geometric_vectors,
 )
 
+# Diagnostics this module triggers on purpose, named exactly and nowhere wider.
+#
+# ShallowSystemWarning: nearly every model here is a two-bar toggle or a shallow
+#   fan, because those are the geometries with closed-form bifurcation loads to
+#   check against. The screen is asserted directly in
+#   test_shallow_toggle_is_still_flagged_as_an_arch and
+#   test_shallow_warning_can_be_suppressed; the remaining tests are about the
+#   eigenproblem, not the screen.
+# LinAlgWarning: raised inside scipy when a deliberately singular matrix reaches
+#   a factorisation. test_base_mechanism_raises builds one on purpose and asserts
+#   the library converts it into MechanismError; scipy's own complaint about the
+#   same matrix is noise on top of that assertion.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ShallowSystemWarning"
+    ),
+    pytest.mark.filterwarnings("ignore::scipy.linalg.LinAlgWarning"),
+]
+
 E_STEEL = 210e9
 AREA = 1e-3
 

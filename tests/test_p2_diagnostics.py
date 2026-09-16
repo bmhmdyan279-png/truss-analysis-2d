@@ -44,6 +44,16 @@ from truss_analysis.uncertainty.sampling import (
     iman_conover_with_report,
 )
 
+# Both categories are the subject of this module: it checks that solver_metadata
+# records the path actually taken, including the penalty path's conditioning
+# complaint and the sparse-to-dense downgrade notice.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.IllConditionedWarning"
+    ),
+    pytest.mark.filterwarnings("ignore::truss_analysis.exceptions.InputIgnoredWarning"),
+]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO_ROOT / "examples" / "example1.json"
 

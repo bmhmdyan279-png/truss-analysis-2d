@@ -24,7 +24,9 @@ import numpy.typing as npt
 from scipy.stats import beta as beta_dist
 from scipy.stats import norm
 
-from .exceptions import BucklingCheckWarning
+from .exceptions import (
+    LegacyBucklingModelWarning,
+)
 from .limitstates import DEFAULT_BUCKLING_CURVE, GAMMA_M_FIRE, BucklingModel
 from .sections import (
     buckling_reduction_factor,
@@ -643,7 +645,7 @@ class ReliabilityEngine:
                 "out-of-straightness, overestimating capacity of intermediate-"
                 "slenderness members. The reported reliability indices are optimistic. "
                 "Use EUROCODE_CHI for code-compliant assessment.",
-                BucklingCheckWarning,
+                LegacyBucklingModelWarning,
                 stacklevel=2,
             )
             return float(p_cr - abs(member.axial_force))

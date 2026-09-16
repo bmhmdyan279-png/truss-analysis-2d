@@ -714,7 +714,7 @@ def perturb_multi(
         rel_resid = float(np.linalg.norm(residual, np.inf) / denom)
         if cond_core > PERTURB_COND_WARN or rel_resid > PERTURB_RESID_WARN:
             warnings.warn(
-                f"IllConditionedPerturbationWarning: Woodbury core for "
+                f"Woodbury core for "
                 f"member(s) {members} is ill-conditioned "
                 f"(cond = {cond_core:.3e}, relative residual = "
                 f"{rel_resid:.3e}); the perturbed displacements may carry "

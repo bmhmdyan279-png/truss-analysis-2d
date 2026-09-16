@@ -10,6 +10,23 @@ import pytest
 from truss_analysis import run
 from truss_analysis.main import AnalysisResult, main
 
+# End-to-end runs over the shipped example models.
+#
+# BucklingCheckWarning: examples/example1.json and example2.json carry members
+#   with no I_sec, so buckling cannot be assessed and the CLI says so. That is
+#   the correct behaviour for those inputs and is asserted through the
+#   status='unknown' / safe=False fields the tests check.
+# IllConditionedWarning: the penalty-path test passes a deliberately small
+#   penalty to exercise the metadata recording.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.BucklingCheckWarning"
+    ),
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.IllConditionedWarning"
+    ),
+]
+
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 SIMPLE = {

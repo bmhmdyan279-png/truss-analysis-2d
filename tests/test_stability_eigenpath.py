@@ -39,6 +39,25 @@ from truss_analysis.stability import (
     linearized_buckling_load_factor,
 )
 
+# Diagnostics this module triggers on purpose, named exactly and nowhere wider.
+#
+# ShallowSystemWarning: the toggle and fan models here are shallow by
+#   construction; the screen is asserted in test_stability.py and in
+#   test_shallow_warning_can_be_suppressed below.
+# InputIgnoredWarning: an imperfection sweep whose amplitudes all lie outside the
+#   EN 1993-1-1 Table 5.1 band must report that it is extrapolating, and a
+#   caller-supplied mode carrying support components must report that they were
+#   masked. Both are asserted directly, in
+#   test_out_of_band_amplitudes_warn_and_are_flagged and
+#   test_supplied_mode_with_support_components_is_masked_and_reported; the other
+#   sweeps pass a single amplitude and are about the study's shape.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.ShallowSystemWarning"
+    ),
+    pytest.mark.filterwarnings("ignore::truss_analysis.exceptions.InputIgnoredWarning"),
+]
+
 E_STEEL = 210e9
 AREA = 4e-3
 

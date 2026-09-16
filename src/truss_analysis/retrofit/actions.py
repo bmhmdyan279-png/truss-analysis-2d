@@ -131,7 +131,7 @@ def member_thickness_ratio(
         reason = "I_sec <= 0"
     if warn:
         warnings.warn(
-            f"BucklingCheckWarning: member {element.id}: cannot recover b/t "
+            f"member {element.id}: cannot recover b/t "
             f"from its section ({reason}); assuming b/t = {fallback:g} for the "
             "enlarged section. The resulting I_sec is an assumption, not a "
             "derivation -- supply a real I_sec to remove it.",

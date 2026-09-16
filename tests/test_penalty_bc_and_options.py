@@ -30,6 +30,17 @@ from truss_analysis.solver import (
     solve_penalty_with_energy,
 )
 
+# IllConditionedWarning is the subject of this module rather than an accident of
+# it: the module exists to check that a penalty too small to approximate a
+# constraint says so. Several tests deliberately pass such a penalty in order to
+# exercise the penalty machinery itself, so the category is filtered here and
+# asserted explicitly wherever the warning is the point.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.IllConditionedWarning"
+    ),
+]
+
 
 def _frame() -> tuple[list[Node], list[Element]]:
     """A four-bar frame with one diagonal: indeterminate, so reactions matter."""

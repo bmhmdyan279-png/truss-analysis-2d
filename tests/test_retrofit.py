@@ -23,6 +23,17 @@ from truss_analysis.retrofit import (
 )
 from truss_analysis.sections import idealised_square_hss
 
+# Retrofit triage runs over campaign fixtures whose members carry no I_sec, so
+# enlarging a member cannot recover its b/t and the action assumes b/t = 25 with
+# a warning. That assumption is exactly what test_decision_physics_map_exact
+# checks; the category is filtered here so the remaining strategy tests assert on
+# decisions rather than diagnostics.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.BucklingCheckWarning"
+    ),
+]
+
 # Deterministic greedy-failure case found by vault/experiment/find_greedy_failure.py
 # (seed rng(5000), linear costs, budget fraction 0.35): greedy picks action 2 on
 # member 3 while the global optimum protects member 2 at level 1.

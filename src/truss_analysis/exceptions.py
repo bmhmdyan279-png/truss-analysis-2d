@@ -61,6 +61,27 @@ class BucklingCheckWarning(UserWarning):
     """
 
 
+class LegacyBucklingModelWarning(BucklingCheckWarning):
+    """Warning issued when the legacy ``EULER_ONLY`` capacity model is selected.
+
+    ``BucklingModel.EULER_ONLY`` takes the member capacity as
+    ``min(N_cr, N_Rd)``, ignoring residual stresses and initial
+    out-of-straightness, and overestimates the capacity of
+    intermediate-slenderness members by roughly 15% at ``lambda_bar ~ 2``.  It
+    is kept because results computed with it must stay reproducible bit for bit;
+    ``EUROCODE_CHI`` is the code-compliant path.
+
+    The same diagnostic used to be emitted under two different categories --
+    a bare :class:`UserWarning` from :mod:`truss_analysis.limitstates` and
+    :class:`BucklingCheckWarning` from :mod:`truss_analysis.reliability`.  A
+    caller filtering on one silently missed the other, and a bare ``UserWarning``
+    cannot be filtered precisely at all, since every third-party library uses it.
+    Deriving from ``BucklingCheckWarning`` keeps existing
+    ``pytest.warns(BucklingCheckWarning)`` and ``filterwarnings`` entries working
+    while making the specific case addressable.
+    """
+
+
 class LargeDisplacementWarning(UserWarning):
     """Warning issued when the linear kinematics assumption is being stretched.
 

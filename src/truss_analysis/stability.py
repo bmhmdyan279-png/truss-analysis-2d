@@ -1182,7 +1182,7 @@ def linearized_buckling_load_factor(
 
         if multiplicity > 1:
             warnings.warn(
-                f"AmbiguousModeWarning: {multiplicity} buckling modes share "
+                f"{multiplicity} buckling modes share "
                 f"the critical load factor (lambda_cr = {lam_cr:.6g}). The "
                 "returned mode is implementation-dependent; any linear "
                 "combination of these modes is equally valid.",

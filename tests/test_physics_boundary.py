@@ -34,6 +34,20 @@ from truss_analysis.physics_boundary import (
     physics_boundary,
 )
 
+# test_digest_is_identical_across_solver_options runs every bc_method against
+# every assembly option by design, which necessarily includes the penalty/dense
+# combinations. Those emit two diagnostics: InputIgnoredWarning because penalty
+# forces dense assembly, and IllConditionedWarning because the fixed 1e12
+# penalty is small relative to this model's stiffness diagonal. Digest invariance
+# is the assertion here; both notices are asserted where they are the subject, in
+# tests/test_p2_diagnostics.py and tests/test_penalty_bc_and_options.py.
+pytestmark = [
+    pytest.mark.filterwarnings("ignore::truss_analysis.exceptions.InputIgnoredWarning"),
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.IllConditionedWarning"
+    ),
+]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 THEORY = REPO_ROOT / "docs" / "theory.md"
 EXAMPLE = REPO_ROOT / "examples" / "example1.json"

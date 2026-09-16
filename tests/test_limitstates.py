@@ -17,6 +17,22 @@ from truss_analysis.limitstates import (
 )
 from truss_analysis.model import Element, Node
 
+# Two diagnostics this module exercises deliberately.
+#
+# LegacyBucklingModelWarning: EULER_ONLY is kept so that results computed with it
+#   stay reproducible bit for bit, and these tests are that reproduction.
+# BucklingCheckWarning: the campaign fixtures carry members with I_sec <= 0, so
+#   their DCR is reported as +inf with a warning -- the documented behaviour for
+#   missing data, asserted in test_dcr_field_on_campaign_truss.
+pytestmark = [
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.LegacyBucklingModelWarning"
+    ),
+    pytest.mark.filterwarnings(
+        "ignore::truss_analysis.exceptions.BucklingCheckWarning"
+    ),
+]
+
 F_Y = 235.0e6
 E = 210.0e9
 P_CR_HAND = math.pi**2 * E * 1e-6 / 2.0**2  # 518154.2310571913 N
