@@ -70,7 +70,7 @@ import numpy as np
 import numpy.typing as npt
 import scipy.sparse as sp
 from scipy.linalg import LinAlgError, cholesky, eigh, solve_triangular
-from scipy.sparse.linalg import ArpackError, LinearOperator, eigsh, splu
+from scipy.sparse.linalg import ArpackError, LinearOperator, SuperLU, eigsh, splu
 
 from .assembly import MemberGeometry, member_geometry
 from .criticality.engine import (
@@ -227,13 +227,15 @@ def geometric_stiffness(
 #: fixed cost of the sparse factorisation and the ARPACK setup dominates and
 #: the dense path wins; from ~120 upward the sparse path is ahead, reaching
 #: ~3.5x by 1300 DOFs and holding there.  400 is chosen rather than 120
-#: because the dense path also buys two things money cannot: an
-#: *unconditional* positive-definiteness verdict from a Cholesky attempt
-#: (the sparse probe detects the loss-of-definiteness crossing, see
-#: :func:`_sparse_smallest_eigenvalue`), and the full spectrum rather than
-#: the leading Ritz pairs.  For a model that solves in well under a second,
-#: that is the better trade.  Memory is the other driver: the dense path
-#: holds three ``n x n`` matrices, 8n^2 bytes each, which is 96 MB at
+#: because the dense path still buys two things the sparse one does not: the
+#: *full* spectrum rather than the leading Ritz pairs, and a verdict whose
+#: arithmetic is LAPACK's rather than SuperLU's -- both paths now decide
+#: positive-definiteness unconditionally (Cholesky failure on the dense side,
+#: Sylvester inertia of the ``U`` diagonal on the sparse side, see
+#: :func:`_sparse_inertia`), so the choice is about spectrum and provenance,
+#: not about safety.  For a model that solves in well under a second, the
+#: dense path is the better trade.  Memory is the other driver: the dense
+#: path holds three ``n x n`` matrices, 8n^2 bytes each, which is 96 MB at
 #: n = 2000 and 2.4 GB at n = 10000.  Override per call with
 #: ``eigen_solver="dense"`` / ``"sparse"``.
 SPARSE_EIGEN_THRESHOLD = 400
@@ -355,23 +357,30 @@ def _dyad_sum_sparse(
 
 def _factor_sparse_base(
     a_sparse: sp.csr_matrix,
-) -> tuple[LinearOperator, float]:
+) -> tuple[LinearOperator, SuperLU]:
     """Sparse ``LU`` of the prestressed base state, wrapped as an operator.
 
-    One factorisation serves both the positive-definiteness probe and the
-    Lanczos eigensolve, because both need ``A^{-1}`` -- the probe through
-    shift-invert with ``sigma = 0`` (which is exactly ``A^{-1}``), the
-    eigensolve as the ``M``-preconditioner of the generalised problem.
-    Factoring twice would roughly double the sparse path's cost.
+    One factorisation serves three consumers -- the inertia verdict, the
+    positive-definiteness probe and the Lanczos eigensolve -- because all
+    three need ``A^{-1}``: the probe through shift-invert with ``sigma = 0``
+    (which is exactly ``A^{-1}``), the eigensolve as the ``M``-preconditioner
+    of the generalised problem, and the inertia read off the same ``U``
+    factor.  Factoring twice would roughly double the sparse path's cost.
 
     ``permc_spec="MMD_AT_PLUS_A"`` with ``SymmetricMode`` is SuperLU's
     fill-reducing ordering for symmetric patterns, which is what a stiffness
-    matrix is.
+    matrix is.  ``diag_pivot_thresh=0.0`` is *load-bearing* here rather than
+    merely a stability preference: it forces SuperLU to take the diagonal
+    entry as the pivot, so the factorisation is the symmetric
+    ``P A P^T = L U`` whose ``U`` diagonal carries the inertia (see
+    :func:`_sparse_inertia`).  A threshold-pivoted factorisation would
+    permute rows independently of columns and the sign count would mean
+    nothing.
 
     Returns
     -------
-    tuple[scipy.sparse.linalg.LinearOperator, float]
-        The ``A^{-1}`` operator and its shape.
+    tuple[scipy.sparse.linalg.LinearOperator, scipy.sparse.linalg.SuperLU]
+        The ``A^{-1}`` operator and the factorisation it was built from.
 
     Raises
     ------
@@ -394,7 +403,51 @@ def _factor_sparse_base(
             f"point, so no load factor is defined ({exc})"
         )
         raise MechanismError(msg) from exc
-    return LinearOperator((n, n), matvec=lu.solve, dtype=float), float(n)
+    return LinearOperator((n, n), matvec=lu.solve, dtype=float), lu
+
+
+def _sparse_inertia(lu: SuperLU) -> tuple[int, int]:
+    """Count the negative and zero pivots of a symmetric ``splu`` factor.
+
+    By **Sylvester's law of inertia** the number of negative (respectively
+    zero) diagonal entries of ``U`` in a symmetric factorisation
+    ``P A P^T = L U`` equals the number of negative (respectively zero)
+    eigenvalues of ``A``, regardless of the fill-reducing permutation.  This
+    is an *unconditional* verdict: it does not depend on an iterative solver
+    converging, on a tolerance, or on where the spectrum happens to sit.
+
+    Why this exists -- the round-7 audit's most important finding.  The
+    shift-invert probe in :func:`_sparse_smallest_eigenvalue` looks for the
+    eigenvalue of *smallest magnitude*, which is the right question at the
+    loss-of-definiteness crossing (``lambda_min -> 0``) and the wrong one
+    past it.  On a deeply indefinite base state -- a temperature near
+    collapse, where ``K_E`` has degraded towards zero while
+    ``K_G(N_imposed)`` has driven it negative, giving a spectrum such as
+    ``{-5, +1, +2}`` -- the probe returns ``+1``, the tolerance test passes,
+    and ``eigsh`` is then handed an indefinite ``M`` for what is documented
+    as a symmetric positive-definite generalised problem.  ARPACK does not
+    validate that assumption; it returns a number.  A safety-critical verdict
+    that depends on the user *guessing* to pass ``eigen_solver="dense"`` is
+    exactly the silent failure mode the library's physics-boundary policy
+    forbids.
+
+    The inertia read costs nothing: ``U`` is already in hand from the
+    factorisation the path needs anyway.
+
+    Parameters
+    ----------
+    lu : scipy.sparse.linalg.SuperLU
+        A factorisation produced by :func:`_factor_sparse_base`, i.e. with
+        ``SymmetricMode=True`` and ``diag_pivot_thresh=0.0``.
+
+    Returns
+    -------
+    tuple[int, int]
+        ``(n_negative, n_zero)`` -- the counts of negative and exactly-zero
+        pivots of ``U``.  ``A`` is positive definite iff both are zero.
+    """
+    diag_u = np.asarray(lu.U.diagonal(), dtype=float)
+    return int(np.count_nonzero(diag_u < 0.0)), int(np.count_nonzero(diag_u == 0.0))
 
 
 def _sparse_smallest_eigenvalue(
@@ -420,9 +473,12 @@ def _sparse_smallest_eigenvalue(
     crossing* (``lambda_min -> 0``), which is the physically relevant
     failure and the one the dense path's Cholesky attempt also catches.  A
     base state that is already deeply indefinite -- far past the crossing,
-    with no eigenvalue near zero -- can return a positive value here.  Use
-    ``eigen_solver="dense"`` when such a state is suspected; the dense path's
-    Cholesky gives an unconditional verdict.
+    with no eigenvalue near zero -- can return a positive value here, so
+    this function is **not** a positive-definiteness test on its own.  The
+    unconditional verdict comes from :func:`_sparse_inertia`, which the
+    caller applies *before* this probe runs; by the time control reaches
+    here the matrix is already known to be positive definite and the probe
+    is reporting a magnitude, not deciding a verdict.
     """
     n = int(a_sparse.shape[0])
     if n == 0:
@@ -762,8 +818,30 @@ def linearized_buckling_load_factor(
         a_sparse = _dyad_sum_sparse(geom, n_dof, free, setup.k_axial, b_local)
         a_sparse = a_sparse + _dyad_sum_sparse(geom, n_dof, free, coeff_th, g_local)
         b_sparse = _dyad_sum_sparse(geom, n_dof, free, coeff_mech, g_local)
-        a_inv, _n = _factor_sparse_base(a_sparse)
+        a_inv, lu = _factor_sparse_base(a_sparse)
         a_scale = float(sp.linalg.norm(a_sparse, "fro"))
+        # Unconditional verdict first: Sylvester inertia from the factor's U
+        # diagonal.  The shift-invert probe below detects the *crossing*
+        # (lambda_min -> 0) but is blind to a base state already deep past
+        # it, so it is a diagnostic here, never the gate (round-7 audit).
+        n_negative, n_zero = _sparse_inertia(lu)
+        if n_zero:
+            msg = (
+                "prestressed base state is singular: the imposed "
+                "(thermal/fabrication) force state alone has reached a "
+                f"critical point ({n_zero} exactly-zero pivot(s) in the "
+                "symmetric factorisation), so no load factor is defined"
+            )
+            raise MechanismError(msg)
+        if n_negative:
+            msg = (
+                "prestressed base state is not positive definite: the imposed "
+                "(thermal/fabrication) force state alone has passed a critical "
+                f"point ({n_negative} of {n_free} negative eigenvalue(s), by "
+                "Sylvester inertia of the symmetric factorisation), so no "
+                "load factor is defined"
+            )
+            raise MechanismError(msg)
         lam_min = _sparse_smallest_eigenvalue(a_sparse, a_inv)
         pd_tol = _definiteness_tolerance(n_free, a_scale)
         if lam_min <= pd_tol:
