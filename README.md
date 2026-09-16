@@ -322,7 +322,7 @@ first 240 bytes. 9 nodes, 15 members, 7 loaded nodes.)
 
 ```console
 $ truss-analysis version
-2.9.0
+2.10.0
 ```
 
 (Installed from a source export. A git checkout reports the exact
@@ -657,7 +657,7 @@ Citation metadata is maintained in [CITATION.cff](CITATION.cff):
   author  = {bmhmdyan279-png},
   title   = {truss\_analysis: linear 2D truss finite-element analysis for Python},
   year    = {2026},
-  version = {2.9.0},
+  version = {2.10.0},
   license = {MIT},
   url     = {https://github.com/bmhmdyan279-png/truss-analysis-2d}
 }

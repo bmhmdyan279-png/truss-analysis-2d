@@ -319,7 +319,7 @@ $ head -c 240 warren4.json
 
 ```console
 $ truss-analysis version
-2.9.0
+2.10.0
 ```
 
 (نصب از خروجیِ بدون git سورس. در یک checkout گیت، رشتهٔ دقیق
@@ -602,7 +602,7 @@ scripts/                                     # ابزارهای نگهداری �
   author  = {bmhmdyan279-png},
   title   = {truss\_analysis: linear 2D truss finite-element analysis for Python},
   year    = {2026},
-  version = {2.9.0},
+  version = {2.10.0},
   license = {MIT},
   url     = {https://github.com/bmhmdyan279-png/truss-analysis-2d}
 }

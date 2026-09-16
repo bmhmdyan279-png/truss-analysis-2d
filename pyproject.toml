@@ -98,7 +98,7 @@ where = ["src"]
 # `tests/test_stats_gate.py` pins that it does.
 [tool.setuptools_scm]
 write_to = "src/truss_analysis/_version.py"
-fallback_version = "2.9.0"
+fallback_version = "2.10.0"
 
 # ---------------------------------------------------------------------------
 # Linting / formatting — ruff

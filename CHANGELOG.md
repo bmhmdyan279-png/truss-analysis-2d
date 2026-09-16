@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.10.0] — 2026-09-16
 
 Round-8 external audit, on `main@db67ee4`. Eight independent critiques were
 read. **Four of the eight had reviewed an older tree** — two said so explicitly
@@ -17,7 +17,9 @@ and the refutations are recorded below with the file and line that refutes
 them. Accepting a stale finding would have meant re-fixing a fixed bug and
 calling it progress.
 
-Suite: **1066 → 1103 tests, 0 → 0 warnings, 94.43 % → 94.54 % coverage.**
+Suite: **1066 → 1140 tests, 0 → 0 warnings, 94.43 % → 94.7 % coverage.**
+Mutation score on `limitstates.py`, measured by the new probe: **93.3 %**
+(42/45), with the three survivors shown to be mathematically equivalent.
 
 The round closed three findings that three separate critics reached
 independently, and the two structural ones were both cases of the same defect
@@ -219,6 +221,74 @@ the caller to pass a parameter no reachable function accepted.
   invisible. Both blocks are now labelled with the release they shipped in, and
   `test_the_changelog_has_one_unreleased_and_a_heading_per_tag` makes the
   property a gate.
+
+- **`scripts/mutation_probe.py`: a targeted mutation probe, and what it found.**
+  Round 7 added 246 tests and moved coverage by +0.23 pp, which is the signature
+  of parameterised variants over branches that were already covered. Line
+  coverage asks whether a line *ran*; it cannot ask whether any test would notice
+  if the line computed something else. This round had already proved the
+  difference by accident — `dcr_field`'s system-stability branch had twenty-two
+  callers in the suite and **zero** assertions, so a path that silently rewrote a
+  safety-relevant number was fully covered and fully unverified.
+
+  The probe applies curated semantic edits (comparison, boolean and arithmetic
+  operators) to one module and runs that module's own tests against each, with
+  `-x` so a killed mutant costs seconds. `limitstates.py` scored **35/45 (77.8 %)**
+  on the first run and **42/45 (93.3 %)** after the findings were closed; the
+  three survivors left are mathematically equivalent mutants, recorded with the
+  reason in `tests/test_limitstates_boundaries.py`, so every mutant that any test
+  could kill now dies.
+
+  Two of the ten survivors were in code written **earlier in this same round**.
+  Flipping `lambda_cr <= 1.0` to `< 1.0` left the whole suite green — including
+  the test written specifically to pin that comparison, because it reached the
+  boundary by scaling a load by the measured factor and round-off lands that at
+  `1 ± 1e-16`, so no load-scaling test can sit *on* the boundary. The decision is
+  now a pure function, `system_stability_amplification(lambda_cr, collapsed)`,
+  that can be asked about exactly 1.0, with the whole domain parameterised across
+  it. The general lesson is in its docstring: **a boundary that cannot be reached
+  from the public API is a boundary that cannot be tested.**
+
+  Chasing a second survivor produced a better result than a killing test would
+  have: `ls.compression and ls.p_cr is not None` cannot be separated, because
+  `_member_limit_state` sets `p_cr` only inside its compression branch, so the two
+  halves are the same statement for every reachable input. That invariant is now
+  pinned directly, since redundancy whose redundancy is unstated gets
+  "simplified" by someone who does not know it was load-bearing.
+
+  Six more were real boundaries no fixture ever landed on: a member length
+  computed as `x_j - x_i` on models whose `node_i` was always at the origin (where
+  `+` and `-` agree, and `hypot` is sign-insensitive besides); `axial_force < 0`
+  with no member at exactly zero force; `lambda_bar <= 0.2` with no member at
+  exactly the limit; `p_cr <= n_rd` in the `EULER_ONLY` governing rule with no
+  member at exact equality; `model is EULER_ONLY and p_cr is not None` flipped to
+  `or`, which would let a *Eurocode* member fall into the legacy governing rule
+  on the default code path; and `len(unassessable) > 5` with no fixture at exactly
+  five and six.
+
+  Two fixtures written to close these were themselves **vacuous in ways that
+  looked correct and passed**: the translation-invariance test built its elements
+  with the default `alpha = 0.0`, so `lengths` only ever fed two zero vectors;
+  and fixing that still did not kill the mutant, because the fixture was a
+  determinate two-bar toggle in which restrained thermal expansion produces no
+  force at all. Setting `alpha`, translating the model and comparing both scan
+  bases were each necessary and none sufficient — it took one degree of redundancy
+  before a length error became a force error.
+
+  The probe is **not** a CI gate and says so in its own docstring: `cosmic-ray`
+  runs the whole suite per mutant, which on 1100+ tests at ~65 s is weeks of
+  compute for three modules, and a nightly job that cannot finish is not a gate
+  either. What it is instead is a measurement with a named scope, where the
+  survivor list is the deliverable rather than the score.
+
+  It also caught a defect in itself, which is the strongest available evidence
+  that its baseline guard is load-bearing. Its outer `finally` ran
+  `git checkout -- <module>` as a "leave no dirty tree" safety net and destroyed
+  uncommitted work in the module being probed, because `git checkout` restores
+  HEAD rather than the state the file was in when the probe started. The next
+  run's baseline check refused to proceed — correctly, since a probe against a red
+  baseline measures nothing and every mutant would look killed — and that refusal
+  is what surfaced the damage.
 
 ### Not reproduced — recorded with the measurement that refutes them
 

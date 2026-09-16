@@ -7,7 +7,9 @@ surviving mutant is a line where the suite's assertions do not reach the
 decision the line makes, which is exactly the gap between "the line ran" (what
 coverage measures) and "the line was checked" (what a test is for).
 
-The module scored 35/45 on the first run.  Ten survived, and they fall into
+The module scored 35/45 on the first run and 42/45 after this file existed.
+The three survivors left are the equivalent mutants documented at the bottom,
+so every mutant that any test could kill now dies.  The original ten fall into
 three groups, treated differently:
 
 * **Real boundaries, now pinned.** A comparison against an exact threshold that
