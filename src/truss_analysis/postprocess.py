@@ -454,50 +454,80 @@ LARGE_DISPLACEMENT_RATIO = 0.1
 def check_shallow_system(
     nodes: list[Node],
     ratio: float = 0.1,
+    elements: list[Element] | None = None,
 ) -> float | None:
-    """Warn when the system geometry is shallow (rise/span < ratio).
+    """Warn when the geometry is a *shallow arch*, and report depth/span.
 
-    Linearised bifurcation analysis approximates the true snap-through limit
-    point with an error that scales as O(theta_0^2) where theta_0 is the
-    initial rise angle. For shallow systems (rise-to-span ratio below ~0.1),
-    the linearised lambda_cr can be significantly optimistic compared to the
-    actual collapse load. This warning flags such geometries so engineers can
-    supplement with geometrically nonlinear analysis (round-5 audit C6#9,
-    C7§4.2: member-specific or strain-based shallow detection is preferred).
+    Two defects fixed here (round-7 audit, item 4).
+
+    **The measure was not orientation-robust.** This function computed
+    ``ptp(y) / ptp(x)`` while :func:`truss_analysis.stability._rise_span_ratio`
+    computed the smaller-over-larger bounding-box extent. The same model could
+    therefore be flagged shallow on one path and not on the other, and a
+    *vertical* truss -- one whose span runs along ``y`` -- was reported with a
+    ratio greater than one and never flagged at all. Both paths now route
+    through :func:`~truss_analysis.stability.shallow_system_screen`, so there
+    is one measure and one threshold.
+
+    **The claim exceeded the evidence.** ``depth/span < 0.1`` was reported as a
+    snap-through risk, but snap-through needs a *bent* compressed load path.
+    A 30 m x 2 m Pratt girder has depth/span = 0.067, straight chords, and no
+    snap-through mode at all -- its instability is member buckling, which
+    :func:`calculate_buckling` already assesses. Warning about snap-through on
+    every ordinary truss girder is how a reader learns to ignore warnings, so
+    the snap-through wording now appears only when
+    :attr:`~truss_analysis.stability.ShallowScreen.arch_like` is true. Pass
+    ``elements`` to get that discrimination; with ``nodes`` alone the screen
+    cannot tell a bent chord from a straight one and stays conservative.
 
     Parameters
     ----------
     nodes : list[Node]
-        Model nodes (for computing rise and span from bounding box).
+        Model nodes.
     ratio : float, default 0.1
-        Threshold fraction; must be positive.
+        Depth/span threshold; must be positive.
+    elements : list[Element] or None, optional
+        Model members. Supplying them enables the curvature discrimination
+        described above; omitting them keeps the conservative bounding-box
+        behaviour.
 
     Returns
     -------
     float or None
-        ``rise / span`` (``None`` when span is zero, i.e. a degenerate model).
-        The warning is emitted when the returned value is below ``ratio``.
+        The orientation-robust ``depth / span`` ratio, or ``None`` for a
+        degenerate model (no nodes, or a zero-extent bounding box). The
+        warning is emitted only when the geometry is a shallow arch.
+
+    See Also
+    --------
+    truss_analysis.stability.shallow_system_screen : the shared measurement.
     """
-    if ratio <= 0.0:
-        msg = f"ratio must be positive, got {ratio}"
-        raise ValueError(msg)
-    xs = [n.x for n in nodes]
-    ys = [n.y for n in nodes]
-    span = max(xs) - min(xs) if nodes else 0.0
-    rise = max(ys) - min(ys) if nodes else 0.0
-    if span <= 0.0:
+    # Imported here rather than at module scope: stability imports the
+    # criticality engine, and keeping postprocess importable on its own avoids
+    # making that chain a hard dependency of a post-processing helper.
+    from .stability import shallow_system_screen
+
+    if not nodes:
         return None
-    shallow_ratio = rise / span
-    if shallow_ratio < ratio:
+    screen = shallow_system_screen(nodes, elements, ratio=ratio)
+    if not math.isfinite(screen.depth_span_ratio):
+        return None
+    if screen.snap_through_risk:
+        kink = screen.max_chord_kink_rad
+        detail = (
+            ""
+            if not math.isfinite(kink)
+            else f" with a {math.degrees(kink):.2f} deg chord kink"
+        )
         warnings.warn(
-            f"system geometry is shallow: rise/span = {shallow_ratio:.3f} "
-            f"(threshold {ratio:.1f}): linearised bifurcation analysis may be "
-            f"optimistic compared to snap-through collapse. Consider a "
-            f"geometrically nonlinear analysis.",
+            f"system geometry is a shallow arch: depth/span = "
+            f"{screen.depth_span_ratio:.3f} < {ratio:.3g}{detail}; linearised "
+            "bifurcation analysis may be optimistic compared to snap-through "
+            "collapse. Consider a geometrically nonlinear analysis.",
             ShallowSystemWarning,
             stacklevel=2,
         )
-    return shallow_ratio
+    return screen.depth_span_ratio
 
 
 def check_displacement_magnitude(

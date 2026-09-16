@@ -697,7 +697,9 @@ def run(
         energy_scale=imposed_strain_energy(nodes, elements),
         penalty_energy=penalty_energy,
     )
-    check_shallow_system(nodes)
+    # elements are passed so the screen can tell a shallow *arch* (which can
+    # snap through) from a merely slender parallel-chord girder (which cannot).
+    check_shallow_system(nodes, elements=elements)
     check_displacement_magnitude(nodes, U)
     reactions = calculate_reactions(nodes, K, U, F_ext, fixed_dofs)
     equilibrium = check_equilibrium(nodes, reactions, applied_loads)

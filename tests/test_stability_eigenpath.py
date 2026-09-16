@@ -15,6 +15,8 @@ Covers the round-6 audit items:
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -498,7 +500,7 @@ def test_collinear_model_is_not_flagged_shallow() -> None:
 
 def test_shallow_warning_can_be_suppressed() -> None:
     nodes, elements, loads = _toggle(h=0.05, b=1.0)  # depth/span = 0.05/2 = 0.025
-    with pytest.warns(ShallowSystemWarning, match="depth/span ratio"):
+    with pytest.warns(ShallowSystemWarning, match="shallow arch"):
         linearized_buckling_load_factor(nodes, elements, loads, warn_shallow=True)
     import warnings
 
@@ -999,6 +1001,220 @@ def test_default_amplitudes_span_the_code_band() -> None:
     assert len(in_band) >= 2, "the verdict needs at least two code-like points"
     assert min(DEFAULT_IMPERFECTION_AMPLITUDES) < band[0], "and one below, for the fit"
     # EN 1993-1-1 Table 5.1, buckling curves a0 ... d
-    assert pytest.approx(
-        (1 / 350, 1 / 300, 1 / 250, 1 / 200, 1 / 150)
-    ) == CODE_IMPERFECTION_AMPLITUDES
+    assert (
+        pytest.approx((1 / 350, 1 / 300, 1 / 250, 1 / 200, 1 / 150))
+        == CODE_IMPERFECTION_AMPLITUDES
+    )
+
+
+# --------------------------------------------------------------------------
+# round-7 audit, item 4: the "shallow" screen conflated geometric curvature
+# with structural slenderness, and fired on ordinary truss girders.
+# --------------------------------------------------------------------------
+
+
+def _parallel_chord_girder(span: float = 30.0, depth: float = 2.0, n_panels: int = 10):
+    """An ordinary Pratt girder: depth/span = 1/15, chords dead straight."""
+    dx = span / n_panels
+    nodes: list[Node] = []
+    elements: list[Element] = []
+    for i in range(n_panels + 1):
+        nodes.append(
+            Node(
+                id=f"b{i}",
+                x=i * dx,
+                y=0.0,
+                is_support=i in (0, n_panels),
+                support_dx=i == 0,
+                support_dy=i in (0, n_panels),
+            )
+        )
+        nodes.append(Node(id=f"t{i}", x=i * dx, y=depth))
+    for i in range(n_panels):
+        elements += [
+            Element(id=f"bc{i}", node_i=f"b{i}", node_j=f"b{i + 1}", E=E_STEEL, A=AREA),
+            Element(id=f"tc{i}", node_i=f"t{i}", node_j=f"t{i + 1}", E=E_STEEL, A=AREA),
+            Element(id=f"v{i}", node_i=f"b{i}", node_j=f"t{i}", E=E_STEEL, A=AREA),
+            Element(
+                id=f"d{i}", node_i=f"b{i}", node_j=f"t{i + 1}", E=E_STEEL, A=0.6 * AREA
+            ),
+        ]
+    # closing vertical: without it the last top node carries a single member
+    # and the assembly is a mechanism rather than a girder.
+    elements.append(
+        Element(
+            id="vl", node_i=f"b{n_panels}", node_j=f"t{n_panels}", E=E_STEEL, A=AREA
+        )
+    )
+    loads = {f"b{i}": {"Fx": 0.0, "Fy": -50e3} for i in range(1, n_panels)}
+    return nodes, elements, loads
+
+
+def test_parallel_chord_girder_is_slender_not_shallow() -> None:
+    """The false positive the round-7 audit found: 30 m x 2 m flagged as an arch.
+
+    depth/span = 0.067 < 0.1, so the old screen warned about snap-through on a
+    completely ordinary truss girder whose chords are straight and which
+    therefore has no snap-through mode at all.
+    """
+    from truss_analysis.stability import shallow_system_screen
+
+    nodes, elements, _ = _parallel_chord_girder()
+    screen = shallow_system_screen(nodes, elements)
+
+    assert screen.depth_span_ratio == pytest.approx(2.0 / 30.0)
+    assert screen.shallow, "the depth/span fact is still reported"
+    assert screen.max_chord_kink_rad == 0.0
+    assert not screen.arch_like
+    assert not screen.snap_through_risk
+
+
+def test_parallel_chord_girder_emits_no_shallow_warning() -> None:
+    """And the warning that used to accompany it is gone."""
+    import warnings
+
+    nodes, elements, loads = _parallel_chord_girder()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ShallowSystemWarning)
+        res = linearized_buckling_load_factor(nodes, elements, loads)
+    assert np.isfinite(res.lambda_cr)
+    assert res.shallow_screen is not None
+    assert not res.shallow_screen.snap_through_risk
+
+
+def test_shallow_toggle_is_still_flagged_as_an_arch() -> None:
+    """The screen must not have been neutered -- real shallow arches still warn."""
+    from truss_analysis.stability import shallow_system_screen
+
+    nodes, elements, loads = _toggle(h=0.05, b=1.0)
+    screen = shallow_system_screen(nodes, elements)
+
+    assert screen.arch_like
+    assert screen.shallow
+    assert screen.snap_through_risk
+    # closed form: the apex kink of a two-bar toggle is 2 atan(h / b)
+    assert math.degrees(screen.max_chord_kink_rad) == pytest.approx(
+        math.degrees(2.0 * math.atan(0.05 / 1.0)), rel=1e-9
+    )
+    assert screen.kink_node is not None
+    with pytest.warns(ShallowSystemWarning, match="chord kink"):
+        linearized_buckling_load_factor(nodes, elements, loads)
+
+
+@pytest.mark.parametrize("angle_deg", [0.0, 37.0, 90.0, 180.0, 271.0])
+def test_chord_kink_is_orientation_robust(angle_deg: float) -> None:
+    """Rotating the model cannot change a curvature measurement."""
+    from truss_analysis.stability import max_chord_kink
+
+    nodes, elements = _toggle(h=0.05, b=1.0)[:2]
+    theta = math.radians(angle_deg)
+    rot = np.array(
+        [[math.cos(theta), -math.sin(theta)], [math.sin(theta), math.cos(theta)]]
+    )
+    rotated = []
+    for nd in nodes:
+        xy = rot @ np.array([nd.x, nd.y], dtype=float)
+        rotated.append(
+            Node(
+                id=nd.id,
+                x=float(xy[0]),
+                y=float(xy[1]),
+                is_support=nd.is_support,
+                support_dx=nd.support_dx,
+                support_dy=nd.support_dy,
+            )
+        )
+    base_kink, _ = max_chord_kink(nodes, elements)
+    rotated_kink, _ = max_chord_kink(rotated, elements)
+    assert rotated_kink == pytest.approx(base_kink, abs=1e-12)
+
+
+def test_a_right_angle_corner_is_not_read_as_a_bent_chord() -> None:
+    """The continuation test must reject a chord-to-web junction.
+
+    At a support node joining a horizontal to a vertical, the two incident
+    members are 90 degrees apart. Treating that as a "kinked chord" would make
+    every rectangular frame arch-like and reintroduce the false positive the
+    curvature test exists to remove.
+    """
+    from truss_analysis.stability import CHORD_CONTINUATION_ANGLE_DEG, max_chord_kink
+
+    nodes = [
+        Node(id="A", x=0.0, y=0.0, is_support=True, support_dx=True, support_dy=True),
+        Node(id="B", x=1.0, y=0.0),
+        Node(id="C", x=0.0, y=1.0),
+    ]
+    elements = [
+        Element(id="ab", node_i="A", node_j="B", E=E_STEEL, A=AREA),
+        Element(id="ac", node_i="A", node_j="C", E=E_STEEL, A=AREA),
+    ]
+    kink, kink_node = max_chord_kink(nodes, elements)
+    assert kink == 0.0
+    assert kink_node is None
+    assert CHORD_CONTINUATION_ANGLE_DEG > 90.0
+
+
+def test_screen_without_elements_stays_conservative() -> None:
+    """No connectivity means no curvature information, so assume arch-like."""
+    from truss_analysis.stability import shallow_system_screen
+
+    nodes, _elements, _ = _parallel_chord_girder()
+    screen = shallow_system_screen(nodes)
+
+    assert not math.isfinite(screen.max_chord_kink_rad)
+    assert screen.kink_node is None
+    assert screen.arch_like, "the conservative default when curvature is unknown"
+    assert screen.snap_through_risk == screen.shallow
+
+
+def test_screen_rejects_a_nonpositive_ratio() -> None:
+    from truss_analysis.stability import shallow_system_screen
+
+    nodes, elements, _ = _parallel_chord_girder()
+    with pytest.raises(ValueError, match="ratio must be positive"):
+        shallow_system_screen(nodes, elements, ratio=0.0)
+
+
+def test_postprocess_screen_agrees_with_stability_screen() -> None:
+    """One measure, one threshold -- the two modules used to disagree.
+
+    ``postprocess.check_shallow_system`` computed ``ptp(y)/ptp(x)`` while
+    ``stability._rise_span_ratio`` computed the smaller-over-larger bounding-box
+    extent, so a vertical truss was reported with a ratio above one on one path
+    and 0.067 on the other.
+    """
+    from truss_analysis.postprocess import check_shallow_system
+    from truss_analysis.stability import shallow_system_screen
+
+    for nodes, elements in (
+        _parallel_chord_girder()[:2],
+        _toggle(h=0.05, b=1.0)[:2],
+    ):
+        ratio = check_shallow_system(nodes, elements=elements)
+        assert ratio == pytest.approx(
+            shallow_system_screen(nodes, elements).depth_span_ratio
+        )
+
+
+def test_vertical_truss_is_measured_the_same_way_as_a_horizontal_one() -> None:
+    """The orientation bug, pinned: rotating by 90 degrees must not change it."""
+    from truss_analysis.postprocess import check_shallow_system
+
+    nodes, elements, _ = _parallel_chord_girder(span=30.0, depth=2.0)
+    swapped = [
+        Node(
+            id=nd.id,
+            x=nd.y,
+            y=nd.x,
+            is_support=nd.is_support,
+            support_dx=nd.support_dy,
+            support_dy=nd.support_dx,
+        )
+        for nd in nodes
+    ]
+    horizontal = check_shallow_system(nodes, elements=elements)
+    vertical = check_shallow_system(swapped, elements=elements)
+    assert horizontal is not None
+    assert vertical is not None
+    assert vertical == pytest.approx(horizontal)
+    assert vertical < 1.0, "a span along y must not produce a ratio above one"

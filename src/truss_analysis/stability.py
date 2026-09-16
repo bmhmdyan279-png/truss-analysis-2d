@@ -61,6 +61,7 @@ from the stiffness assembly by a round-off.
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -90,6 +91,8 @@ from .exceptions import (
 from .model import Element, Node, fixed_dof_indices
 
 __all__ = [
+    "CHORD_CONTINUATION_ANGLE_DEG",
+    "CHORD_KINK_TOLERANCE_RAD",
     "CODE_IMPERFECTION_AMPLITUDES",
     "DEFAULT_IMPERFECTION_AMPLITUDES",
     "EIGEN_MODE_PADDING",
@@ -97,10 +100,13 @@ __all__ = [
     "BucklingResult",
     "EigenSolver",
     "ImperfectionStudy",
+    "ShallowScreen",
     "geometric_stiffness",
     "imperfection_sensitivity",
     "linearized_buckling_load_factor",
+    "max_chord_kink",
     "member_geometric_vectors",
+    "shallow_system_screen",
 ]
 
 
@@ -663,6 +669,200 @@ def _rise_span_ratio(nodes: Sequence[Node]) -> float:
     return shortest / longest
 
 
+#: Two incident members at a node count as a *chord continuation* -- i.e. the
+#: node is a kink in a chord rather than a junction between a chord and a web
+#: member -- when the angle between their directions away from the node
+#: exceeds this.  135 degrees bounds the kink at 45 degrees, which is far
+#: deeper than any geometry the word "shallow" is being asked about, and it is
+#: strict enough that a right-angle corner (a support node joining a vertical
+#: to a horizontal) is *not* mistaken for a bent chord.
+CHORD_CONTINUATION_ANGLE_DEG = 135.0
+
+#: Kink below which a chord node counts as exactly straight.
+CHORD_KINK_TOLERANCE_RAD = 1e-9
+
+
+@dataclass(frozen=True)
+class ShallowScreen:
+    """What the depth/span screen actually found, and what it may claim.
+
+    Attributes
+    ----------
+    depth_span_ratio : float
+        Orientation-robust smaller-over-larger bounding-box extent, i.e.
+        depth/span.  ``inf`` for a degenerate (collinear or single-node)
+        model, which is never shallow -- see :func:`_rise_span_ratio`.
+    max_chord_kink_rad : float
+        Largest deviation-from-straightness found at any node where two
+        members continue each other.  Zero for a parallel-chord truss, whose
+        chords are straight by construction.
+    kink_node : str or None
+        Id of the node carrying :attr:`max_chord_kink_rad`, so the finding can
+        be located rather than merely believed.
+    arch_like : bool
+        ``True`` when some chord is genuinely bent -- the precondition for
+        snap-through.  A pin-jointed assembly whose compressed load path is
+        straight cannot snap through: its instability is Euler buckling of a
+        member, which :mod:`truss_analysis.limitstates` already assesses.
+    shallow : bool
+        ``depth_span_ratio < threshold``.  Reported for both kinds because it
+        is a real geometric fact; what differs is what it *means*.
+    threshold : float
+        The ratio below which :attr:`shallow` is set.
+    """
+
+    depth_span_ratio: float
+    max_chord_kink_rad: float
+    kink_node: str | None
+    arch_like: bool
+    shallow: bool
+    threshold: float
+
+    @property
+    def snap_through_risk(self) -> bool:
+        """Whether the linearised bifurcation load may be optimistic.
+
+        Both conditions are required.  Slenderness alone is not a snap-through
+        criterion -- a 30 m x 2 m Pratt girder has depth/span = 0.067 and is
+        an entirely ordinary truss, and flagging it as a snap-through risk
+        produces a warning on nearly every real model, which is how users
+        learn to ignore warnings.
+        """
+        return bool(self.arch_like and self.shallow)
+
+
+def max_chord_kink(
+    nodes: Sequence[Node],
+    elements: Sequence[Element],
+    continuation_angle_deg: float = CHORD_CONTINUATION_ANGLE_DEG,
+) -> tuple[float, str | None]:
+    """Largest kink in any chord, and the node carrying it.
+
+    At each node with two or more incident members, the pair of directions
+    *most nearly opposite* each other is the candidate chord continuation --
+    a web member meeting a chord does a large-angle junction, while the next
+    chord segment continues almost straight through.  If that pair is within
+    ``continuation_angle_deg`` of straight, the node is a chord node and its
+    kink ``pi - angle`` is measured; otherwise the node joins no chord and
+    contributes nothing.
+
+    Orientation-robust by construction: it is built from dot products of unit
+    direction vectors, so rotating the model cannot change the answer.  On a
+    Pratt or Warren girder it returns exactly zero -- the chords are straight
+    -- and on a two-bar toggle of rise ``h`` over half-span ``b`` it returns
+    ``2 atan(h / b)``, the apex angle deficit, which is the geometric content
+    of "shallow".
+
+    Parameters
+    ----------
+    nodes, elements : Sequence[Node], Sequence[Element]
+        Model.
+    continuation_angle_deg : float, default 135.0
+        Angle above which two incident members count as one chord passing
+        through the node.
+
+    Returns
+    -------
+    tuple[float, str or None]
+        The largest kink [rad] and the id of the node carrying it, or
+        ``(0.0, None)`` when no chord is bent.
+    """
+    if not nodes or not elements:
+        return 0.0, None
+    index = {n.id: i for i, n in enumerate(nodes)}
+    incident: dict[int, list[int]] = {i: [] for i in range(len(nodes))}
+    for e in elements:
+        i = index.get(e.node_i)
+        j = index.get(e.node_j)
+        if i is None or j is None:  # pragma: no cover - model validation owns this
+            continue
+        incident[i].append(j)
+        incident[j].append(i)
+    coords = np.array([[n.x, n.y] for n in nodes], dtype=float)
+    cos_continuation = math.cos(math.radians(float(continuation_angle_deg)))
+
+    worst_kink = 0.0
+    worst_node: str | None = None
+    for j, neighbours in incident.items():
+        if len(neighbours) < 2:
+            continue
+        best_cos: float | None = None
+        for a in range(len(neighbours)):
+            for b in range(a + 1, len(neighbours)):
+                u1 = coords[neighbours[a]] - coords[j]
+                u2 = coords[neighbours[b]] - coords[j]
+                n1 = float(np.linalg.norm(u1))
+                n2 = float(np.linalg.norm(u2))
+                if n1 <= 0.0 or n2 <= 0.0:
+                    continue  # coincident nodes: geometry validation's problem
+                cos_angle = float(np.clip(u1 @ u2 / (n1 * n2), -1.0, 1.0))
+                if best_cos is None or cos_angle < best_cos:
+                    best_cos = cos_angle
+        if best_cos is None or best_cos >= cos_continuation:
+            continue  # no chord passes through this node
+        kink = math.pi - math.acos(best_cos)
+        if kink > worst_kink:
+            worst_kink, worst_node = kink, nodes[j].id
+    return worst_kink, worst_node
+
+
+def shallow_system_screen(
+    nodes: Sequence[Node],
+    elements: Sequence[Element] | None = None,
+    ratio: float = SHALLOW_RISE_SPAN,
+) -> ShallowScreen:
+    """Classify a model's geometry as arch-like or beam-like, and how shallow.
+
+    This is the single source of truth for the shallow-geometry screen.  Both
+    :func:`linearized_buckling_load_factor` and
+    :func:`truss_analysis.postprocess.check_shallow_system` route through it,
+    which they did not used to: ``postprocess`` measured ``ptp(y) / ptp(x)``
+    while ``stability`` measured the orientation-robust smaller-over-larger
+    bounding-box extent, so the same model could be flagged shallow on one
+    path and not on the other -- and a *vertical* truss, whose span runs along
+    ``y``, was reported with a ratio greater than one.
+
+    Parameters
+    ----------
+    nodes : Sequence[Node]
+        Model nodes.
+    elements : Sequence[Element] or None, optional
+        Model members.  ``None`` degrades the screen to the bounding-box
+        measure alone and reports ``arch_like = True``, the conservative
+        default: without connectivity there is no way to tell a bent chord
+        from a straight one, so the snap-through claim must not be dropped.
+    ratio : float, default SHALLOW_RISE_SPAN
+        Depth/span threshold below which the model counts as shallow.
+
+    Returns
+    -------
+    ShallowScreen
+        The measurement and what it licenses the caller to say.
+    """
+    if ratio <= 0.0:
+        msg = f"ratio must be positive, got {ratio}"
+        raise ValueError(msg)
+    depth_span = _rise_span_ratio(nodes)
+    if elements is None:
+        return ShallowScreen(
+            depth_span_ratio=depth_span,
+            max_chord_kink_rad=float("nan"),
+            kink_node=None,
+            arch_like=True,
+            shallow=bool(depth_span < ratio),
+            threshold=float(ratio),
+        )
+    kink, kink_node = max_chord_kink(nodes, elements)
+    return ShallowScreen(
+        depth_span_ratio=depth_span,
+        max_chord_kink_rad=kink,
+        kink_node=kink_node,
+        arch_like=bool(kink > CHORD_KINK_TOLERANCE_RAD),
+        shallow=bool(depth_span < ratio),
+        threshold=float(ratio),
+    )
+
+
 @dataclass(frozen=True)
 class BucklingResult:
     """Outcome of the linearised bifurcation analysis.
@@ -724,6 +924,11 @@ class BucklingResult:
         small for ARPACK and the caller is entitled to know.
     n_free_dof : int
         Number of free DOFs the eigenproblem was posed on.
+    shallow_screen : ShallowScreen or None
+        The geometry screen that decided whether a snap-through warning was
+        warranted, carried so the verdict is auditable rather than inferred
+        from the absence of a warning.  ``None`` only for instances built by
+        hand; :func:`linearized_buckling_load_factor` always fills it.
     """
 
     lambda_cr: float
@@ -735,6 +940,7 @@ class BucklingResult:
     base_forces: dict[str, float]
     solver_path: str = "dense-whitened"
     n_free_dof: int = 0
+    shallow_screen: ShallowScreen | None = None
 
 
 def linearized_buckling_load_factor(
@@ -782,10 +988,14 @@ def linearized_buckling_load_factor(
         :attr:`BucklingResult.solver_path`.
     warn_shallow : bool, default True
         Issue :exc:`~truss_analysis.exceptions.ShallowSystemWarning` when the
-        depth/span ratio is below :data:`SHALLOW_RISE_SPAN`.  Set to
-        ``False`` inside sweeps (e.g.
-        :func:`imperfection_sensitivity`) that would otherwise emit the same
-        warning once per amplitude.
+        geometry is a *shallow arch* -- depth/span below
+        :data:`SHALLOW_RISE_SPAN` **and** a bent chord, which is what makes
+        snap-through a possible failure mode.  A slender parallel-chord girder
+        is not warned about: it is slender, not shallow, and the two have
+        different failure modes.  The measurement is returned on
+        :attr:`BucklingResult.shallow_screen` either way.  Set to ``False``
+        inside sweeps (e.g. :func:`imperfection_sensitivity`) that would
+        otherwise emit the same warning once per amplitude.
 
     Returns
     -------
@@ -808,12 +1018,18 @@ def linearized_buckling_load_factor(
 
     Notes
     -----
-    When ``warn_shallow`` is set and the depth/span ratio is below 0.1, a
+    When ``warn_shallow`` is set and the geometry is a shallow *arch*
+    (depth/span below 0.1 with a bent chord -- see
+    :func:`shallow_system_screen`), a
     :exc:`~truss_analysis.exceptions.ShallowSystemWarning` is issued (not
     raised): for such systems the true collapse is a snap-through limit
     point and the linearised factor can significantly underestimate the
     demand at failure.  Use :func:`imperfection_sensitivity` to quantify how
-    much of that optimism is geometry-driven.
+    much of that optimism is geometry-driven.  A model that is merely
+    slender -- straight chords, small depth/span, as for any ordinary truss
+    girder -- is reported on ``shallow_screen`` but not warned about, because
+    its instability is member buckling, which
+    :mod:`truss_analysis.limitstates` assesses.
     """
     if int(n_modes) < 1:
         msg = f"n_modes must be >= 1, got {n_modes}"
@@ -829,15 +1045,24 @@ def linearized_buckling_load_factor(
         )
         raise MechanismError(msg)
 
-    # A4: shallow-geometry screen.  Orientation-robust depth/span ratio.
-    ratio = _rise_span_ratio(nodes)
-    if warn_shallow and ratio < SHALLOW_RISE_SPAN:
+    # A4: shallow-geometry screen, curvature-aware (round-7 audit, item 4).
+    #
+    # depth/span alone conflates two different facts.  A 30 m x 2 m Pratt
+    # girder has depth/span = 0.067 and is an entirely ordinary truss whose
+    # chords are straight -- it cannot snap through, and warning about
+    # snap-through on it trains the reader to ignore the warning that matters.
+    # Snap-through needs a *bent* compressed load path, which max_chord_kink
+    # measures directly, so the claim is made only when both hold.
+    screen = shallow_system_screen(nodes, elements)
+    if warn_shallow and screen.snap_through_risk:
         warnings.warn(
-            f"ShallowSystemWarning: depth/span ratio = {ratio:.3f} < "
-            f"{SHALLOW_RISE_SPAN}; linearised buckling may significantly "
-            "underestimate the snap-through load. Use "
-            "imperfection_sensitivity() or a geometrically nonlinear analysis "
-            "for shallow systems.",
+            f"system geometry is a shallow arch: depth/span = "
+            f"{screen.depth_span_ratio:.3f} < {screen.threshold:g} with a "
+            f"{math.degrees(screen.max_chord_kink_rad):.2f} deg chord kink at "
+            f"node {screen.kink_node!r}. The true collapse is a snap-through "
+            "limit point, so the linearised lambda_cr may be optimistic; "
+            "quantify it with imperfection_sensitivity() or use a "
+            "geometrically nonlinear analysis.",
             ShallowSystemWarning,
             stacklevel=2,
         )
@@ -983,6 +1208,7 @@ def linearized_buckling_load_factor(
         base_forces={e.id: float(n_total[i]) for i, e in enumerate(elements)},
         solver_path=solver_path,
         n_free_dof=n_free,
+        shallow_screen=screen,
     )
 
 
