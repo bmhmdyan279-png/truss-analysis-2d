@@ -50,13 +50,22 @@ def rank_correlation(
     """Spearman rank correlation between two fields over shared keys.
 
     Keys are aligned by :func:`natural_sort_key` (deterministic).  Ties are
-    handled by scipy's average-rank convention.  If either field is constant
-    over the shared keys the correlation is undefined and ``float('nan')`` is
-    returned — callers must route NaN through :func:`classify_rho`, never
-    treat it as a pass.
+    handled by scipy's average-rank convention.
 
-    ``quantize`` (optional, e.g. ``1e-10``): values are snapped to a grid of
-    that resolution before ranking — the same convention as
+    Returns ``nan`` when the correlation is undefined:
+
+    * fewer than two shared keys,
+    * either field contains non-finite values,
+    * either field is constant over the shared keys.
+
+    Callers must route ``nan`` through :func:`classify_rho`, never treat it
+    as a pass.  The degenerate cases are detected explicitly here — rather
+    than left to ``scipy.stats.spearmanr`` — so the documented ``nan``
+    contract does not also emit a ``ConstantInputWarning`` that callers
+    would have to filter out under ``filterwarnings = error``.
+
+    ``quantize`` (optional, e.g. ``1e-10``): values are snapped to a grid
+    of that resolution before ranking — the same convention as
     :func:`truss_analysis.criticality.ranking.tau_b` (sub-tolerance
     floating-point noise between near-tied members is not a rank signal).
     """
@@ -68,7 +77,9 @@ def rank_correlation(
     if quantize:
         va = np.floor(va / quantize + 0.5)
         vb = np.floor(vb / quantize + 0.5)
-    if float(np.std(va)) == 0.0 or float(np.std(vb)) == 0.0:
+    if not np.isfinite(va).all() or not np.isfinite(vb).all():
+        return float("nan")
+    if np.ptp(va) == 0.0 or np.ptp(vb) == 0.0:
         return float("nan")
     return float(spearmanr(va, vb).statistic)
 
@@ -97,8 +108,9 @@ def classify_rho(rho: float) -> RhoBranch:
             rho=float(rho),
             verdict=RhoVerdict.MODEL_REVIEW,
             prescribed_action=(
-                "Correlation is undefined (constant or <2 shared keys): the "
-                "comparison carries no evidence. Review the case setup."
+                "Correlation is undefined (constant, non-finite or <2 shared "
+                "keys): the comparison carries no evidence. Review the case "
+                "setup."
             ),
         )
     if rho >= RHO_FULL:
