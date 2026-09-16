@@ -61,7 +61,7 @@ elevated temperatures:
   condition number of the free-free stiffness matrix).
 
 Everything is deterministic given the inputs, fully type-annotated
-(`mypy --strict` clean) and covered by a test suite of 964 tests
+(`mypy --strict` clean) and covered by a test suite of 1066 tests
 (94.4 % coverage, gate at 90 %). Results are always SI (m, N, Pa) regardless
 of the input unit system.
 
@@ -607,7 +607,7 @@ make stats          # re-measure and patch the README test/coverage numbers
 make sync-requirements  # regenerate requirements*.txt from pyproject.toml
 ```
 
-Current status on this branch: **964 tests passing, 94.4 % coverage**
+Current status on this branch: **1066 tests passing, 94.4 % coverage**
 (`pytest tests/`), `ruff` clean (extended rule set: E, F, I, W, UP, B, SIM,
 RUF, PT, N, D), `mypy --strict` clean on all 49 library modules.
 
@@ -636,7 +636,7 @@ src/truss_analysis/
 ├── validation/                              # metrics, reference bridge, surrogate
 ├── sensitivity.py, reliability.py           # gradients + reliability helpers (chi-aligned margins)
 └── visualization.py                         # plotting (lazy matplotlib)
-tests/                                       # 964 tests incl. tests/validation/
+tests/                                       # 1066 tests incl. tests/validation/
 docs/theory.md, docs/error_codes.md          # formulation + error reference
 examples/                                    # runnable example models
 scripts/                                     # repository utilities
