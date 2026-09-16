@@ -16,7 +16,22 @@ schema: truss-analysis/physics-boundary/v1
 
 version: "2.9.0"
 updated: "2026-09-16"
-audit_round: 6
+audit_round: 7
+
+# Evidence class behind each row's status.  A status says what the solver
+# *claims*; this says what would have to be true for the claim to have been
+# checked, and -- critically -- whether that check can run here.
+#
+# Added because a result could carry a valid content hash for a boundary whose
+# verification column had never been executed in the environment that produced
+# it: the OpenSeesPy bridge is an optional extra, so its tests skip, and a
+# digest that reported only the hash gave a consumer no way to tell "verified"
+# from "verification not attempted on this machine".
+verification_vocabulary:
+  analytical-oracle: "Checked against a closed form or an independently written numerical oracle; runs in every environment."
+  property-invariant: "Checked against a physical identity or invariance (energy balance, renumbering, rigid motion); runs in every environment."
+  reference-solver: "Checked against OpenSeesPy, which ships in the optional `validation` extra. Skipped where that extra is absent, so this evidence is environment-dependent."
+  declared-only: "A not-supported or deferred row: there is nothing to verify, the declaration is the content."
 
 status_vocabulary:
   exact: "Solved to numerical tolerance with a closed-form or independent-oracle verification."
@@ -31,24 +46,31 @@ entries:
     status: exact
     detail: "Direct stiffness method, pin-jointed, nodal loads only."
     doc_section: "1"
+    verification: analytical-oracle
+    verification_supplement: reference-solver
 
   - id: eigenstrain_thermal_fabrication
     phenomenon: "Thermal / fabrication eigenstrain"
     status: supported
     detail: "Verified in both the restrained and the free-expansion limits."
     doc_section: "1.3"
+    verification: analytical-oracle
+    verification_supplement: reference-solver
 
   - id: temperature_dependent_material
     phenomenon: "Temperature-dependent E(theta), f_y(theta)"
     status: supported
     detail: "EN 1993-1-2 Table 3.1, loaded from the provenance fixture; no hard-coded material numbers."
     doc_section: "4"
+    verification: analytical-oracle
+    verification_supplement: reference-solver
 
   - id: secant_thermal_strain
     phenomenon: "Secant thermal strain alpha_bar(theta_0, theta)"
     status: supported
     detail: "Opt-in via effective_alpha; guards against the constant-alpha trap."
     doc_section: "10.3"
+    verification: analytical-oracle
 
   - id: fire_exposure_unprotected
     phenomenon: "Fire exposure to member temperature, unprotected steel"
@@ -61,6 +83,7 @@ entries:
       A_m/V = 50 1/m, where a real through-thickness gradient develops and a
       single lumped temperature becomes un-conservative.
     doc_section: "10.2, 10.6"
+    verification: analytical-oracle
     limits:
       - "uniform cross-section temperature (no heat conduction through the section)"
       - "A_m/V >= 50 1/m for the lumped assumption to be comfortable"
@@ -73,6 +96,7 @@ entries:
       density, boundary thermal inertia and the Table A.2 limiting duration.
       Pinned against the Access Steel worked example SX042a-EN-EU.
     doc_section: "10.4"
+    verification: analytical-oracle
     limits:
       - "0.02 <= O <= 0.2 m^0.5 and 100 <= b <= 2200 J/(m^2 s^0.5 K) enforced"
       - "q_td outside [50, 1000] MJ/m^2 warns as an extrapolation"
@@ -88,6 +112,7 @@ entries:
       fire-resistance duration quoted against a different integrator than the
       code's is not a code-compliant duration.
     doc_section: "10.5"
+    verification: analytical-oracle
     limits:
       - "one homogeneous insulation layer; no cavity, no multi-layer build-up"
       - "constant lambda_p, rho_p, c_p -- gypsum's dehydration plateau near 100-200 degC is NOT represented"
@@ -99,12 +124,14 @@ entries:
     status: supported
     detail: "EN 1993-1-2 4.2.3.1 chi model, fire and ambient buckling curves."
     doc_section: "4"
+    verification: analytical-oracle
 
   - id: member_buckling_capacity
     phenomenon: "Member buckling capacity"
     status: supported-with-limits
     detail: "Flexural buckling only, Euler or code chi."
     doc_section: "4"
+    verification: analytical-oracle
     limits:
       - "torsional and torsional-flexural buckling need I_z, I_t, I_w, which the section model does not carry"
 
@@ -115,6 +142,7 @@ entries:
       Linearised eigenvalue analysis about the prestressed base state, dense or
       sparse Lanczos path, agreement < 2e-13 relative between them.
     doc_section: "9"
+    verification: analytical-oracle
     limits:
       - "linearised: for shallow systems the true collapse is a snap-through limit point"
       - "ShallowSystemWarning below a depth/span ratio of 0.1"
@@ -126,6 +154,7 @@ entries:
       Linearised sweep over imposed geometric imperfections along the critical
       mode, both signs probed and the adverse one reported.
     doc_section: "9.5"
+    verification: analytical-oracle
     limits:
       - "each point is a fresh linearised analysis, not a limit-point search"
 
@@ -137,6 +166,7 @@ entries:
       that the relative Frobenius gap to the exact tangent closes at fitted
       order 1.000 over a 16x load range.
     doc_section: "tangent_verification"
+    verification: analytical-oracle
     limits:
       - "first order in the demand; large-displacement response is out of scope"
 
@@ -148,6 +178,7 @@ entries:
       the achieved Spearman correlation is reported alongside the target.
       Parallel evaluation is bit-identical to serial.
     doc_section: "11"
+    verification: property-invariant
     limits:
       - "pf below ~1/n cannot be resolved by crude Monte Carlo; the Clopper-Pearson interval, not the point estimate, is the honest output"
       - "beta_mom is a method-of-moments mean/std, NOT a Hasofer-Lind / FORM index"
@@ -157,48 +188,56 @@ entries:
     status: not-supported
     detail: "Uniform section temperature only; validity is measured via the Biot number instead."
     doc_section: "10.6"
+    verification: declared-only
 
   - id: geometric_nonlinearity
     phenomenon: "Geometric nonlinearity (P-delta, large displacement)"
     status: not-supported
     detail: "Validity guarded by LargeDisplacementWarning and diagnosable via the bifurcation analysis."
     doc_section: "9.3"
+    verification: declared-only
 
   - id: post_buckling
     phenomenon: "Post-buckling, snap-through, arc-length continuation"
     status: not-supported
     detail: "Supersedes rather than extends the linearised bifurcation check; belongs to a dedicated release."
     doc_section: "9.3, 9.5"
+    verification: declared-only
 
   - id: material_nonlinearity
     phenomenon: "Material nonlinearity (plasticity, redistribution)"
     status: not-supported
     detail: "Capacity checks are code-model, not incremental analysis."
     doc_section: "4"
+    verification: declared-only
 
   - id: creep_transient_strain
     phenomenon: "Creep & transient thermal strain"
     status: deferred
     detail: "Needs material data and validation sources beyond the current fixture."
     doc_section: "12"
+    verification: declared-only
 
   - id: torsional_buckling
     phenomenon: "Torsional / torsional-flexural buckling"
     status: not-supported
     detail: "Requires I_z, I_t and I_w, which the section model does not carry."
     doc_section: "12"
+    verification: declared-only
 
   - id: model_dimensionality
     phenomenon: "3D, frames, semi-rigid joints, distributed loads"
     status: not-supported
     detail: "2D pin-jointed assemblies with nodal loads only."
     doc_section: "1"
+    verification: declared-only
 
   - id: rare_event_reliability
     phenomenon: "FORM/SORM, PCE, Sobol indices, subset simulation"
     status: deferred
     detail: "A UQ subsystem with its own validation burden."
     doc_section: "11.2"
+    verification: declared-only
 
   - id: empirical_validation
     phenomenon: "Validation against physical fire or structural test data"
@@ -209,3 +248,4 @@ entries:
       the real world is inferred from agreement with the standards, not
       measured.
     doc_section: "12"
+    verification: declared-only

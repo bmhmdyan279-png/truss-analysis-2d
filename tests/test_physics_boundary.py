@@ -184,6 +184,7 @@ def test_content_hash_is_stable_and_content_sensitive() -> None:
                 status="supported",
                 detail="detail",
                 doc_section="13",
+                verification="analytical-oracle",
             ),
         ),
         status_vocabulary=b.status_vocabulary,
@@ -203,6 +204,7 @@ def test_digest_is_json_safe_and_compact() -> None:
         "content_hash",
         "n_entries",
         "counts",
+        "verification",
     }
     assert json.loads(payload) == d
 
@@ -463,3 +465,140 @@ def test_content_hash_is_deterministic_and_entry_sensitive() -> None:
         altered = dataclasses.replace(first, limits=(*first.limits, "one more"))
         edited = dataclasses.replace(boundary, entries=(altered, *boundary.entries[1:]))
         assert edited.content_hash() != boundary.content_hash(), "limits"
+
+
+# --------------------------------------------------------------------------
+# round-7 audit, item 10: a result could carry a valid content hash for a
+# boundary whose verification had never been executed in that environment.
+# --------------------------------------------------------------------------
+
+
+def test_every_entry_declares_an_evidence_class() -> None:
+    """A status says what is claimed; verification says what checked it."""
+    from truss_analysis.physics_boundary import VERIFICATION_VOCABULARY
+
+    boundary = physics_boundary()
+    for entry in boundary.entries:
+        assert entry.verification in VERIFICATION_VOCABULARY, entry.id
+        if entry.verification_supplement is not None:
+            assert entry.verification_supplement in VERIFICATION_VOCABULARY
+
+
+def test_a_modelled_capability_may_not_claim_declared_only_evidence(
+    tmp_path: Path,
+) -> None:
+    """The invariant that makes the field meaningful rather than decorative."""
+    boundary = physics_boundary()
+    with pytest.raises(ValueError, match="claim nobody can check"):
+        PhysicsBoundary(
+            schema=boundary.schema,
+            version=boundary.version,
+            updated=boundary.updated,
+            audit_round=boundary.audit_round,
+            entries=(
+                BoundaryEntry(
+                    id="modelled_but_unverified",
+                    phenomenon="x",
+                    status="supported",
+                    detail="d",
+                    doc_section="1",
+                    verification="declared-only",
+                ),
+            ),
+        )
+
+
+def test_an_unknown_evidence_class_is_rejected() -> None:
+    boundary = physics_boundary()
+    for bad in ("verification", "verification_supplement"):
+        kwargs = {bad: "not-a-real-class"}
+        if bad == "verification_supplement":
+            kwargs["verification"] = "analytical-oracle"
+        with pytest.raises(ValueError, match=bad):
+            PhysicsBoundary(
+                schema=boundary.schema,
+                version=boundary.version,
+                updated=boundary.updated,
+                audit_round=boundary.audit_round,
+                entries=(
+                    BoundaryEntry(
+                        id="x",
+                        phenomenon="x",
+                        status="not-supported",
+                        detail="d",
+                        doc_section="1",
+                        **kwargs,
+                    ),
+                ),
+            )
+
+
+def test_summary_names_the_evidence_that_could_not_run_here() -> None:
+    """The whole point: 'verified' must not look like 'not attempted'."""
+    boundary = physics_boundary()
+
+    without = boundary.verification_summary(reference_solver_available=False)
+    with_solver = boundary.verification_summary(reference_solver_available=True)
+
+    assert without["environment_dependent"], (
+        "the shipped boundary has reference-solver supplements; if this is "
+        "empty the artefact lost them"
+    )
+    assert not without["complete"]
+    assert without["reference_solver_available"] is False
+
+    assert with_solver["environment_dependent"] == []
+    assert with_solver["complete"] is True
+    assert with_solver["reference_solver_available"] is True
+
+    # the counts do not depend on availability; only the verdict does
+    assert without["counts"] == with_solver["counts"]
+    assert sum(without["counts"].values()) == len(boundary.entries)
+
+
+def test_summary_defaults_to_probing_this_environment() -> None:
+    """A caller that does not know gets the truth about *here*, not an optimist."""
+    summary = physics_boundary().verification_summary()
+    try:
+        import openseespy.opensees  # noqa: F401
+
+        expected = True
+    except Exception:
+        expected = False
+    assert summary["reference_solver_available"] is expected
+    assert summary["complete"] is (expected or not summary["environment_dependent"])
+
+
+def test_digest_carries_the_verification_summary() -> None:
+    """So the fact reaches a result payload rather than staying in this module."""
+    digest = boundary_digest()
+    assert "verification" in digest
+    assert set(digest["verification"]) == {
+        "counts",
+        "reference_solver_available",
+        "environment_dependent",
+        "complete",
+    }
+    assert isinstance(digest["verification"]["environment_dependent"], list)
+    assert json.loads(json.dumps(digest)) == digest, "digest must round-trip"
+
+
+def test_content_hash_covers_the_evidence_class() -> None:
+    """Downgrading a row's evidence is a change to the envelope, not to prose."""
+    import dataclasses
+
+    boundary = physics_boundary()
+    first = boundary.entries[0]
+    assert first.verification != "declared-only"
+
+    downgraded = dataclasses.replace(first, verification="property-invariant")
+    edited = dataclasses.replace(boundary, entries=(downgraded, *boundary.entries[1:]))
+    assert edited.content_hash() != boundary.content_hash()
+
+
+def test_as_dict_round_trips_the_new_fields() -> None:
+    boundary = physics_boundary()
+    data = json.loads(json.dumps(boundary.as_dict()))
+    for row, entry in zip(data["entries"], boundary.entries, strict=True):
+        assert row["verification"] == entry.verification
+        assert row["verification_supplement"] == entry.verification_supplement

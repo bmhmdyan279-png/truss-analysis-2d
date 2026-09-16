@@ -45,7 +45,9 @@ import yaml
 
 __all__ = [
     "BOUNDARY_SCHEMA",
+    "ENVIRONMENT_DEPENDENT_VERIFICATION",
     "STATUS_VOCABULARY",
+    "VERIFICATION_VOCABULARY",
     "BoundaryEntry",
     "PhysicsBoundary",
     "boundary_digest",
@@ -68,6 +70,23 @@ STATUS_VOCABULARY: tuple[str, ...] = (
     "deferred",
 )
 
+#: Closed vocabulary for :attr:`BoundaryEntry.verification` -- the evidence class
+#: behind a row's status.  A status says what the solver *claims*; this says what
+#: would have to be true for the claim to have been checked.
+VERIFICATION_VOCABULARY: tuple[str, ...] = (
+    "analytical-oracle",
+    "property-invariant",
+    "reference-solver",
+    "declared-only",
+)
+
+#: Evidence classes that depend on an optional extra and therefore **may not have
+#: run** in the environment that produced a result.  This is the set a consumer
+#: has to be told about: without it a result can carry a valid ``content_hash``
+#: for a boundary whose verification was silently skipped, and "verified" is
+#: indistinguishable from "verification not attempted here".
+ENVIRONMENT_DEPENDENT_VERIFICATION: frozenset[str] = frozenset({"reference-solver"})
+
 
 @dataclass(frozen=True)
 class BoundaryEntry:
@@ -89,6 +108,23 @@ class BoundaryEntry:
         Explicit validity restrictions.  Non-empty exactly when ``status`` is
         ``supported-with-limits``; a capability with an unstated restriction
         is how a library ends up used outside its envelope.
+    verification : str
+        Evidence class behind :attr:`status`, from
+        :data:`VERIFICATION_VOCABULARY`.  ``declared-only`` for rows that
+        describe an absence, where the declaration is the content and there is
+        nothing to check.
+    verification_supplement : str or None
+        A second evidence class the row also rests on, or ``None``.  Used where
+        an always-running oracle is backed by an optional reference-solver
+        cross-check, so the primary evidence stays environment-independent while
+        the supplement is reported as skippable.
+
+    Notes
+    -----
+    Whether a row's evidence could have run is answered by
+    :meth:`PhysicsBoundary.verification_summary`, not by reading these fields:
+    the point of separating them is that a consumer should not have to know which
+    classes depend on an extra.
     """
 
     id: str
@@ -97,6 +133,18 @@ class BoundaryEntry:
     detail: str
     doc_section: str
     limits: tuple[str, ...] = ()
+    verification: str = "declared-only"
+    verification_supplement: str | None = None
+
+    @property
+    def environment_dependent(self) -> tuple[str, ...]:
+        """Evidence classes on this row that may not have run here."""
+        out = [
+            v
+            for v in (self.verification, self.verification_supplement)
+            if v in ENVIRONMENT_DEPENDENT_VERIFICATION
+        ]
+        return tuple(out)
 
     @property
     def available(self) -> bool:
@@ -161,6 +209,38 @@ class PhysicsBoundary:
                     "'supported-with-limits' but declares no limits"
                 )
                 raise ValueError(msg)
+            if entry.verification not in VERIFICATION_VOCABULARY:
+                msg = (
+                    f"physics boundary entry {entry.id!r} has verification "
+                    f"{entry.verification!r}, not in {VERIFICATION_VOCABULARY}"
+                )
+                raise ValueError(msg)
+            if (
+                entry.verification_supplement is not None
+                and entry.verification_supplement not in VERIFICATION_VOCABULARY
+            ):
+                msg = (
+                    f"physics boundary entry {entry.id!r} has "
+                    f"verification_supplement {entry.verification_supplement!r}, "
+                    f"not in {VERIFICATION_VOCABULARY}"
+                )
+                raise ValueError(msg)
+            if (
+                entry.status
+                in (
+                    "exact",
+                    "supported",
+                    "supported-with-limits",
+                )
+                and entry.verification == "declared-only"
+            ):
+                msg = (
+                    f"physics boundary entry {entry.id!r} claims "
+                    f"{entry.status!r} but declares its evidence "
+                    "'declared-only'; a modelled capability without a stated "
+                    "verification is a claim nobody can check"
+                )
+                raise ValueError(msg)
 
     def entry(self, entry_id: str) -> BoundaryEntry:
         """Return one entry by id.
@@ -194,6 +274,63 @@ class PhysicsBoundary:
             out[e.status] = out.get(e.status, 0) + 1
         return out
 
+    def verification_summary(
+        self, reference_solver_available: bool | None = None
+    ) -> dict[str, Any]:
+        """Report what evidence stands behind the boundary, and what may not have run.
+
+        A ``content_hash`` says *which* envelope a result was computed under.  It
+        cannot say whether that envelope's verification was executed in the
+        environment that produced the result -- and before this method it did not
+        have to, because nothing recorded the evidence class at all.  The gap was
+        concrete: the OpenSeesPy bridge ships in the optional ``validation``
+        extra, its tests skip where that extra is absent, and a result could
+        still carry a valid hash for a boundary whose reference-solver column had
+        never been run.  "Verified" and "verification not attempted here" looked
+        identical to a consumer.
+
+        Parameters
+        ----------
+        reference_solver_available : bool or None, optional
+            Whether the optional reference solver can be imported.  ``None``
+            (the default) probes it via
+            :func:`truss_analysis.validation.opensees_reference.opensees_available`,
+            falling back to ``False`` if that module cannot be imported at all.
+            Pass an explicit value to describe an environment other than this one,
+            which is what a result payload wants: the fact belongs to the machine
+            that ran the analysis, not to whatever reads the digest later.
+
+        Returns
+        -------
+        dict[str, Any]
+            ``counts`` per verification class; ``environment_dependent``, the ids
+            resting on evidence that may not have run; ``reference_solver_ran``,
+            whether that evidence was available; and ``complete``, which is
+            ``True`` only when no row depends on evidence that was unavailable.
+            A consumer that requires complete verification checks ``complete``
+            rather than reasoning about the classes itself.
+        """
+        available = reference_solver_available
+        if available is None:
+            available = _reference_solver_available()
+
+        counts: dict[str, int] = {v: 0 for v in VERIFICATION_VOCABULARY}
+        dependent: list[str] = []
+        for entry in self.entries:
+            counts[entry.verification] = counts.get(entry.verification, 0) + 1
+            if entry.environment_dependent and not available:
+                dependent.append(entry.id)
+        return {
+            "counts": counts,
+            "reference_solver_available": bool(available),
+            # A list, not a tuple: the digest is documented as JSON-safe, and a
+            # tuple silently becomes a list on a round trip, so `json.loads(
+            # json.dumps(digest)) == digest` would fail for a container that
+            # claims to survive exactly that.
+            "environment_dependent": list(dependent),
+            "complete": not dependent,
+        }
+
     def content_hash(self) -> str:
         """Return a short hash pinning the boundary's content *and* revision.
 
@@ -201,6 +338,11 @@ class PhysicsBoundary:
         :attr:`audit_round`, so it changes when and only when the envelope
         changes -- which is what lets a result assert *which* boundary it was
         computed under, and a test detect a silent edit.
+
+        The verification evidence class of every entry is hashed too: a boundary
+        whose rows changed from "checked against an analytical oracle" to
+        "declared only" has changed in a way that matters more than most wording
+        edits, and a hash that ignored it would report the two as identical.
 
         ``audit_round`` is included because it is part of what a consumer needs
         to know.  Without it, re-certifying the same envelope against a new
@@ -217,7 +359,8 @@ class PhysicsBoundary:
             + "\n"
             + "\n".join(
                 f"{e.id}|{e.status}|{e.phenomenon}|{e.detail}|{e.doc_section}|"
-                f"{';'.join(e.limits)}"
+                f"{';'.join(e.limits)}|{e.verification}|"
+                f"{e.verification_supplement or ''}"
                 for e in self.entries
             )
         )
@@ -239,6 +382,7 @@ class PhysicsBoundary:
             "content_hash": self.content_hash(),
             "n_entries": len(self.entries),
             "counts": self.counts(),
+            "verification": self.verification_summary(),
         }
 
     def as_dict(self) -> dict[str, Any]:
@@ -257,10 +401,29 @@ class PhysicsBoundary:
                     "detail": e.detail,
                     "doc_section": e.doc_section,
                     "limits": list(e.limits),
+                    "verification": e.verification,
+                    "verification_supplement": e.verification_supplement,
                 }
                 for e in self.entries
             ],
         }
+
+
+def _reference_solver_available() -> bool:
+    """Whether the optional reference solver can be imported, defaulting to no.
+
+    Resolved lazily and defensively: :mod:`truss_analysis.validation` imports
+    ``openseespy`` at module scope, so importing it in an environment without the
+    extra raises, and the honest answer there is that the reference-solver
+    evidence did not run.  Failing loudly instead would make the digest unusable
+    exactly where it is most needed.
+    """
+    try:
+        from .validation.opensees_reference import opensees_available
+
+        return bool(opensees_available())
+    except Exception:
+        return False
 
 
 @lru_cache(maxsize=1)
@@ -301,6 +464,12 @@ def physics_boundary() -> PhysicsBoundary:
                 detail=str(row.get("detail", "")).strip(),
                 doc_section=str(row.get("doc_section", "")),
                 limits=tuple(str(x) for x in limits),
+                verification=str(row.get("verification", "declared-only")),
+                verification_supplement=(
+                    str(row["verification_supplement"])
+                    if row.get("verification_supplement")
+                    else None
+                ),
             )
         )
     return PhysicsBoundary(
