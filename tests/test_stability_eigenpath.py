@@ -23,6 +23,7 @@ from truss_analysis.criticality.engine import MechanismError
 from truss_analysis.exceptions import (
     AmbiguousModeWarning,
     EigenConvergenceError,
+    InputIgnoredWarning,
     ShallowSystemWarning,
 )
 from truss_analysis.model import Element, Node, fixed_dof_indices
@@ -826,3 +827,178 @@ def test_singular_base_state_is_caught_by_the_factorisation_itself() -> None:
     a = sp.csr_matrix(np.diag([4.0, 0.0, 9.0]))
     with pytest.raises(MechanismError, match="singular"):
         _factor_sparse_base(a)
+
+
+# --------------------------------------------------------------------------
+# round-7 audit, item 2: `normalized_gradient` was a global secant, not the
+# first-order sensitivity its own docstring claimed; and the sensitivity
+# verdict was decided by the least realistic amplitude in the sweep.
+# --------------------------------------------------------------------------
+
+
+def _toggle_lambda_closed_form(h: float, b: float, load: float) -> float:
+    """Hand-derived bifurcation load factor of the symmetric two-bar toggle.
+
+    ``P_cr = 2 E A h^3 / (b^2 L_0)`` with ``L_0 = hypot(b, h)``; dividing by
+    the applied ``load`` gives the factor.  Written here rather than imported
+    so the test's oracle does not share code with the thing it checks.
+    """
+    import math
+
+    l0 = math.hypot(b, h)
+    return (2.0 * E_STEEL * AREA * h**3 / (b**2 * l0)) / abs(load)
+
+
+def _toggle_gradient_oracle(h: float, b: float, load: float, l_ref: float) -> float:
+    """d(lambda/lambda_0)/d(eps) at eps = 0, by central difference on the closed form.
+
+    The imperfection moves the apex vertically by ``eps * l_ref``, so the
+    perturbed rise is ``h - eps * l_ref`` for the adverse sign.
+    """
+    step = 1e-7
+    lam0 = _toggle_lambda_closed_form(h, b, load)
+    # The *adverse* imperfection lowers the apex, i.e. takes h -> h - eps*l_ref,
+    # which is the sign the study reports as its gradient.  Differentiating the
+    # favourable direction instead would return the same magnitude with the
+    # opposite sign and the test would pass on a sign bug.
+    favourable = _toggle_lambda_closed_form(h + step * l_ref, b, load)
+    adverse = _toggle_lambda_closed_form(h - step * l_ref, b, load)
+    return ((adverse - favourable) / (2.0 * step)) / lam0
+
+
+def test_normalized_gradient_is_a_derivative_not_a_secant() -> None:
+    """The field must mean what its docstring says it means.
+
+    Measured before the fix: the global least-squares slope over the default
+    amplitude series was ``-42.3`` on this toggle against a true derivative
+    of ``-119.9`` -- a 65% error in the unconservative direction.  The local
+    anchored fit recovers it to four significant figures.
+    """
+    nodes, elements, loads = _toggle(h=0.05, b=1.0, load=-1000.0)
+    study = imperfection_sensitivity(nodes, elements, loads)
+
+    oracle = _toggle_gradient_oracle(0.05, 1.0, 1000.0, study.reference_length)
+    assert study.normalized_gradient == pytest.approx(oracle, rel=1e-3)
+    # and the old global secant is demonstrably NOT the derivative
+    assert abs(study.secant_gradient - oracle) > 0.5 * abs(oracle)
+    assert study.gradient_in_code_band
+
+
+def test_secant_gradient_reproduces_the_previous_global_slope() -> None:
+    """The old number is not lost, it is renamed to what it always was."""
+    nodes, elements, loads = _toggle(h=0.05, b=1.0, load=-1000.0)
+    amps = (0.001, 0.005, 0.01, 0.02)
+    study = imperfection_sensitivity(nodes, elements, loads, amplitudes=amps)
+
+    ratios = np.array(study.lambda_cr) / study.reference_lambda_cr
+    expected = float(np.polyfit(np.asarray(amps), ratios, 1)[0])
+    assert study.secant_gradient == pytest.approx(expected, rel=1e-12)
+
+
+def test_gradient_provenance_is_reported_and_inside_the_code_band() -> None:
+    """A derivative without the amplitudes it came from is unverifiable."""
+    from truss_analysis.stability import (
+        CODE_IMPERFECTION_AMPLITUDES,
+        LOCAL_GRADIENT_POINTS,
+    )
+
+    nodes, elements, loads = _toggle(h=0.05, b=1.0, load=-1000.0)
+    study = imperfection_sensitivity(nodes, elements, loads)
+
+    assert study.gradient_amplitudes, "the fit must report what it fitted"
+    assert len(study.gradient_amplitudes) <= LOCAL_GRADIENT_POINTS
+    ceiling = max(CODE_IMPERFECTION_AMPLITUDES)
+    assert all(a <= ceiling for a in study.gradient_amplitudes)
+    # the exploratory tail must not be part of a *local* measurement
+    assert max(study.amplitudes) not in study.gradient_amplitudes
+
+
+def test_verdict_is_anchored_in_the_code_band_not_the_exploratory_tail() -> None:
+    """The safety flag must not be set by an amplitude nobody would build.
+
+    On a 24 m truss the old default's largest amplitude was an initial
+    out-of-straightness of 0.48 m.  Taking ``max(relative_drop)`` let that
+    single un-code-like point decide ``imperfection_sensitive``.
+    """
+    from truss_analysis.stability import CODE_IMPERFECTION_AMPLITUDES
+
+    # h = 0.3 keeps the apex above the chord even at eps = 0.05, so the
+    # erosion grows monotonically across the sweep and the exploratory tail
+    # really does exceed the code-band amplitude.  (At h = 0.05 the tail
+    # inverts the geometry instead and lambda_cr *rises*, which would make
+    # this assertion vacuous.)
+    nodes, elements, loads = _toggle(h=0.3, b=1.0, load=-1000.0)
+    study = imperfection_sensitivity(
+        nodes, elements, loads, amplitudes=(0.001, 1.0 / 200.0, 0.05)
+    )
+
+    assert study.verdict_amplitude == pytest.approx(1.0 / 200.0)
+    assert study.verdict_amplitude <= max(CODE_IMPERFECTION_AMPLITUDES)
+    idx = study.amplitudes.index(study.verdict_amplitude)
+    assert study.relative_drop_at_verdict == pytest.approx(study.relative_drop[idx])
+    # the tail drops far more, and must not be what the verdict quotes
+    assert max(study.relative_drop) > study.relative_drop_at_verdict
+    assert study.imperfection_sensitive
+
+
+def test_out_of_band_amplitudes_warn_and_are_flagged() -> None:
+    """Extrapolating a derivative from un-code-like amplitudes must say so."""
+    nodes, elements, loads = _toggle(h=0.05, b=1.0, load=-1000.0)
+    with pytest.warns(InputIgnoredWarning, match="out-of-straightness band"):
+        study = imperfection_sensitivity(
+            nodes, elements, loads, amplitudes=(0.02, 0.05, 0.08, 0.12)
+        )
+    assert not study.gradient_in_code_band
+
+
+def test_perturbed_nodes_never_moves_a_support() -> None:
+    """Masking is the difference between an imperfection and a settlement."""
+    from truss_analysis.stability import _perturbed_nodes
+
+    nodes, _elements, _ = _toggle(h=0.2, b=1.0)
+    # a shape that deliberately carries support components
+    shape = np.ones(2 * len(nodes))
+    shape /= np.linalg.norm(shape)
+    perturbed = _perturbed_nodes(nodes, shape, 0.01, 2.0)
+
+    for original, moved in zip(nodes, perturbed, strict=True):
+        if original.is_support:
+            assert (moved.x, moved.y) == (original.x, original.y)
+        else:
+            assert (moved.x, moved.y) != (original.x, original.y)
+        assert moved.is_support == original.is_support
+        assert moved.support_dx == original.support_dx
+        assert moved.support_dy == original.support_dy
+
+
+def test_supplied_mode_with_support_components_is_masked_and_reported() -> None:
+    """A user-supplied mode is arbitrary; its support part must not be consumed."""
+    nodes, elements, loads = _toggle(h=0.2, b=1.0, load=-1000.0)
+    shape = np.ones(2 * len(nodes))
+    with pytest.warns(InputIgnoredWarning, match="restrained DOFs"):
+        study = imperfection_sensitivity(
+            nodes, elements, loads, mode=shape, amplitudes=(0.001, 1.0 / 200.0)
+        )
+    # The masking itself is asserted directly in
+    # test_perturbed_nodes_never_moves_a_support; here the point is that a
+    # mode carrying support components still produces a usable study rather
+    # than silently becoming a settlement analysis.
+    assert np.isfinite(study.reference_lambda_cr)
+    assert len(study.lambda_cr) == 2
+
+
+def test_default_amplitudes_span_the_code_band() -> None:
+    """The shipped defaults must be defensible against a real tolerance table."""
+    from truss_analysis.stability import (
+        CODE_IMPERFECTION_AMPLITUDES,
+        DEFAULT_IMPERFECTION_AMPLITUDES,
+    )
+
+    band = (min(CODE_IMPERFECTION_AMPLITUDES), max(CODE_IMPERFECTION_AMPLITUDES))
+    in_band = [a for a in DEFAULT_IMPERFECTION_AMPLITUDES if band[0] <= a <= band[1]]
+    assert len(in_band) >= 2, "the verdict needs at least two code-like points"
+    assert min(DEFAULT_IMPERFECTION_AMPLITUDES) < band[0], "and one below, for the fit"
+    # EN 1993-1-1 Table 5.1, buckling curves a0 ... d
+    assert pytest.approx(
+        (1 / 350, 1 / 300, 1 / 250, 1 / 200, 1 / 150)
+    ) == CODE_IMPERFECTION_AMPLITUDES

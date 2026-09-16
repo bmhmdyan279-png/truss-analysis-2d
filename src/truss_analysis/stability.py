@@ -84,11 +84,13 @@ from .criticality.engine import (
 from .exceptions import (
     AmbiguousModeWarning,
     EigenConvergenceError,
+    InputIgnoredWarning,
     ShallowSystemWarning,
 )
-from .model import Element, Node
+from .model import Element, Node, fixed_dof_indices
 
 __all__ = [
+    "CODE_IMPERFECTION_AMPLITUDES",
     "DEFAULT_IMPERFECTION_AMPLITUDES",
     "EIGEN_MODE_PADDING",
     "SPARSE_EIGEN_THRESHOLD",
@@ -282,11 +284,45 @@ SHALLOW_RISE_SPAN = 0.1
 #: stated here so it can be argued with.
 IMPERFECTION_SENSITIVE_DROP = 0.05
 
+#: EN 1993-1-1 Table 5.1 equivalent initial bow imperfections ``e0/L`` for
+#: buckling curves a0, a, b, c and d -- the code's own band of *member*
+#: out-of-straightness, from L/350 (curve a0) to L/150 (curve d).  Used here
+#: as the realistic range for a *system* geometric imperfection: transferring
+#: a member tolerance to a whole-structure initial shape is an approximation,
+#: but it is the approximation a designer actually has data for, and it is an
+#: order of magnitude tighter than "2% of the bounding box".
+CODE_IMPERFECTION_AMPLITUDES: tuple[float, ...] = (
+    1.0 / 350.0,
+    1.0 / 300.0,
+    1.0 / 250.0,
+    1.0 / 200.0,
+    1.0 / 150.0,
+)
+
 #: Default imperfection amplitudes, as fractions of ``reference_length``.
-#: The largest (2%) matches the out-of-straightness tolerance band that EN 1993-1-1
-#: uses for member imperfections; the series spans a decade so the trend, not
-#: a single point, is what gets reported.
-DEFAULT_IMPERFECTION_AMPLITUDES: tuple[float, ...] = (0.001, 0.005, 0.01, 0.02)
+#:
+#: The round-7 audit measured the previous default ``(0.001, 0.005, 0.01,
+#: 0.02)`` on a 24 m truss: its largest amplitude is an initial out-of-
+#: straightness of **0.48 m**, several times larger than any code-based
+#: tolerance, and because the sensitivity verdict was taken from
+#: ``max(relative_drop)`` the *verdict itself* was decided by the least
+#: realistic amplitude in the set.  The series now spans the code band as
+#: well as the exploratory tail, so the trend and the verdict come from
+#: amplitudes a designer could defend.  Four amplitudes, as before -- eight
+#: solves per study, since both imperfection signs are probed.
+#:
+#: * ``0.001``  -- small enough for the local gradient fit (see
+#:   :attr:`~truss_analysis.stability.ImperfectionStudy.normalized_gradient`);
+#: * ``1/350``  -- the least conservative EN 1993-1-1 Table 5.1 value;
+#: * ``1/200``  -- the most conservative common Table 5.1 value, and the
+#:   amplitude that drives the verdict by default;
+#: * ``0.02``   -- exploratory tail, reported but not decisive.
+DEFAULT_IMPERFECTION_AMPLITUDES: tuple[float, ...] = (
+    0.001,
+    1.0 / 350.0,
+    1.0 / 200.0,
+    0.02,
+)
 
 EigenSolver = Literal["auto", "dense", "sparse"]
 """Eigen-solve strategy for :func:`linearized_buckling_load_factor`.
@@ -950,6 +986,112 @@ def linearized_buckling_load_factor(
     )
 
 
+#: Ceiling on how many amplitudes the local gradient fit consumes.
+#:
+#: A first-order sensitivity is a derivative at ``eps -> 0``.  Fitting it over
+#: a series that spans a decade does not produce a derivative; it produces a
+#: secant dominated by the largest amplitudes, where the response has already
+#: curved away.  Measured on the closed-form two-bar toggle: the global
+#: least-squares slope over ``(0.001, 1/350, 1/200, 0.02)`` is ``-42.3``
+#: against a true derivative of ``-119.9`` -- a 65% error, in the
+#: *unconservative* direction, for a field whose docstring had always
+#: described it as ``d(lambda/lambda_0)/d(eps)``.  Restricting the fit to the
+#: code band brings that to 0.003%.
+LOCAL_GRADIENT_POINTS = 4
+
+#: Degree ceiling of the local gradient fit.  Cubic is the highest degree the
+#: default series can support once the exact ``eps = 0`` anchor is included,
+#: and it already resolves the toggle's curvature to four significant figures.
+LOCAL_GRADIENT_DEGREE = 3
+
+
+def _select_local_amplitudes(
+    amplitudes: npt.NDArray[np.float64],
+    usable: npt.NDArray[np.bool_],
+) -> tuple[npt.NDArray[np.float64], bool]:
+    """Pick the amplitudes a *derivative at zero* may legitimately be fitted on.
+
+    The selection rule is physical, not arbitrary: only amplitudes inside the
+    EN 1993-1-1 Table 5.1 out-of-straightness band
+    (:data:`CODE_IMPERFECTION_AMPLITUDES`) describe a geometry a built
+    structure could actually have, and a derivative estimated from
+    amplitudes beyond that band is an extrapolation of a curve the code never
+    claimed to describe.  The smallest usable amplitude is always kept, so a
+    series that starts inside the band stays inside it.
+
+    Returns
+    -------
+    tuple[numpy.ndarray, bool]
+        The selected amplitudes, ascending, and whether the selection stayed
+        inside the code band.  ``False`` means no probed amplitude was inside
+        the band and the fit fell back to the smallest
+        :data:`LOCAL_GRADIENT_POINTS` -- which the caller turns into a
+        warning, because a first-order sensitivity quoted from
+        un-code-like amplitudes should not look like one quoted from
+        code-like ones.
+    """
+    amps = np.asarray(amplitudes, dtype=float)[usable]
+    if amps.size == 0:
+        return amps, True
+    amps = np.sort(amps)
+    band_ceiling = max(CODE_IMPERFECTION_AMPLITUDES)
+    in_band = amps <= band_ceiling
+    if not bool(np.any(in_band)):
+        return amps[: min(amps.size, LOCAL_GRADIENT_POINTS)], False
+    n_in_band = int(np.count_nonzero(in_band))
+    selected = amps[in_band][: min(n_in_band, LOCAL_GRADIENT_POINTS)]
+    # always keep the smallest amplitude, even if it sits below the band
+    if selected[0] > amps[0]:
+        selected = np.concatenate(([amps[0]], selected))
+    return selected, True
+
+
+def _local_gradient(
+    amplitudes: npt.NDArray[np.float64],
+    ratios: npt.NDArray[np.float64],
+) -> tuple[float, tuple[float, ...], bool]:
+    """First-order sensitivity ``d(lambda/lambda_0)/d(eps)`` at ``eps -> 0``.
+
+    Fits a polynomial of degree ``min(LOCAL_GRADIENT_DEGREE, n - 1)`` to the
+    amplitudes :func:`_select_local_amplitudes` keeps, **plus the exact anchor
+    ``(0, 1)``** -- the perfect-geometry ratio is 1 by definition, so it is a
+    free data point that raises the supportable degree by one without another
+    eigensolve -- and returns the fit's derivative at ``eps = 0``.
+
+    Parameters
+    ----------
+    amplitudes, ratios : numpy.ndarray
+        Probed amplitudes and the corresponding ``lambda_cr(eps)/lambda_cr(0)``.
+        Non-finite ratios (an imperfect geometry that lost stability outright)
+        are dropped.
+
+    Returns
+    -------
+    tuple[float, tuple[float, ...], bool]
+        The derivative at zero (``nan`` when fewer than two usable amplitudes
+        remain), the amplitudes actually fitted -- so the number carries its
+        own provenance rather than being an unverifiable scalar -- and whether
+        those amplitudes lay inside the EN 1993-1-1 Table 5.1 band.
+    """
+    amps = np.asarray(amplitudes, dtype=float)
+    vals = np.asarray(ratios, dtype=float)
+    usable = np.isfinite(vals)
+    selected, in_band = _select_local_amplitudes(amps, usable)
+    if selected.size < 2:
+        return float("nan"), tuple(float(x) for x in selected), in_band
+    order = np.argsort(amps[usable])
+    usable_amps = amps[usable][order]
+    usable_vals = vals[usable][order]
+    idx = np.searchsorted(usable_amps, selected)
+    fitted_a = np.concatenate(([0.0], selected))
+    fitted_y = np.concatenate(([1.0], usable_vals[idx]))
+    degree = min(LOCAL_GRADIENT_DEGREE, fitted_a.size - 1)
+    coeffs = np.polyfit(fitted_a, fitted_y, degree)
+    # np.polyfit returns the highest degree first, so the linear coefficient --
+    # the derivative at zero -- is the second-to-last entry.
+    return float(coeffs[-2]), tuple(float(x) for x in selected), in_band
+
+
 # ---------------------------------------------------------------------------
 # B4: imperfection sensitivity
 # ---------------------------------------------------------------------------
@@ -984,17 +1126,64 @@ class ImperfectionStudy:
         ``1 - lambda_cr(eps) / lambda_cr(0)`` per amplitude.  ``nan`` where
         the perfect-geometry factor is infinite (no bifurcation to erode).
     normalized_gradient : float
-        Least-squares slope of ``lambda_cr(eps) / lambda_cr(0)`` against
-        ``eps`` -- the first-order sensitivity ``d(lambda/lambda_0)/d(eps)``.
-        Negative means the imperfection is destabilising.  ``nan`` when the
-        reference factor is infinite.
+        First-order sensitivity ``d(lambda/lambda_0)/d(eps)`` **evaluated at
+        ``eps = 0``**: the derivative at zero of a degree-``<= 3`` polynomial
+        fitted to the probed amplitudes that lie inside the EN 1993-1-1
+        Table 5.1 out-of-straightness band, anchored at the exact point
+        ``(0, 1)``.  Negative means the imperfection is destabilising.
+        ``nan`` when the reference factor is infinite or fewer than two
+        usable amplitudes remain.
+
+        This field used to be the global least-squares slope over *every*
+        probed amplitude, which is a secant, not a derivative, and was wrong
+        by a factor of 2.7 on the closed-form two-bar toggle (-42.3 against a
+        true -119.9) -- wrong in the unconservative direction, for a quantity
+        whose docstring had always claimed it was the first-order
+        sensitivity.  The secant is still available, honestly named, as
+        :attr:`secant_gradient`.
+    secant_gradient : float
+        Global least-squares slope of ``lambda_cr(eps) / lambda_cr(0)`` over
+        **all** usable probed amplitudes -- the average erosion per unit
+        imperfection across the whole sweep, not a derivative at any point.
+        Kept because it is a legitimate summary of the sweep; kept *separate*
+        because it is not :attr:`normalized_gradient` and calling it that was
+        the defect.  ``nan`` under the same conditions.
+    gradient_amplitudes : tuple[float, ...]
+        The amplitudes :attr:`normalized_gradient` was actually fitted on, so
+        the derivative carries its provenance instead of being an
+        unverifiable scalar.  Empty when the gradient is ``nan``.
+    gradient_in_code_band : bool
+        ``True`` when :attr:`gradient_amplitudes` all lie within
+        :data:`CODE_IMPERFECTION_AMPLITUDES`.  ``False`` means no probed
+        amplitude was code-like and the derivative was extrapolated from
+        larger ones -- in which case an
+        :exc:`~truss_analysis.exceptions.InputIgnoredWarning`-family notice
+        was issued at sweep time.
+    verdict_amplitude : float
+        The amplitude that drives :attr:`imperfection_sensitive`: the largest
+        probed amplitude inside the code band, or the largest probed
+        amplitude at all when none is inside it.  ``nan`` when the reference
+        factor is infinite.
+    relative_drop_at_verdict : float
+        ``relative_drop`` evaluated at :attr:`verdict_amplitude``.  This, not
+        ``max(relative_drop)``, is what the verdict compares against
+        :data:`IMPERFECTION_SENSITIVE_DROP`.  ``nan`` under the same
+        conditions.
     imperfection_sensitive : bool
-        ``True`` when the largest probed amplitude erodes ``lambda_cr`` by
-        more than :data:`IMPERFECTION_SENSITIVE_DROP`.  A system that is
-        imperfection sensitive is one whose linearised bifurcation load
-        should *not* be used as a design capacity without a nonlinear
-        check -- the practical answer to the round-5 audit's objection that
-        ``lambda_cr`` alone hides mode-shape sensitivity.
+        ``True`` when the erosion at :attr:`verdict_amplitude` exceeds
+        :data:`IMPERFECTION_SENSITIVE_DROP`.  A system that is imperfection
+        sensitive is one whose linearised bifurcation load should *not* be
+        used as a design capacity without a nonlinear check -- the practical
+        answer to the round-5 audit's objection that ``lambda_cr`` alone
+        hides mode-shape sensitivity.
+
+        The verdict is deliberately *not* ``max(relative_drop) > threshold``.
+        Taking the maximum lets the least realistic amplitude in the sweep
+        decide the answer: on a 24 m truss the old default's largest
+        amplitude was an initial out-of-straightness of 0.48 m, several times
+        any code tolerance, so the flag was being set by a geometry no one
+        would build.  Anchoring the verdict inside the code band makes it a
+        statement about a real structure.
 
     Notes
     -----
@@ -1026,6 +1215,11 @@ class ImperfectionStudy:
     imperfection_mode: npt.NDArray[np.float64]
     relative_drop: tuple[float, ...]
     normalized_gradient: float
+    secant_gradient: float
+    gradient_amplitudes: tuple[float, ...]
+    gradient_in_code_band: bool
+    verdict_amplitude: float
+    relative_drop_at_verdict: float
     imperfection_sensitive: bool
 
 
@@ -1035,8 +1229,30 @@ def _perturbed_nodes(
     amplitude: float,
     reference_length: float,
 ) -> list[Node]:
-    """Copy ``nodes`` with coordinates displaced along ``mode``."""
+    """Copy ``nodes`` with the *free* coordinates displaced along ``mode``.
+
+    A geometric imperfection is a deviation of the built structure from its
+    nominal geometry.  A support is not part of that deviation: moving a
+    restrained node moves the ground, and the resulting analysis would be
+    solving a **support-settlement** problem while reporting it as an
+    imperfection-sensitivity study -- two different physics with two
+    different demand paths.
+
+    Modes returned by :func:`linearized_buckling_load_factor` already have
+    exactly-zero entries on the restrained DOFs, so for the default
+    ``mode=None`` this mask is a no-op and costs nothing.  It matters for a
+    caller-supplied ``mode=``, which is an arbitrary vector: the restrained
+    components are zeroed here rather than consumed as settlements.
+    :func:`imperfection_sensitivity` checks the masked-out magnitude once, up
+    front, and warns if it was not negligible.
+    """
     disp = np.asarray(mode, dtype=float).reshape(-1, 2) * (amplitude * reference_length)
+    restrained = set(fixed_dof_indices(list(nodes)))
+    if restrained:
+        mask = np.array(
+            [dof not in restrained for dof in range(disp.shape[0] * 2)], dtype=bool
+        ).reshape(-1, 2)
+        disp = np.where(mask, disp, 0.0)
     return [
         Node(
             id=nd.id,
@@ -1171,6 +1387,30 @@ def imperfection_sensitivity(
         raise ValueError(msg)
     shape = shape / shape_norm
 
+    # A caller-supplied imperfection shape is an arbitrary vector: unlike a
+    # mode returned by the solver it may carry components on restrained DOFs.
+    # :func:`_perturbed_nodes` masks those out, because moving a support is a
+    # settlement analysis rather than an imperfection study -- but masking
+    # input the user believes controls the physics is exactly what
+    # :class:`~truss_analysis.exceptions.InputIgnoredWarning` exists to
+    # report, so say it once here rather than 2 * len(amplitudes) times inside
+    # the sweep.
+    if mode is not None:
+        restrained = np.array(sorted(fixed_dof_indices(list(nodes))), dtype=int)
+        if restrained.size:
+            masked_norm = float(np.linalg.norm(shape[restrained]))
+            if masked_norm > 1e-12:
+                warnings.warn(
+                    "imperfection_sensitivity: the supplied mode carries "
+                    f"{masked_norm:.3e} of its unit norm on restrained DOFs "
+                    f"{restrained.tolist()}; those components were zeroed. "
+                    "Perturbing a support coordinate is a support-settlement "
+                    "analysis, not a geometric imperfection, and the two have "
+                    "different demand paths.",
+                    InputIgnoredWarning,
+                    stacklevel=2,
+                )
+
     lam0 = base.lambda_cr
     lam_plus: list[float] = []
     lam_minus: list[float] = []
@@ -1193,6 +1433,7 @@ def imperfection_sensitivity(
     # adverse of the two signs; inf loses to any finite value by construction
     lambdas = [min(a, b) for a, b in zip(lam_plus, lam_minus, strict=True)]
 
+    amp_arr = np.asarray(amps, dtype=float)
     finite_ref = np.isfinite(lam0)
     if finite_ref:
         drops = tuple(
@@ -1203,17 +1444,56 @@ def imperfection_sensitivity(
             [lam / lam0 if np.isfinite(lam) else np.nan for lam in lambdas], dtype=float
         )
         usable = np.isfinite(ratios)
+
+        # The derivative at zero, fitted only where the code band reaches.
+        gradient, fitted, in_band = _local_gradient(amp_arr, ratios)
+        if not in_band and usable.any():
+            warnings.warn(
+                "imperfection_sensitivity: none of the probed amplitudes "
+                f"{tuple(round(float(a), 6) for a in amp_arr)} lies inside the "
+                "EN 1993-1-1 Table 5.1 out-of-straightness band "
+                f"[{min(CODE_IMPERFECTION_AMPLITUDES):.5f}, "
+                f"{max(CODE_IMPERFECTION_AMPLITUDES):.5f}]; the reported "
+                "first-order gradient is extrapolated from amplitudes larger "
+                "than any a built structure would carry. Add a smaller "
+                "amplitude to make it a local measurement.",
+                InputIgnoredWarning,
+                stacklevel=2,
+            )
+
+        # The secant over the whole sweep, kept and named as what it is.
         if int(np.count_nonzero(usable)) >= 2:
-            slope = float(np.polyfit(np.asarray(amps)[usable], ratios[usable], 1)[0])
+            secant = float(np.polyfit(amp_arr[usable], ratios[usable], 1)[0])
         else:
-            slope = float("nan")
-        finite_drops = [d for d in drops if np.isfinite(d)]
+            secant = float("nan")
+
+        # The verdict comes from the largest *code-like* amplitude probed, so
+        # an exploratory tail cannot decide a safety flag on its own.
+        band_ceiling = max(CODE_IMPERFECTION_AMPLITUDES)
+        in_band_mask = usable & (amp_arr <= band_ceiling)
+        if bool(np.any(in_band_mask)):
+            verdict_amp = float(np.max(amp_arr[in_band_mask]))
+        else:
+            verdict_amp = (
+                float(np.max(amp_arr[usable])) if bool(usable.any()) else float("nan")
+            )
+        drop_at_verdict = float("nan")
+        for a, d in zip(amp_arr, drops, strict=True):
+            if float(a) == verdict_amp:
+                drop_at_verdict = float(d)
+                break
         sensitive = bool(
-            finite_drops and max(finite_drops) > IMPERFECTION_SENSITIVE_DROP
+            np.isfinite(drop_at_verdict)
+            and drop_at_verdict > IMPERFECTION_SENSITIVE_DROP
         )
     else:
         drops = tuple(float("nan") for _ in lambdas)
-        slope = float("nan")
+        gradient = float("nan")
+        fitted = ()
+        in_band = True
+        secant = float("nan")
+        verdict_amp = float("nan")
+        drop_at_verdict = float("nan")
         sensitive = False
 
     return ImperfectionStudy(
@@ -1225,6 +1505,11 @@ def imperfection_sensitivity(
         reference_length=ref_length,
         imperfection_mode=np.asarray(shape, dtype=float),
         relative_drop=drops,
-        normalized_gradient=slope,
+        normalized_gradient=gradient,
+        secant_gradient=secant,
+        gradient_amplitudes=fitted,
+        gradient_in_code_band=bool(in_band),
+        verdict_amplitude=verdict_amp,
+        relative_drop_at_verdict=drop_at_verdict,
         imperfection_sensitive=sensitive,
     )
