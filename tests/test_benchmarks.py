@@ -50,6 +50,7 @@ EXPECTED_NAMES = frozenset(
         "rk4_convergence_order",
         "table_3_1_reduction_factors",
         "tangent_stiffness_finite_difference",
+        "criticality_rank1_vs_direct_resolve",
     }
 )
 
@@ -477,3 +478,76 @@ def test_oracle_constants_match_the_standard_not_the_library() -> None:
 
     assert pytest.approx(7850.0) == RHO_STEEL  # EN 1993-1-2:2005 clause 3.2.2
     assert float(unit_mass()) == pytest.approx(RHO_STEEL)
+
+
+def test_the_criticality_oracle_is_not_a_constant() -> None:
+    """The new oracle must be sensitive to the perturbation it measures.
+
+    A comparison between two numbers that both ignore ``alpha`` would pass
+    whatever the engine did, so the oracle is anchored at the one point where
+    its answer is known without computing it: at ``alpha = 1`` nothing is
+    perturbed, every member's CI is exactly zero by definition, and the norm is
+    therefore exactly zero.  That the same oracle returns 0.191 at
+    ``alpha = 0.7`` is what makes the agreement at 0.7 evidence rather than a
+    coincidence of two constants.
+    """
+    from benchmarks.reference_problems import (
+        CriticalityRank1AgainstDirectResolve,
+        _oracle_direct_resolve_ci,
+    )
+
+    problem = CriticalityRank1AgainstDirectResolve()
+    at_unity = _oracle_direct_resolve_ci(1.0)
+    assert at_unity == pytest.approx(0.0, abs=1e-12)
+    assert problem.reference_value() > 0.1, "the oracle must move with alpha"
+    # and the library reproduces the moved value, not the trivial one
+    assert problem.computed_value() == pytest.approx(
+        problem.reference_value(), rel=1e-12
+    )
+
+
+# --------------------------------------------------------------------------
+# performance regression guard -- explicitly NOT a verification oracle
+# --------------------------------------------------------------------------
+
+
+def test_criticality_engine_speedup_is_measured_and_agrees() -> None:
+    """The engine's reason to exist, measured rather than asserted.
+
+    ``docs/theory.md`` section 8.1 separates verification from everything else,
+    and a wall-clock ratio belongs to the everything else: there is no
+    independent source of truth for how long this machine takes to do this work.
+    So this is a *regression guard*, kept out of ``ALL_BENCHMARKS`` on purpose,
+    guarding the claim that one factorisation serving every member beats one
+    factorisation per member.
+
+    The anti-vacuity discipline is the agreement check, and it is the half that
+    matters.  A path that returns garbage is very fast, so a guard that only
+    timed would reward the wrong thing: ``measure_criticality_engine`` refuses
+    to call the speedup meaningful unless the rank-1 sweep and the direct
+    resolve produced the same criticality indices, and ``passed`` requires both.
+
+    The floor is ``m / 4``, deliberately far below the measured ratio (5.7m at
+    29 members, 19.8m at 93).  Wall-clock ratios move with machine load, BLAS
+    build and thread count; a floor at the measured value would flake, and a
+    flaky gate gets disabled, which is worse than no gate.  ``m / 4`` is the
+    point below which the architectural claim would be false rather than
+    diluted -- if the engine ever degenerated to per-member factorisation the
+    ratio would fall towards 1 and this would fail.
+    """
+    from benchmarks.performance import measure_criticality_engine
+
+    measurement = measure_criticality_engine(n_panels=12, repeats=3)
+
+    # the agreement half first: without it the timing half means nothing
+    assert measurement.agrees, (
+        f"the two paths disagree by {measurement.max_ci_deviation:.3e}, so the "
+        "speedup is void -- a fast wrong answer is not a result"
+    )
+    assert measurement.max_ci_deviation < 1e-9
+    assert measurement.speedup >= measurement.floor, measurement.report()
+    assert measurement.passed
+    # and the model is big enough for the claim to be about something
+    assert measurement.n_members >= 40
+    assert measurement.engine_s > 0.0
+    assert measurement.direct_s > measurement.engine_s

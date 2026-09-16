@@ -1215,6 +1215,202 @@ class TangentStiffnessFiniteDifference(ReferenceProblem):
 # ---------------------------------------------------------------------------
 
 #: Every problem, in the order the report prints them.
+# ---------------------------------------------------------------------------
+# 11. the rank-1 criticality engine against a from-scratch direct resolve
+# ---------------------------------------------------------------------------
+
+
+def _independent_dsm_truss():
+    """A redundant planar truss as plain tuples, for both sides of the check.
+
+    Deliberately *not* built with :mod:`truss_analysis.topology_generator`: the
+    oracle below must not share a model constructor with the code it verifies,
+    or a bug in the constructor would move both sides together and the
+    comparison would stay green.
+
+    A six-free-DOF girder with seven members -- one degree of static
+    redundancy, so softening a member genuinely redistributes load rather than
+    merely changing a determinate member's own force.  The layout was selected
+    by searching candidate member sets for the best-conditioned stable one:
+    the assembled ``K_ff`` has an eigenvalue ratio of ``5.0e-2``, which keeps
+    the comparison about the perturbation algebra rather than about round-off
+    in an ill-conditioned solve.
+    """
+    nodes = {
+        "A": (0.0, 0.0),
+        "B": (2.0, 0.0),
+        "C": (4.0, 0.0),
+        "D": (1.0, 1.5),
+        "E": (3.0, 1.5),
+    }
+    members = [
+        ("m1", "A", "D"),
+        ("m2", "D", "B"),
+        ("m3", "A", "B"),
+        ("m4", "D", "E"),
+        ("m5", "E", "C"),
+        ("m6", "B", "E"),
+        ("m7", "B", "C"),
+    ]
+    supports = {"A": (True, True), "C": (False, True)}
+    loads = {"B": (-4.0e4, -6.0e4), "D": (0.0, -2.0e4)}
+    area = 2.0e-3
+    return nodes, members, supports, loads, area
+
+
+def _oracle_direct_resolve_ci(alpha: float) -> float:
+    """Member-criticality norm from a DSM written from scratch.
+
+    Assembles ``K = sum_e (EA/L)_e b_e b_e^T`` directly from geometry, applies
+    boundary conditions by row/column deletion, and solves with
+    ``numpy.linalg.solve`` -- a different linear-algebra entry point from the
+    ``scipy.linalg.lu_factor`` the engine uses.  For each member it rebuilds the
+    *whole* system with that member's axial stiffness scaled by ``alpha`` and
+    resolves, which is the definition the rank-1 engine claims to reproduce
+    without refactoring.
+
+    Returns the 2-norm of the resulting CI vector, so one scalar is sensitive to
+    every member's index rather than only to whichever happens to be largest.
+    """
+    nodes, members, supports, loads, area = _independent_dsm_truss()
+
+    # free DOFs, in a fixed order: index only the unrestrained directions
+    free: list[tuple[str, str]] = []
+    for nid in sorted(nodes):
+        sx, sy = supports.get(nid, (False, False))
+        if not sx:
+            free.append((nid, "x"))
+        if not sy:
+            free.append((nid, "y"))
+    pos = {nd: i for i, nd in enumerate(free)}
+    n = len(free)
+
+    def direction(mi: str, mj: str) -> tuple[float, float, float]:
+        x1, y1 = nodes[mi]
+        x2, y2 = nodes[mj]
+        length = math.hypot(x2 - x1, y2 - y1)
+        return length, (x2 - x1) / length, (y2 - y1) / length
+
+    def assemble(scale: dict[str, float] | None = None) -> np.ndarray:
+        k = np.zeros((n, n))
+        for mid, mi, mj in members:
+            length, c, sn = direction(mi, mj)
+            ea = area * E_STEEL / length
+            if scale is not None:
+                ea *= scale[mid]
+            b = np.zeros(n)
+            for nid, comp, sgn in (
+                (mi, "x", -c),
+                (mi, "y", -sn),
+                (mj, "x", c),
+                (mj, "y", sn),
+            ):
+                if (nid, comp) in pos:
+                    b[pos[(nid, comp)]] = sgn
+            k += ea * np.outer(b, b)
+        return k
+
+    f = np.zeros(n)
+    for nid, (fx, fy) in loads.items():
+        if (nid, "x") in pos:
+            f[pos[(nid, "x")]] += fx
+        if (nid, "y") in pos:
+            f[pos[(nid, "y")]] += fy
+
+    u_base = np.linalg.solve(assemble(), f)
+    base = float(np.max(np.abs(u_base)))
+    ci = []
+    for mid, _mi, _mj in members:
+        scale = {m[0]: 1.0 for m in members}
+        scale[mid] = alpha
+        u_pert = np.linalg.solve(assemble(scale), f)
+        ci.append(float(np.max(np.abs(u_pert))) / base - 1.0)
+    return float(np.linalg.norm(np.array(ci)))
+
+
+class CriticalityRank1AgainstDirectResolve(ReferenceProblem):
+    """The rank-1 perturbation engine against a full resolve per member.
+
+    The engine is the performance claim of the criticality layer: one
+    factorisation serves every member, and a Sherman-Morrison update replaces
+    what would otherwise be ``m`` refactorisations.  That is worth having only
+    if the update is *exact*, so the oracle rebuilds and resolves the whole
+    system from scratch for each member -- no shared assembly path, no shared
+    factorisation, and a different linear-algebra entry point
+    (``numpy.linalg.solve`` against the engine's ``scipy`` LU).
+    """
+
+    #: Stiffness multiplier defining "damaged"; the engine's own default.
+    ALPHA = 0.7
+
+    @property
+    def name(self) -> str:
+        return "criticality_rank1_vs_direct_resolve"
+
+    @property
+    def description(self) -> str:
+        return (
+            "2-norm of the member criticality index vector on a six-member "
+            "redundant truss, at a stiffness multiplier of 0.7"
+        )
+
+    @property
+    def oracle(self) -> str:
+        return (
+            "A direct stiffness method assembled from geometry inside this "
+            "module and solved with numpy.linalg.solve: one full rebuild and "
+            "resolve per member, sharing no assembly path, factorisation or "
+            "linear-algebra entry point with truss_analysis.criticality.engine."
+        )
+
+    @property
+    def units(self) -> str:
+        return "dimensionless (2-norm of CI)"
+
+    @property
+    def tolerance(self) -> float:
+        return 1e-12
+
+    @property
+    def tolerance_kind(self) -> ToleranceKind:
+        return "relative"
+
+    def computed_value(self) -> float:
+        from truss_analysis.criticality.engine import (
+            base_displacement,
+            build_engine,
+            ci_sweep,
+            total_load_vector,
+        )
+        from truss_analysis.model import Element, Node
+
+        nodes_raw, members, supports, loads_raw, area = _independent_dsm_truss()
+        nodes = [
+            Node(
+                id=nid,
+                x=xy[0],
+                y=xy[1],
+                is_support=nid in supports,
+                support_dx=supports.get(nid, (False, False))[0],
+                support_dy=supports.get(nid, (False, False))[1],
+            )
+            for nid, xy in sorted(nodes_raw.items())
+        ]
+        elements = [
+            Element(id=mid, node_i=mi, node_j=mj, E=E_STEEL, A=area)
+            for mid, mi, mj in members
+        ]
+        loads = {nid: {"Fx": fx, "Fy": fy} for nid, (fx, fy) in loads_raw.items()}
+        setup = build_engine(nodes, elements, loads, None)
+        u = base_displacement(setup, total_load_vector(nodes, loads, setup))
+        sweep = ci_sweep(setup, u, self.ALPHA)
+        vector = np.array([sweep.ci_values[e.id] for e in elements])
+        return float(np.linalg.norm(vector))
+
+    def reference_value(self) -> float:
+        return _oracle_direct_resolve_ci(self.ALPHA)
+
+
 ALL_BENCHMARKS: tuple[ReferenceProblem, ...] = (
     EulerColumnFiniteDifference(),
     ToggleBifurcationClosedForm(),
@@ -1226,6 +1422,7 @@ ALL_BENCHMARKS: tuple[ReferenceProblem, ...] = (
     Rk4ConvergenceOrder(),
     Table31ReductionFactors(),
     TangentStiffnessFiniteDifference(),
+    CriticalityRank1AgainstDirectResolve(),
 )
 
 
