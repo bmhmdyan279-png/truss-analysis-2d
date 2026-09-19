@@ -1,7 +1,11 @@
 name: Publish to PyPI
 on:
   # Manual-only: publishing must be an explicit action (prevents accidental
-  # releases from tag pushes).
+  # releases from tag pushes).  Dispatch on a TAG ref (e.g. v2.10.1), not on
+  # a branch: setuptools_scm derives the version from the checkout, so a
+  # branch dispatch builds a `X.Y.Z.devN+gSHA` local version, which PyPI
+  # rejects at the upload step after a full build — a confusing late
+  # failure that the guard below turns into an immediate, explained one.
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,6 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     steps:
+      - name: Require a tag dispatch
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF_TYPE" != "tag" ]; then
+            echo "::error::Publish was dispatched on '${REF}' (a ${REF_TYPE}). Dispatch this workflow on a tag ref such as v2.10.1 — a branch checkout builds a dev/local version that PyPI rejects at upload time."
+            exit 1
+          fi
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
