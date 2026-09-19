@@ -2,18 +2,47 @@ name: Release
 
 on:
   # Manual-only: releases must be an explicit action (prevents accidental
-  # GitHub Releases from tag pushes).
+  # GitHub Releases from tag pushes).  The version is an explicit *input*:
+  # on a workflow_dispatch run GITHUB_REF_NAME is the branch name ("main"),
+  # so the previous revision of this file would have created a release
+  # titled after the branch instead of after the version.
   workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Version to release, without the "v" prefix (e.g. 2.10.1).
+          The tag v<version> must already exist: setuptools_scm derives
+          the package version from tags, so building before tagging would
+          publish the wrong version.
+        required: true
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
+      - name: Validate version input
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version input '$VERSION' is not in X.Y.Z form"
+            exit 1
+          fi
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Require the tag to exist
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::tag v${VERSION} does not exist -- push it first; the package version is derived from tags"
+            exit 1
+          fi
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -22,21 +51,37 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install build
-      - name: Build package
-        run: python -m build
-      - name: Generate Release Notes
+      - name: Build package (at the tag)
         run: |
-          echo "## Release Notes / یادداشت‌های انتشار" > RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-          echo "### 🇬🇧 English" >> RELEASE_NOTES.md
-          echo "Automated release of version ${GITHUB_REF_NAME#v}." >> RELEASE_NOTES.md
-          echo "" >> RELEASE_NOTES.md
-          echo "### 🇮🇷 فارسی" >> RELEASE_NOTES.md
-          echo "انتشار خودکار نسخه ${GITHUB_REF_NAME#v}." >> RELEASE_NOTES.md
+          git checkout -q "refs/tags/v${VERSION}"
+          python -m build
+      - name: Derive release body from CHANGELOG.md
+        run: |
+          python - "$VERSION" <<'PY' > /tmp/release_body.md
+          import re, sys
+          version = sys.argv[1]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(
+              rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)",
+              text, re.M | re.S)
+          if m:
+              print(m.group(1).strip())
+          else:
+              print(f"## Release Notes / یادداشت‌های انتشار\n")
+              print(f"### 🇬🇧 English")
+              print(f"Release of version {version}. No CHANGELOG section was found "
+                    f"for this version; see CHANGELOG.md on main.\n")
+              print(f"### 🇮🇷 فارسی")
+              print(f"انتشار نسخهٔ {version}. بخشی برای این نسخه در CHANGELOG.md "
+                    f"پیدا نشد؛ فایل CHANGELOG.md را روی شاخهٔ main ببینید.")
+          PY
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ inputs.version }}
+          name: v${{ inputs.version }}
           files: dist/*
-          body_path: RELEASE_NOTES.md
+          body_path: /tmp/release_body.md
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
