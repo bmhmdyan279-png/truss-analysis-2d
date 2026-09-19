@@ -100,6 +100,12 @@ and the hygiene scanner all pass; `sphinx-build -b html docs` succeeds.
 
 ### CI
 
+- `publish.yml` now rejects a `workflow_dispatch` that is not on a tag ref.
+  A branch dispatch builds a `X.Y.Z.devN+gSHA` local version (setuptools_scm
+  derives it from the checkout), which PyPI refuses at upload — the failure
+  surfaced only after a full build, on the first publishing attempt of
+  2026-09-19. The guard fails immediately with an explanation instead; the
+  re-run on tag `v2.10.0` published successfully.
 - `release.yml` created releases titled after `GITHUB_REF_NAME`, which on a
   `workflow_dispatch` run is the branch name — the first manual release
   would have been tagged `main`. The workflow now takes a required
@@ -118,6 +124,16 @@ and the hygiene scanner all pass; `sphinx-build -b html docs` succeeds.
   OpenSeesPy's Linux wheel can load.  Then use `pyversion` (with
   `getattr` fallback to `getVersion`) — the API name had changed between
   OpenSeesPy releases and the runner's wheel does not expose `getVersion`.
+
+### Removed
+
+- The "first PyPI release is pending" status notes in both READMEs (added
+  earlier in this same unreleased cycle). The note carried its own deletion
+  condition, and the condition is met: `truss-analysis` 2.10.0 is live on
+  PyPI (wheel + sdist, published 2026-09-19 through the OIDC workflow),
+  GitHub Release `v2.10.0` carries the dist assets and the changelog-derived
+  body, and the PyPI badge in the README now resolves. The status flag did
+  its job and is gone.
 
 ## [2.10.0] — 2026-09-16
 
