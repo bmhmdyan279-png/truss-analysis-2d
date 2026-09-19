@@ -3,11 +3,6 @@ Truss Analysis 2D Documentation
 
 Welcome to the **Truss Analysis 2D** API documentation. This package provides a comprehensive toolkit for linear 2D truss finite-element analysis with temperature-dependent steel properties according to EN 1993-1-2 (Eurocode 3).
 
-.. image:: images/logo.png
-   :alt: Truss Analysis Logo
-   :align: center
-   :width: 200px
-
 Quick Start
 -----------
 
