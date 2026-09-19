@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Theory, model scope & verification matrix
+    url: https://github.com/bmhmdyan279-png/truss-analysis-2d/blob/main/docs/theory.md
+    about: What the library computes, what it deliberately does not, and the evidence behind each claim — read before filing a scope question
+  - name: Error codes
+    url: https://github.com/bmhmdyan279-png/truss-analysis-2d/blob/main/docs/error_codes.md
+    about: Meaning and resolution of every TrussError code
+  - name: Contributing guide (EN / FA)
+    url: https://github.com/bmhmdyan279-png/truss-analysis-2d/blob/main/CONTRIBUTING.md
+    about: Development setup, quality gates and the pull-request process

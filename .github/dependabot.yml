@@ -1,0 +1,27 @@
+# Dependabot configuration.
+#
+# Note on pins: ruff and mypy are version-pinned in pyproject.toml so the
+# pre-commit chain, local runs and CI agree (.pre-commit-config.yaml pins the
+# same versions). A Dependabot PR that bumps either MUST update
+# .pre-commit-config.yaml in the same PR, or the chains silently diverge.
+# requirements*.txt are generated mirrors (scripts/sync_requirements.py);
+# accept pyproject.toml updates and regenerate the mirrors, never the
+# reverse.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"

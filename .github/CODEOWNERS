@@ -1,0 +1,3 @@
+# Code owners — every path routes review to the maintainer. Becomes
+# meaningful as a gate once branch protection requires code-owner review.
+* @bmhmdyan279-png
