@@ -34,7 +34,7 @@ jobs:
             echo "::error::version input '$VERSION' is not in X.Y.Z form"
             exit 1
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Require the tag to exist
