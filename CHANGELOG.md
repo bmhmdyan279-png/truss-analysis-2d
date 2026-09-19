@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Round-9 external audit, on `main@5e61820`. Nine critique texts were read
+(eight numbered critics; one number appears twice, with distinct findings).
+As in round 8, every finding was reproduced or refuted against the current
+tree and the live GitHub/PyPI state before anything was changed.
+
+**Reproduced and fixed here.** The community-health file set was genuinely
+absent — GitHub's community standards profile reported code of conduct,
+security policy, issue templates and pull-request template all missing.
+`release.yml`, on `workflow_dispatch`, interpolated `GITHUB_REF_NAME` — the
+*branch* name — into the release notes and left `tag_name` at the action's
+default, so the first manually dispatched release would have been titled
+`main`. `docs/index.rst` referenced `images/logo.png`, a file that has never
+existed in the repository, breaking the front page of every Sphinx build.
+And both READMEs advertised `pip install truss-analysis` while
+`pypi.org/project/truss-analysis` returns 404 — a claim whose name promises
+what the value does not deliver, the defect class round 7 named.
+
+**Reproduced but not fixable from inside the tree** (owner-side actions,
+itemised in the commit message): PyPI Trusted Publisher configuration plus
+the first `publish.yml` run; creating GitHub Releases for the existing tags
+with the now-fixed `release.yml`; repository description/topics/homepage;
+branch protection on `main`; pruning stale remote branches; enabling Pages
+(source: GitHub Actions) for `docs.yml`; enabling private vulnerability
+reporting; CodeQL; a Zenodo DOI for `CITATION.cff`.
+
+**Refuted against `main@5e61820` and the live API on 2026-09-19.** "CI is
+red": all 16 checks on `5e61820` report success, including the mandatory
+reference-solver bridge. "README quotes 2.5.0 / 356 tests / 95.4 %": it
+quotes 2.10.0 / 1130 / 94.5 %, enforced by the statistics gate in CI.
+"`CITATION.cff` says 2.5.0": it says 2.10.0. "No badges in README": five
+badges on lines 10–14. "docs/ links 404": `/tree/main/docs` returns 200.
+"`__pycache__` tracked in git": `git ls-files` is clean. "publish.yml needs
+a stored API token": it is already OIDC Trusted Publishing — what is missing
+is the PyPI-side configuration, not the workflow. "No claim → evidence →
+limitation matrix": `docs/theory.md` §8.1 *is* that matrix, §8.3 states the
+validation status explicitly, §12 itemises the scope, and
+`physics_boundary.yaml` carries all of it machine-readably with
+`supported` / `supported-with-limits` / `not-supported` statuses. The
+absence of *physical* validation stays open exactly as §8.3 declares: it
+cannot be closed by more code in this repository, only by measured or
+published external data, and no amount of green in the other columns is
+evidence for it.
+
+Re-measured locally on the round-9 tree before committing: `ruff check` and
+`ruff format --check` clean; `mypy src` clean under `--strict` (49 files);
+1148 passed / 1 skipped raw, canonical statistics 1130 tests at 94.53 %
+coverage; `sync_requirements.py --check`, `update_readme_stats.py --check`
+and the hygiene scanner all pass; `sphinx-build -b html docs` succeeds.
+
+### Added
+
+- Community-health file set: `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1
+  with a Persian summary; enforcement routed through a private channel
+  rather than a published mailbox), `SECURITY.md` (private reporting via
+  GitHub's draft advisories, supported-versions table, and an explicit split
+  between security issues and modelling limitations — a wrong number is an
+  issue-tracker matter, not an advisory), `.github/ISSUE_TEMPLATE/`
+  (`bug_report.md` and `feature_request.md` asking for exactly what
+  CONTRIBUTING.md's report sections require, plus `config.yml` linking the
+  theory, error-code and contributing documents),
+  `.github/PULL_REQUEST_TEMPLATE.md` (CI gates and the project's hard rules
+  as a checklist), `.github/dependabot.yml` (pip + github-actions, weekly,
+  with a note that ruff/mypy bumps must move `.pre-commit-config.yaml` in
+  lockstep), and `.github/CODEOWNERS`.
+- `docs` optional-dependency extra (the Sphinx stack `docs/conf.py`
+  actually imports, `myst-parser[linkify]` included) and
+  `.github/workflows/docs.yml`: manual-only, matching the publish/release
+  philosophy, building the docs and deploying them to GitHub Pages. The
+  requirements mirrors are unchanged — `sync_requirements.py` renders
+  dev+viz+validation only — and `test_extras_declared` asserts a superset,
+  so both packaging gates stay green.
+
 ### Fixed
 
 - **`rank_correlation`** (`src/truss_analysis/validation/metrics.py`)
@@ -18,9 +90,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   test failure.  Discovered by the mandatory `reference-solver` bridge
   job added in v2.10.0, which was the first CI gate to run
   `tests/validation/test_level4_rho_branches.py` on Linux.
+- `docs/index.rst` referenced `images/logo.png`, which does not exist in
+  the repository; every Sphinx build opened on a broken image. The
+  directive is removed until a real logo asset is committed.
+- READMEs (EN + FA): the "From PyPI" section now states that the first
+  release is pending and points to source installation until
+  `pypi.org/project/truss-analysis` resolves. The note is marked for
+  deletion at that point — it is a status flag, not a permanent section.
 
 ### CI
 
+- `release.yml` created releases titled after `GITHUB_REF_NAME`, which on a
+  `workflow_dispatch` run is the branch name — the first manual release
+  would have been tagged `main`. The workflow now takes a required
+  `version` input, validates `X.Y.Z`, requires the matching tag to exist,
+  builds the distributions *at that tag*, and derives the release body from
+  the version's `CHANGELOG.md` section (bilingual fallback when absent).
+  It no longer overwrites the tracked root `RELEASE_NOTES.md` in the runner
+  workspace.
+- `docs.yml` (new): `workflow_dispatch`-only Sphinx build deployed to
+  GitHub Pages via the official Pages actions. Not warnings-as-errors yet:
+  the autosummary-generated `api/` stubs currently emit warnings, and a
+  first deployment should not fail on a nitpick — tighten after the build
+  is warning-clean.
 - `reference-solver` job: install `libblas-dev`/`liblapack-dev` and
   symlink versioned shared objects into the linker's default path, so
   OpenSeesPy's Linux wheel can load.  Then use `pyversion` (with
