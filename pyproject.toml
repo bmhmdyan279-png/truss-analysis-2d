@@ -69,6 +69,16 @@ dev = [
     "twine>=5.0.0",
     "vermin>=1.6.0",
 ]
+# Documentation build (Sphinx).  Kept separate from `dev` so the test/lint
+# chain does not pull a documentation stack; `docs.yml` (and any future
+# ReadTheDocs setup) installs this extra.  `myst-parser[linkify]` because
+# conf.py enables the `linkify` MyST extension.
+docs = [
+    "sphinx>=7.4",
+    "sphinx-rtd-theme>=2.0",
+    "myst-parser[linkify]>=2.0",
+    "sphinx-autodoc-typehints>=1.25",
+]
 
 [project.urls]
 Repository = "https://github.com/bmhmdyan279-png/truss-analysis-2d"
