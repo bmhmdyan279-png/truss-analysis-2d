@@ -86,11 +86,6 @@ of the input unit system.
 
 ### From PyPI
 
-> **Status:** the first PyPI release is pending — until the `Publish to PyPI`
-> workflow has run against a tag and `pypi.org/project/truss-analysis`
-> resolves, install from source (below). This note should be deleted once it
-> does.
-
 ```bash
 pip install truss-analysis
 ```
