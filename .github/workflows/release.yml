@@ -76,7 +76,7 @@ jobs:
                     f"پیدا نشد؛ فایل CHANGELOG.md را روی شاخهٔ main ببینید.")
           PY
       - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ inputs.version }}
           name: v${{ inputs.version }}
