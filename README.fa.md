@@ -83,6 +83,11 @@
 
 ### از PyPI
 
+> **وضعیت:** نخستین انتشار روی PyPI هنوز انجام نشده است؛ تا زمانی که workflow
+> «Publish to PyPI» روی یک تگ اجرا شود و `pypi.org/project/truss-analysis`
+> در دسترس قرار گیرد، از روش «از سورس» در زیر نصب کنید. این یادداشت پس از
+> نخستین انتشار حذف شود.
+
 ```bash
 pip install truss-analysis
 ```
